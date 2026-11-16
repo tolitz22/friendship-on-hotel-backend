@@ -82,12 +82,11 @@ Roles are only an initial `admin` / non-admin read/write distinction. Future fin
 
 ```powershell
 php artisan route:list --path=api
-php artisan migrate:fresh --env=testing
 php artisan test
 vendor/bin/pint --test
 ```
 
-`migrate:fresh` destroys the selected database: **never run it on production data**. Tests use SQLite `:memory:` via phpunit.xml; normal development uses PostgreSQL.
+Tests use SQLite `:memory:` via phpunit.xml; normal development uses PostgreSQL.
 
 The repository does not yet have a generated `composer.lock`; after a successful first installation, commit one for reproducible dependency resolution. GitHub Actions workflow: [Backend validation](.github/workflows/backend.yml).
 
