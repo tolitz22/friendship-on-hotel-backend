@@ -22,6 +22,12 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/', [HotelController::class, 'show']);
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
+
+            Route::middleware('hotel.admin')->group(function (): void {
+                Route::patch('/', [HotelController::class, 'update']);
+                Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
+                Route::post('/rooms', [RoomCatalogController::class, 'createRoom']);
+            });
         });
     });
 });
