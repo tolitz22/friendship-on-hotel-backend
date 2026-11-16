@@ -13,6 +13,10 @@ class EnsureHotelMember
     {
         $hotel = $request->route('hotel');
 
+        if (! $request->user()->tokenCan('hotel:read')) {
+            abort(403, 'A hotel read token is required.');
+        }
+
         // Never let users enumerate or read a property they do not belong to.
         if (! $hotel instanceof Hotel || ! $request->user()->memberships()
             ->where('hotel_id', $hotel->getKey())
