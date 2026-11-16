@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Hotel extends Model
 {
-    protected $fillable = ['name', 'timezone', 'currency'];
+    protected $fillable = ['name', 'timezone', 'currency', 'address', 'contact_email', 'contact_phone'];
 
     public function roomTypes(): HasMany
     {
