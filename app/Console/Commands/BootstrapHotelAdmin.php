@@ -27,14 +27,17 @@ class BootstrapHotelAdmin extends Command
 
         $password = $this->secret('Password for a new account (leave blank if user exists)');
 
+        $existingUser = User::where('email', $email)->first();
+        if (! $existingUser && (! is_string($password) || strlen($password) < 12)) {
+            $this->error('A new account requires a password of at least 12 characters.');
+
+            return self::FAILURE;
+        }
+
         DB::transaction(function () use ($hotel, $email, $password): void {
             $user = User::where('email', $email)->first();
 
             if (! $user) {
-                if (! is_string($password) || strlen($password) < 12) {
-                    throw new \InvalidArgumentException('A new account requires a password of at least 12 characters.');
-                }
-
                 $user = User::create([
                     'name' => $this->ask('Staff name'),
                     'email' => $email,
