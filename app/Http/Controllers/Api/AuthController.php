@@ -1,0 +1,64 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
+
+class AuthController
+{
+    public function login(Request $request): JsonResponse
+    {
+        $data = Validator::make($request->all(), [
+            'email' => ['required', 'email'],
+            'password' => ['required', 'string'],
+        ])->validate();
+
+        $user = User::where('email', $data['email'])->first();
+
+        if (! $user || ! $user->is_active || ! Hash::check($data['password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'email' => ['The provided credentials are incorrect.'],
+            ]);
+        }
+
+        $token = $user->createToken('hotel-pms', ['hotel:read']);
+
+        return response()->json([
+            'data' => [
+                'token' => $token->plainTextToken,
+                'tokenType' => 'Bearer',
+                'user' => ['id' => (string) $user->id, 'name' => $user->name, 'email' => $user->email],
+            ],
+        ]);
+    }
+
+    public function me(Request $request): JsonResponse
+    {
+        $user = $request->user();
+
+        return response()->json(['data' => [
+            'id' => (string) $user->id,
+            'name' => $user->name,
+            'email' => $user->email,
+            'hotels' => $user->memberships()->where('is_active', true)
+                ->with('hotel:id,name')->get()
+                ->map(fn ($membership): array => [
+                    'id' => (string) $membership->hotel_id,
+                    'name' => $membership->hotel->name,
+                    'role' => $membership->role,
+                ])->values(),
+        ]]);
+    }
+
+    public function logout(Request $request): JsonResponse
+    {
+        $request->user()->currentAccessToken()?->delete();
+
+        return response()->json(['message' => 'Signed out.']);
+    }
+}
