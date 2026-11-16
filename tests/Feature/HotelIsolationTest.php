@@ -49,5 +49,5 @@ it('makes room endpoints read only', function (): void {
     HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $user->id, 'role' => 'front_desk']);
     Sanctum::actingAs($user, ['hotel:read']);
 
-    $this->postJson('/api/v1/hotels/'.$hotel->id.'/rooms', ['number' => '401'])->assertStatus(405);
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/rooms', ['number' => '401'])->assertForbidden();
 });
