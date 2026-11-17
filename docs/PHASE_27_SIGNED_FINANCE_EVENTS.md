@@ -32,11 +32,12 @@ FINANCE_CUSTOM_HMAC_SECRET=
 
 `sha256=` followed by `HMAC_SHA256(secret, timestamp + "." + raw_request_body)`.
 
-Use an absolute Unix timestamp (seconds), with a maximum allowed skew of 300 seconds. The only accepted JSON shape, in the **exact field order** below, is:
+Use an absolute Unix timestamp (seconds), with a maximum allowed skew of 300 seconds. The only accepted JSON shape, in the **exact field order** below, is; the signed `hotelId` must identify an existing hotel:
 
 ```json
 {
   "eventId": "example-event-0001",
+  "hotelId": 1,
   "eventType": "payment.observed",
   "reference": "EXAMPLE-REFERENCE-001",
   "amountMinor": 150000,
@@ -45,21 +46,22 @@ Use an absolute Unix timestamp (seconds), with a maximum allowed skew of 300 sec
 }
 ```
 
-Also accepted is `refund.observed` for **storage only**; it cannot be matched to a payment. The transport does not accept additional metadata or identity information, and it stores only those allowlisted fields. The global provider-name namespace is `custom_hmac_v1`; it does not assert a real processor origin. Identical event-ID + body deliveries return 200, new events return 202, reused IDs with different content return 409. Invalid signatures or timestamp windows return 401; an unconfigured adapter returns 503. Events are append-only from this interface.
+Also accepted is `refund.observed` for **storage only**; it cannot be matched to a payment. The transport does not accept additional metadata or identity information, and it stores only those allowlisted fields. The global provider-name namespace is `custom_hmac_v1`; it does not assert a real processor origin. A signed `hotelId` binds an observation to a property but **does not verify that a real processor merchant account belongs to that property**. Old pre-binding events, if any, remain unbound and cannot be reconciled. The separate `2026_11_17_271000_bind_finance_events_to_hotels.php` migration adds this field for existing Phase 27 databases. Identical event-ID + body deliveries return 200, new events return 202, reused IDs with different content return 409. Invalid signatures or timestamp windows return 401; an unconfigured adapter returns 503. Events are append-only from this interface.
 
-**Provider onboarding checklist:** replace the generic signing scheme with the chosen provider's documented signature/version/replay verification, validate the merchant/subaccount, currency exponent, sandbox/live keys, event schema, event ordering, refund lifecycle and authoritative source-of-truth API. Require authentic provider sandbox fixtures and independent integration tests. **Do not turn on this generic adapter as if it were a real webhook integration.**
+**Provider onboarding checklist:** replace the generic signing scheme with the chosen provider's documented signature/version/replay verification, validate the merchant/subaccount and map it securely to the signed hotel's identity, currency exponent, sandbox/live keys, event schema, event ordering, refund lifecycle and authoritative source-of-truth API. Require authentic provider sandbox fixtures and independent integration tests. **Do not turn on this generic adapter as if it were a real webhook integration.**
 
 ## Admin reconciliation endpoints
 
 Under `/api/v1/hotels/{hotel}`:
 
 ```http
+GET  /finance/events?status=unmapped&per_page=20
 GET  /bookings/{booking}/finance-event-reviews
 POST /bookings/{booking}/finance-event-reviews
 POST /finance/charge-policy-drafts/{policy}/review
 ```
 
-The event-review POST accepts:
+The admin-only hotel event inbox lists signed observations with their internal IDs, references and amounts **only for that hotel**. It does not claim provider settlement. The event-review POST accepts:
 
 ```json
 {
