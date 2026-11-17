@@ -171,6 +171,16 @@ final class KeycardAuthorizationService
                 ->where('kind', 'initial')->where('status', 'authorized_mock')->exists()) {
                 throw new HttpException(409, 'An active initial keycard authorization already exists.');
             }
+            if ($kind !== 'initial') {
+                $pending = DB::table('keycard_authorizations')->where('hotel_id', $hotel->id)
+                    ->where('kind', $kind)->where('room_id', $roomId)
+                    ->where('status', 'pending_manager');
+                if ($bookingId === null) $pending->whereNull('reservation_record_id');
+                else $pending->where('reservation_record_id', $bookingId);
+                if ($pending->exists()) {
+                    throw new HttpException(409, 'An equivalent manager-review request is already pending.');
+                }
+            }
             $id = DB::table('keycard_authorizations')->insertGetId([
                 'hotel_id' => $hotel->id, 'room_id' => $roomId,
                 'reservation_record_id' => $bookingId, 'requested_by' => $actor,
@@ -221,6 +231,12 @@ final class KeycardAuthorizationService
                 $booking = $this->verifyBooking($hotel, (int) $row->reservation_record_id, (int) $row->room_id);
                 if ($booking->check_in !== $row->valid_from || $booking->check_out !== $row->valid_until) {
                     throw new HttpException(409, 'Booking dates changed after the request.');
+                }
+                if ($row->kind === 'replacement' && ! DB::table('keycard_authorizations')
+                    ->where('hotel_id', $hotel->id)->where('reservation_record_id', $row->reservation_record_id)
+                    ->where('room_id', $row->room_id)->where('kind', 'initial')
+                    ->where('status', 'authorized_mock')->exists()) {
+                    throw new HttpException(409, 'The original authorization was revoked. Replacement request is no longer eligible.');
                 }
             }
             $status = $input['decision'] === 'approve' ? 'approved' : 'rejected';
