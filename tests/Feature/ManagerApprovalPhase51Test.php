@@ -24,34 +24,6 @@ function phase51Member(Hotel $hotel, string $role): User
     return $user;
 }
 
-function phase51Fixture(): array
-{
-    $hotel = Hotel::create(['name' => 'Phase 51 Hotel', 'timezone' => 'Asia/Manila']);
-    $type = RoomType::create([
-        'hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2,
-    ]);
-    Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => 'P51-101']);
-    $guest = $hotel->guests()->create(['first_name' => 'Approval', 'last_name' => 'Guest']);
-    $manager = phase51Member($hotel, 'admin');
-    $reception = phase51Member($hotel, 'front_desk');
-    $arrival = now('Asia/Manila')->addDays(10)->toDateString();
-    $departure = now('Asia/Manila')->addDays(12)->toDateString();
-    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
-    $base = '/api/v1/hotels/'.$hotel->id;
-    $booking = $thisUnused = null;
-    return compact('hotel', 'type', 'guest', 'manager', 'reception', 'arrival', 'departure', 'base');
-}
-
-function phase51Booking(array $fx, $test): string
-{
-    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
-    return (string) $test->postJson($fx['base'].'/bookings', [
-        'idempotencyKey' => 'phase51-booking-'.uniqid(),
-        'guestId' => $fx['guest']->id, 'roomTypeId' => $fx['type']->id,
-        'checkIn' => $fx['arrival'], 'checkOut' => $fx['departure'],
-    ])->assertCreated()->json('data.id');
-}
-
 it('executes one independent manager-approved cancellation with complete audit history', function (): void {
     $hotel = Hotel::create(['name' => 'Phase 51 Cancellation']);
     $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Basic', 'max_occupancy' => 2]);
@@ -197,4 +169,66 @@ it('denies missing write ability and invalid date request payloads', function ()
         'action' => 'amend_dates', 'reason' => 'Guest needs to change planned dates.',
         'checkIn' => '2026-12-12', 'checkOut' => '2026-12-10',
     ])->assertUnprocessable();
+});
+
+it('executes approved unpriced date amendments once and records the reviewer as actor', function (): void {
+    $hotel = Hotel::create(['name' => 'Phase 51 Dates', 'timezone' => 'Asia/Manila']);
+    $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Basic', 'max_occupancy' => 2]);
+    Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => 'P51-501']);
+    $guest = $hotel->guests()->create(['first_name' => 'Dates', 'last_name' => 'Guest']);
+    $manager = phase51Member($hotel, 'admin');
+    $reception = phase51Member($hotel, 'front_desk');
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $in = now('Asia/Manila')->addDays(10)->toDateString();
+    $out = now('Asia/Manila')->addDays(11)->toDateString();
+    $extended = now('Asia/Manila')->addDays(12)->toDateString();
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $booking = $this->postJson($base.'/bookings', [
+        'idempotencyKey' => 'phase51-amend-create-'.uniqid(), 'guestId' => $guest->id,
+        'roomTypeId' => $type->id, 'checkIn' => $in, 'checkOut' => $out,
+    ])->assertCreated()->json('data.id');
+    Sanctum::actingAs($reception, ['hotel:read', 'booking:write']);
+    $approval = $this->postJson($base.'/bookings/'.$booking.'/approval-requests', [
+        'idempotencyKey' => 'phase51-amend-request-'.uniqid(),
+        'action' => 'amend_dates', 'reason' => 'Guest requested one more night at the hotel.',
+        'checkIn' => $in, 'checkOut' => $extended,
+    ])->assertCreated()->json('data.id');
+
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $this->postJson($base.'/approval-requests/'.$approval.'/review', [
+        'decision' => 'approve',
+    ])->assertOk()->assertJsonPath('data.status', 'executed');
+    expect(DB::table('reservation_records')->where('id', $booking)->value('check_out'))
+        ->toBe($extended);
+    expect(DB::table('reservation_date_amendments')->where('reservation_record_id', $booking)
+        ->where('actor_id', $manager->id)->count())->toBe(1);
+});
+
+it('only returns a receptionist their own requests and blocks cross-request event reads', function (): void {
+    $hotel = Hotel::create(['name' => 'Phase 51 Privacy']);
+    $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Basic', 'max_occupancy' => 2]);
+    Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => 'P51-601']);
+    $guest = $hotel->guests()->create(['first_name' => 'Private', 'last_name' => 'Guest']);
+    $manager = phase51Member($hotel, 'admin');
+    $a = phase51Member($hotel, 'front_desk');
+    $b = phase51Member($hotel, 'front_desk');
+    $base = '/api/v1/hotels/'.$hotel->id;
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $booking = $this->postJson($base.'/bookings', [
+        'idempotencyKey' => 'phase51-privacy-create-'.uniqid(), 'guestId' => $guest->id,
+        'roomTypeId' => $type->id,
+        'checkIn' => now()->addDays(10)->toDateString(),
+        'checkOut' => now()->addDays(11)->toDateString(),
+    ])->assertCreated()->json('data.id');
+    Sanctum::actingAs($a, ['hotel:read', 'booking:write']);
+    $approval = $this->postJson($base.'/bookings/'.$booking.'/approval-requests', [
+        'idempotencyKey' => 'phase51-privacy-request-'.uniqid(),
+        'action' => 'cancel_booking', 'reason' => 'A request only this receptionist should read.',
+    ])->assertCreated()->json('data.id');
+    $this->getJson($base.'/approval-requests')->assertOk()->assertJsonCount(1, 'data');
+    $this->getJson($base.'/approval-requests/'.$approval.'/history')->assertOk()->assertJsonCount(1, 'data');
+
+    Sanctum::actingAs($b, ['hotel:read', 'booking:write']);
+    $this->getJson($base.'/approval-requests')->assertOk()->assertJsonCount(0, 'data');
+    $this->getJson($base.'/approval-requests/'.$approval.'/history')->assertNotFound();
 });
