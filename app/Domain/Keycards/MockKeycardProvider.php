@@ -14,4 +14,9 @@ final class MockKeycardProvider implements KeycardProvider
             'physicalCardEncoded' => false,
         ];
     }
+
+    public function revoke(int $hotelId, int $authorizationId): array
+    {
+        return ['provider' => 'mock', 'physicalCardRevoked' => false];
+    }
 }
