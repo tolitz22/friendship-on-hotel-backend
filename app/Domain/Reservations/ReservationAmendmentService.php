@@ -22,6 +22,7 @@ final class ReservationAmendmentService
         }
 
         return DB::transaction(function () use ($hotel, $actor, $bookingId, $newStay): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $snapshot = DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
             abort_unless($snapshot !== null, 404);
 
