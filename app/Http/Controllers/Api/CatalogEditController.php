@@ -88,7 +88,12 @@ final class CatalogEditController
             $typeIds = array_values(array_unique($typeIds));
             sort($typeIds, SORT_NUMERIC);
             foreach ($typeIds as $typeId) {
-                $hotel->roomTypes()->whereKey($typeId)->lockForUpdate()->firstOrFail();
+                $lockedType = $hotel->roomTypes()->whereKey($typeId)->lockForUpdate()->first();
+                if ($lockedType === null) {
+                    throw ValidationException::withMessages([
+                        'roomTypeId' => ['The room type does not belong to this property.'],
+                    ]);
+                }
             }
             $room = $hotel->rooms()->lockForUpdate()->findOrFail($record->id);
             $before = [
