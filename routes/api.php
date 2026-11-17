@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\MaintenanceWorkOrderController;
 use App\Http\Controllers\Api\PropertyCatalogSummaryController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HotelController;
+use App\Http\Controllers\Api\HotelStaffController;
 use App\Http\Controllers\Api\RoomCatalogController;
 use App\Http\Controllers\Api\ReservationRecordController;
 use App\Http\Controllers\Api\ReservationScenarioController;
@@ -39,6 +40,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-simulation', ReservationScenarioController::class);
             Route::get('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'show']);
             Route::get('/reservation-policy-readiness', ReservationPolicyReadinessController::class);
+            Route::patch('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'update'])->whereNumber('task');
+            Route::patch('/maintenance-work-orders/{order}', [MaintenanceWorkOrderController::class, 'update'])->whereNumber('order');
             Route::get('/housekeeping-tasks', [HousekeepingTaskController::class, 'index']);
             Route::get('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'show'])->whereNumber('task');
             Route::get('/housekeeping-tasks/{task}/history', [HousekeepingTaskController::class, 'history'])->whereNumber('task');
@@ -51,6 +54,9 @@ Route::prefix('v1')->group(function (): void {
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
+                Route::get('/staff', [HotelStaffController::class, 'index']);
+                Route::post('/staff', [HotelStaffController::class, 'attach']);
+                Route::patch('/staff/{userId}', [HotelStaffController::class, 'update'])->whereNumber('userId');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
                 Route::get('/reservation-policy-draft/history', [ReservationPolicyDraftController::class, 'history']);
                 Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
@@ -59,9 +65,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/rooms/{room}', [CatalogEditController::class, 'updateRoom'])->whereNumber('room');
                 Route::get('/catalog-audit', [CatalogEditController::class, 'audit']);
                 Route::post('/housekeeping-tasks', [HousekeepingTaskController::class, 'store']);
-                Route::patch('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'update'])->whereNumber('task');
                 Route::post('/maintenance-work-orders', [MaintenanceWorkOrderController::class, 'store']);
-                Route::patch('/maintenance-work-orders/{order}', [MaintenanceWorkOrderController::class, 'update'])->whereNumber('order');
                 Route::post('/guests', [GuestController::class, 'store']);
                 Route::patch('/guests/{guest}', [GuestController::class, 'update'])->whereNumber('guest');
             });
