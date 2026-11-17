@@ -21,6 +21,7 @@ final class ReservationStayLifecycleService
         }
 
         return DB::transaction(function () use ($hotel, $actor, $bookingId, $operation): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $snapshot = DB::table('reservation_records')
                 ->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
             abort_unless($snapshot !== null, 404);
@@ -53,6 +54,10 @@ final class ReservationStayLifecycleService
             if ($operation === 'check_in') {
                 if ($record->assigned_room_id === null) {
                     throw new HttpException(409, 'Assign a physical room before check-in.');
+                }
+
+                if (app(ReadinessWriteGuard::class)->enabled($hotel)) {
+                    app(ReadinessWriteGuard::class)->requireReady($hotel, (int) $record->assigned_room_id);
                 }
 
                 // Existing assignments must still be safe at the time of check-in.
