@@ -95,6 +95,16 @@ final class RoomInventoryController
         )]);
     }
 
+    public function assignmentOptions(Request $request, Hotel $hotel, string $booking, RoomInventoryService $inventory): JsonResponse
+    {
+        $input = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+        return response()->json($inventory->assignmentOptions($hotel, (int) $booking,
+            (int) ($input['page'] ?? 1), (int) ($input['per_page'] ?? 24)));
+    }
+
     public function assign(Request $request, Hotel $hotel, string $booking, RoomInventoryService $inventory): JsonResponse
     {
         $data = $request->validate(['roomId' => ['required', 'integer', 'min:1']]);
