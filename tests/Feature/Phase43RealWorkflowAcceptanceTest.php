@@ -68,19 +68,67 @@ it('accepts a persisted synthetic guest-to-checkout stay with payment review, au
         'hotel_id' => $hotel->id, 'amount_minor' => 250000, 'entry_type' => 'room_night',
     ]);
 
+    // Phase 52: cash must enter the same folio through an open shift. The
+    // independent administrator reviews the payment and reconciles the drawer.
+    $cashier = User::create([
+        'name' => 'Acceptance Cashier',
+        'email' => 'phase43-cashier@example.test',
+        'password' => 'unused-test-password',
+    ]);
+    HotelMembership::create([
+        'hotel_id' => $hotel->id, 'user_id' => $cashier->id,
+        'role' => 'front_desk', 'is_active' => true,
+    ]);
+
+    // Legacy direct cash posting is deliberately blocked, even for managers.
+    $this->postJson($base.'/bookings/'.$bookingId.'/payment-records', [
+        'requestKey' => 'phase43-old-direct-cash',
+        'method' => 'cash', 'reference' => 'SYNTHETIC-LEGACY-CASH',
+        'amountMinor' => 250000,
+    ])->assertStatus(409);
+
+    Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $shiftId = $this->postJson($base.'/cashier-shifts', [
+        'openingFloatMinor' => 10000,
+    ])->assertCreated()->assertJsonPath('data.status', 'open')->json('data.id');
+    $receiptUrl = $base.'/cashier-shifts/'.$shiftId.'/bookings/'.$bookingId.'/cash-receipts';
     $paymentInput = [
-        'requestKey' => 'phase43-payment-key-001', 'method' => 'cash',
+        'requestKey' => 'phase43-payment-key-001',
         'reference' => 'SYNTHETIC-CASH-001', 'amountMinor' => 250000,
     ];
-    $payment = $this->postJson($base.'/bookings/'.$bookingId.'/payment-records', $paymentInput)
+    $payment = $this->postJson($receiptUrl, $paymentInput)
         ->assertCreated()->assertJsonPath('data.status', 'pending_review');
-    $paymentId = $payment->json('data.id');
-    $this->postJson($base.'/bookings/'.$bookingId.'/payment-records', $paymentInput)
-        ->assertOk()->assertJsonPath('data.replayed', true);
+    $paymentId = $payment->json('data.paymentId');
+    $this->postJson($receiptUrl, $paymentInput)
+        ->assertOk()->assertJsonPath('data.replayed', true)
+        ->assertJsonPath('data.paymentId', $paymentId);
     $this->assertDatabaseCount('folio_payment_records', 1);
+    $this->assertDatabaseHas('cashier_shift_receipts', [
+        'hotel_id' => $hotel->id, 'shift_id' => $shiftId,
+        'reservation_record_id' => $bookingId,
+        'payment_id' => $paymentId, 'amount_minor' => 250000,
+    ]);
+    $this->postJson($base.'/cashier-shifts/'.$shiftId.'/close', [
+        'countedCashMinor' => 260000,
+        'note' => 'Cash and opening float physically counted.',
+    ])->assertOk()->assertJsonPath('data.status', 'submitted')
+        ->assertJsonPath('data.expectedCashMinor', 260000)
+        ->assertJsonPath('data.varianceMinor', 0);
+
+    Sanctum::actingAs($admin, ['hotel:read', 'hotel:write']);
+    $this->postJson($base.'/cashier-shifts/'.$shiftId.'/reconcile', [
+        'decision' => 'reconcile', 'note' => 'Awaiting independent payment review.',
+    ])->assertStatus(409);
     $this->postJson($base.'/bookings/'.$bookingId.'/payment-records/'.$paymentId.'/review', [
-        'decision' => 'confirm', 'note' => 'Synthetic cash receipt verified by test admin',
+        'decision' => 'confirm', 'note' => 'Synthetic cash receipt verified by independent admin',
     ])->assertOk()->assertJsonPath('data.status', 'staff_confirmed');
+    $this->postJson($base.'/cashier-shifts/'.$shiftId.'/reconcile', [
+        'decision' => 'reconcile',
+        'note' => 'Verified submitted drawer count and reviewed payment evidence.',
+    ])->assertOk()->assertJsonPath('data.status', 'reconciled');
+    expect(DB::table('cashier_shift_events')->where('shift_id', $shiftId)
+        ->orderBy('id')->pluck('event')->all())
+        ->toBe(['opened', 'cash_received', 'submitted', 'reconciled']);
 
     $this->getJson($base.'/bookings/'.$bookingId.'/folio-ledger')
         ->assertOk()->assertJsonPath('data.summary.staffConfirmedPaymentsMinor', 250000)
