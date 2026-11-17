@@ -31,6 +31,7 @@ use App\Http\Controllers\Api\RoomInventoryController;
 use App\Http\Controllers\Api\RoomReadinessController;
 use App\Http\Controllers\Api\ReadinessEnforcementPolicyController;
 use App\Http\Controllers\Api\RoomReadinessDashboardController;
+use App\Http\Controllers\Api\RoomInventoryStatusController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
@@ -100,6 +101,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/rooms/{room}/readiness', [RoomReadinessController::class, 'show'])->whereNumber('room');
             Route::get('/rooms/{room}/readiness/history', [RoomReadinessController::class, 'history'])->whereNumber('room');
             Route::get('/readiness/dashboard', RoomReadinessDashboardController::class);
+            Route::get('/room-inventory-status', RoomInventoryStatusController::class)
+                ->middleware('hotel.permission:room.read');
             Route::get('/readiness/enforcement-policy', [ReadinessEnforcementPolicyController::class, 'show']);
             Route::get('/readiness/enforcement-policy/history', [ReadinessEnforcementPolicyController::class, 'history']);
 
