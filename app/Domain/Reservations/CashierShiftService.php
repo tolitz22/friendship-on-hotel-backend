@@ -34,7 +34,7 @@ final class CashierShiftService
 
     private function checkedAdd(int $a, int $b): int
     {
-        if ($a < 0 || $b < 0 || $a > PHP_INT_MAX - $b) {
+        if ($a < 0 || $b < 0 || $a > 9007199254740991 - $b) {
             throw new HttpException(422, 'Cash total exceeds supported financial limits.');
         }
         return $a + $b;
