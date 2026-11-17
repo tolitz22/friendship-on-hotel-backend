@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
+use App\Support\TaskStaffAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -34,6 +35,7 @@ final class MaintenanceWorkOrderController
             'priority' => $row->priority,
             'status' => $row->status,
             'assignedTo' => $row->assigned_to,
+            'assignedUserId' => $row->assigned_user_id===null?null:(string)$row->assigned_user_id,
             'affectsRoom' => (bool) $row->affects_room,
             'revision' => (int) $row->revision,
             'reportedAt' => $row->created_at,
@@ -88,6 +90,7 @@ final class MaintenanceWorkOrderController
             'description'=>['required','string','max:5000'],
             'priority'=>['required',Rule::in(self::PRIORITIES)],
             'assignedTo'=>['sometimes','nullable','string','max:120'],
+            'assignedUserId'=>['sometimes','nullable','integer','min:1'],
             'affectsRoom'=>['sometimes','boolean'],
             'note'=>['sometimes','nullable','string','max:2000'],
         ]);
@@ -98,12 +101,14 @@ final class MaintenanceWorkOrderController
             if ($data[$key]==='') throw ValidationException::withMessages([$key=>['This field cannot be blank.']]);
         }
 
+        TaskStaffAccess::verifyAssignee($hotel,isset($data['assignedUserId'])?(int)$data['assignedUserId']:null,'maintenance');
         $id = DB::transaction(function () use ($hotel,$request,$data): int {
             $id = DB::table('maintenance_work_orders')->insertGetId([
                 'hotel_id'=>$hotel->id,'room_id'=>$data['roomId'],
                 'title'=>$data['title'],'description'=>$data['description'],
                 'priority'=>$data['priority'],'status'=>'open',
                 'assigned_to'=>$data['assignedTo']??null,
+                'assigned_user_id'=>$data['assignedUserId']??null,
                 'affects_room'=>$data['affectsRoom']??false,
                 'revision'=>1,'created_by'=>$request->user()->id,
                 'created_at'=>now(),'updated_at'=>now(),
@@ -130,10 +135,14 @@ final class MaintenanceWorkOrderController
             $row = DB::table('maintenance_work_orders')
                 ->where('hotel_id',$hotel->id)->where('id',$order)->lockForUpdate()->first();
             abort_if($row===null,404);
+            if (!TaskStaffAccess::canOperate($request,$hotel,$row,'maintenance')) abort(403);
+            if (!TaskStaffAccess::isAdmin($request,$hotel)
+                && (array_key_exists('priority',$data)||array_key_exists('assignedTo',$data)||array_key_exists('assignedUserId',$data)||array_key_exists('affectsRoom',$data))) abort(403);
+            if (array_key_exists('assignedUserId',$data)) TaskStaffAccess::verifyAssignee($hotel,$data['assignedUserId']===null?null:(int)$data['assignedUserId'],'maintenance');
             if ((int)$row->revision !== (int)$data['expectedRevision']) return ['conflict'=>true];
             $before = $this->state($row);
             $changes=[];
-            foreach (['status'=>'status','priority'=>'priority','assignedTo'=>'assigned_to','affectsRoom'=>'affects_room'] as $input=>$column) {
+            foreach (['status'=>'status','priority'=>'priority','assignedTo'=>'assigned_to','assignedUserId'=>'assigned_user_id','affectsRoom'=>'affects_room'] as $input=>$column) {
                 if (array_key_exists($input,$data)) $changes[$column]=$data[$input];
             }
             if (isset($changes['status']) && $changes['status'] !== $row->status
@@ -186,7 +195,8 @@ final class MaintenanceWorkOrderController
     private function state(object $row): array
     {
         return ['status'=>$row->status,'priority'=>$row->priority,
-            'assignedTo'=>$row->assigned_to,'affectsRoom'=>(bool)$row->affects_room];
+            'assignedTo'=>$row->assigned_to,
+            'assignedUserId'=>$row->assigned_user_id===null?null:(string)$row->assigned_user_id,'affectsRoom'=>(bool)$row->affects_room];
     }
 
     private function event(Hotel $hotel,int $id,int $actor,string $action,?array $before,array $after,?string $note): void
