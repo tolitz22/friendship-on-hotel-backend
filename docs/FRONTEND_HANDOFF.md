@@ -110,3 +110,8 @@ API-mode Hotel staff now exposes administrator-only invitation issue/list/revoke
 Backend `main` now includes `POST /api/v1/hotels/{hotel}/bookings` and `POST /api/v1/hotels/{hotel}/bookings/{booking}/cancel` for active hotel administrators with `hotel:write`. Bookings sell a room type, count registered rooms per night, are created `confirmed`, and require an existing property-scoped guest plus an idempotency key. A booked room remains unassigned. Cancellation releases demand and writes an audit event.
 
 **Do not connect the existing React booking wizard yet.** It still assumes mock rate quotes, operations and availability states that are not provided by this Phase 20 API. The new backend has no integrated maintenance blocks, payments, pricing, reservation amendments, or checkout/assignment workflow. See `docs/PHASE_20_LIVE_RESERVATIONS.md`. API mode can continue using previously integrated real Guest, Catalogue, Staff and Maintenance endpoints. Before enabling a live booking UI, run the backend tests and MySQL/PostgreSQL concurrency tests and design a frontend contract that does not claim real pricing or room readiness.
+
+
+## Phase 21 — Availability and room assignment backend
+
+The Laravel backend now exposes selected-hotel room-type availability by night, dated room inventory blocks and room assignment for confirmed reservations. `canBook` reports instantaneous capacity only, not a held room or verified housekeeping readiness; booking creation rechecks under lock. No rate, payment or check-in status is returned. Do not silently connect the existing mock booking wizard until its full contract has been reconciled. See `docs/PHASE_21_ROOM_INVENTORY.md`.
