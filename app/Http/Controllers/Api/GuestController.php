@@ -79,8 +79,8 @@ final class GuestController
         $name = $partial ? 'sometimes' : 'required';
 
         return [
-            'firstName' => [$name, 'required', 'string', 'min:1', 'max:120'],
-            'lastName' => [$name, 'required', 'string', 'min:1', 'max:120'],
+            'firstName' => [$name, 'required', 'string', 'min:1', 'max:120', 'regex:/\\S/u'],
+            'lastName' => [$name, 'required', 'string', 'min:1', 'max:120', 'regex:/\\S/u'],
             'email' => ['sometimes', 'nullable', 'email', 'max:255'],
             'phone' => ['sometimes', 'nullable', 'string', 'max:40'],
             'nationality' => ['sometimes', 'nullable', 'string', 'max:100'],
