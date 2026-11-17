@@ -39,6 +39,7 @@ use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
+use App\Http\Controllers\Api\OccupancyVerificationController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -132,7 +133,23 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/cashier-shifts/{shift}/close', [CashierShiftController::class, 'close'])
                 ->whereNumber('shift')->middleware('hotel.permission:cashier.write')->middleware('throttle:20,1');
 
+            // Independent observation: assigned housekeeping cannot edit bookings;
+            // front desk cannot submit or inspect occupancy verification evidence.
+            Route::get('/occupancy-verifications', [OccupancyVerificationController::class, 'index'])
+                ->middleware('hotel.permission:occupancy.read');
+            Route::get('/occupancy-verifications/{verification}', [OccupancyVerificationController::class, 'show'])
+                ->whereNumber('verification')->middleware('hotel.permission:occupancy.read');
+            Route::get('/occupancy-verifications/{verification}/history', [OccupancyVerificationController::class, 'history'])
+                ->whereNumber('verification')->middleware('hotel.permission:occupancy.read');
+            Route::post('/occupancy-verifications/{verification}/observe', [OccupancyVerificationController::class, 'observe'])
+                ->whereNumber('verification')->middleware('hotel.permission:occupancy.observe')
+                ->middleware('throttle:20,1');
+
             Route::middleware('hotel.admin')->group(function (): void {
+                Route::post('/occupancy-verifications', [OccupancyVerificationController::class, 'assign'])
+                    ->middleware('throttle:30,1');
+                Route::post('/occupancy-verifications/{verification}/review', [OccupancyVerificationController::class, 'review'])
+                    ->whereNumber('verification')->middleware('throttle:20,1');
                 Route::post('/cashier-shifts/{shift}/reconcile', [CashierShiftController::class, 'reconcile'])
                     ->whereNumber('shift')->middleware('throttle:20,1');
                 Route::post('/approval-requests/{approval}/review', [ManagerApprovalController::class, 'review'])
