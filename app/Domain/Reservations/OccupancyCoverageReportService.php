@@ -1,0 +1,112 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Domain\Reservations;
+
+use App\Models\Hotel;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Phase 55: manager-only, date-scoped coverage derived from independent
+ * Phase 53 observations. Missing checks are unverified, not vacant.
+ * Never retroactively recompute an observation from mutable PMS bookings.
+ */
+final class OccupancyCoverageReportService
+{
+    public function show(Hotel $hotel, array $filters): array
+    {
+        $date = $filters['date'] ?? now($hotel->timezone ?: 'Asia/Manila')->toDateString();
+        $scope = DB::table('rooms as r')
+            ->leftJoin('occupancy_verifications as v', function ($join) use ($hotel, $date): void {
+                $join->on('v.room_id', '=', 'r.id')
+                    ->on('v.hotel_id', '=', 'r.hotel_id')
+                    ->where('v.hotel_id', '=', $hotel->id)
+                    ->where('v.inspection_date', '=', $date);
+            })
+            ->where('r.hotel_id', $hotel->id);
+
+        $totals = (clone $scope)->selectRaw(
+            "COUNT(r.id) as room_count,
+             SUM(CASE WHEN v.id IS NULL THEN 1 ELSE 0 END) as missing_count,
+             SUM(CASE WHEN v.status = 'assigned' THEN 1 ELSE 0 END) as assigned_count,
+             SUM(CASE WHEN v.status = 'submitted' THEN 1 ELSE 0 END) as submitted_count,
+             SUM(CASE WHEN v.status = 'verified' THEN 1 ELSE 0 END) as verified_count,
+             SUM(CASE WHEN v.status = 'flagged' THEN 1 ELSE 0 END) as flagged_count,
+             SUM(CASE WHEN v.discrepancy = 'unexpected_occupied' THEN 1 ELSE 0 END) as unexpected_occupied_count,
+             SUM(CASE WHEN v.discrepancy = 'expected_occupied_vacant' THEN 1 ELSE 0 END) as expected_occupied_vacant_count,
+             SUM(CASE WHEN v.discrepancy = 'unverified' THEN 1 ELSE 0 END) as unverified_count,
+             SUM(CASE WHEN v.discrepancy = 'match' THEN 1 ELSE 0 END) as match_count"
+        )->first();
+
+        $filter = $filters['filter'] ?? 'all';
+        $records = clone $scope;
+        if ($filter === 'missing') $records->whereNull('v.id');
+        if ($filter === 'assigned') $records->where('v.status', 'assigned');
+        if ($filter === 'needs_review') $records->where('v.status', 'submitted');
+        if ($filter === 'flagged') $records->where('v.status', 'flagged');
+        if ($filter === 'mismatch') $records->whereIn('v.discrepancy', [
+            'unexpected_occupied', 'expected_occupied_vacant', 'unverified',
+        ]);
+        if ($filter === 'verified') $records->where('v.status', 'verified');
+
+        $page = $records->orderBy('r.number')->orderBy('r.id')
+            ->select([
+                'r.id as room_id', 'r.number as room_number', 'r.floor_number',
+                'v.id as verification_id', 'v.status', 'v.discrepancy',
+                'v.expected_occupancy', 'v.observed_occupancy',
+                'v.assigned_user_id', 'v.observed_by', 'v.reviewed_by',
+                'v.observed_at', 'v.reviewed_at',
+            ])->paginate((int) ($filters['per_page'] ?? 25));
+
+        $roomCount = (int) $totals->room_count;
+        $missing = (int) $totals->missing_count;
+        $assigned = (int) $totals->assigned_count;
+        $submitted = (int) $totals->submitted_count;
+        $verified = (int) $totals->verified_count;
+        $flagged = (int) $totals->flagged_count;
+
+        return [
+            'data' => $page->getCollection()->map(fn (object $row): array => [
+                'roomId' => (string) $row->room_id,
+                'roomNumber' => $row->room_number,
+                'floor' => $row->floor_number === null ? null : (int) $row->floor_number,
+                'verificationId' => $row->verification_id === null ? null : (string) $row->verification_id,
+                'status' => $row->status ?? 'missing',
+                'discrepancy' => $row->discrepancy,
+                'expectedOccupancy' => $row->expected_occupancy,
+                'observedOccupancy' => $row->observed_occupancy,
+                'assignedUserId' => $row->assigned_user_id === null ? null : (string) $row->assigned_user_id,
+                'observedBy' => $row->observed_by === null ? null : (string) $row->observed_by,
+                'reviewedBy' => $row->reviewed_by === null ? null : (string) $row->reviewed_by,
+                'observedAt' => $row->observed_at,
+                'reviewedAt' => $row->reviewed_at,
+            ])->values(),
+            'summary' => [
+                'hotelId' => (string) $hotel->id,
+                'inspectionDate' => $date,
+                'hotelDate' => now($hotel->timezone ?: 'Asia/Manila')->toDateString(),
+                'roomCount' => $roomCount,
+                'missing' => $missing,
+                'assigned' => $assigned,
+                'submitted' => $submitted,
+                'verified' => $verified,
+                'flagged' => $flagged,
+                'observed' => $submitted + $verified + $flagged,
+                'checked' => $roomCount - $missing,
+                'unexpectedOccupied' => (int) $totals->unexpected_occupied_count,
+                'expectedOccupiedVacant' => (int) $totals->expected_occupied_vacant_count,
+                'unverified' => (int) $totals->unverified_count,
+                'matching' => (int) $totals->match_count,
+                'coveragePercent' => $roomCount === 0 ? 0 : round(($roomCount - $missing) * 100 / $roomCount, 1),
+                'observationPercent' => $roomCount === 0 ? 0 : round(($submitted + $verified + $flagged) * 100 / $roomCount, 1),
+                'historicalSnapshotOnly' => true,
+            ],
+            'meta' => [
+                'page' => $page->currentPage(), 'perPage' => $page->perPage(),
+                'total' => $page->total(), 'totalPages' => $page->lastPage(),
+                'filter' => $filter,
+            ],
+        ];
+    }
+}
