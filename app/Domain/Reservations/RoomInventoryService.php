@@ -71,6 +71,7 @@ final class RoomInventoryService
         $stay = $this->stay($data['checkIn'], $data['checkOut']);
 
         return DB::transaction(function () use ($hotel, $actor, $data, $stay): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $room = DB::table('rooms')->where('hotel_id', $hotel->id)->where('id', $data['roomId'])->first();
             abort_unless($room !== null, 404);
             DB::table('room_types')->where('hotel_id', $hotel->id)->where('id', $room->room_type_id)
@@ -117,6 +118,7 @@ final class RoomInventoryService
     public function release(Hotel $hotel, int $actor, int $blockId): array
     {
         return DB::transaction(function () use ($hotel, $actor, $blockId): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $block = DB::table('room_inventory_blocks')->where('hotel_id', $hotel->id)->where('id', $blockId)->first();
             abort_unless($block !== null, 404);
             DB::table('room_types')->where('hotel_id', $hotel->id)->where('id', $block->room_type_id)
@@ -136,6 +138,7 @@ final class RoomInventoryService
     public function assign(Hotel $hotel, int $actor, int $bookingId, int $roomId): array
     {
         return DB::transaction(function () use ($hotel, $actor, $bookingId, $roomId): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $booking = DB::table('reservation_records')->where('hotel_id', $hotel->id)
                 ->where('id', $bookingId)->first();
             abort_unless($booking !== null, 404);
