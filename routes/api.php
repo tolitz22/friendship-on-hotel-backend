@@ -40,6 +40,7 @@ use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
 use App\Http\Controllers\Api\OccupancyVerificationController;
+use App\Http\Controllers\Api\OccupancyCoverageReportController;
 use App\Http\Controllers\Api\KeycardAuthorizationController;
 use Illuminate\Support\Facades\Route;
 
@@ -156,6 +157,7 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('hotel.permission:keycard.request')->middleware('throttle:20,1');
 
             Route::middleware('hotel.admin')->group(function (): void {
+                Route::get('/occupancy-coverage-report', OccupancyCoverageReportController::class);
                 Route::post('/keycard-authorizations/{authorization}/review', [KeycardAuthorizationController::class, 'review'])
                     ->whereNumber('authorization')->middleware('throttle:20,1');
                 Route::post('/keycard-authorizations/{authorization}/revoke', [KeycardAuthorizationController::class, 'revoke'])
