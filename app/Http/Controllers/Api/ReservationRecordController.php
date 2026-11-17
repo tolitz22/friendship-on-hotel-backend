@@ -21,6 +21,9 @@ final class ReservationRecordController
             ->whereKey($booking)->firstOrFail();
         $guest = DB::table('guests')->where('hotel_id', $hotel->id)
             ->where('id', $record->guest_id)->first(['first_name', 'last_name']);
+        $early = DB::table('reservation_early_check_ins')
+            ->where('hotel_id', $hotel->id)->where('reservation_record_id', $record->id)->first();
+
 
         return response()->json(['data' => [
             'id' => (string) $record->id,
@@ -34,6 +37,17 @@ final class ReservationRecordController
             'checkIn' => $record->check_in->format('Y-m-d'),
             'checkOut' => $record->check_out->format('Y-m-d'),
             'lifecycleState' => $record->lifecycle_state,
+            'earlyCheckIn' => $early === null ? null : [
+                'scheduledCheckIn' => $early->scheduled_check_in,
+                'actualCheckInDate' => $early->actual_check_in_date,
+                'actualCheckedInAt' => $early->actual_checked_in_at,
+                'approvalRequestId' => (string) $early->approval_request_id,
+                'requestedBy' => (string) $early->requested_by,
+                'approvedBy' => (string) $early->approved_by,
+                'checkedInBy' => (string) $early->checked_in_by,
+                'reason' => $early->reason,
+                'managerNote' => $early->manager_note,
+            ],
         ]]);
     }
 
