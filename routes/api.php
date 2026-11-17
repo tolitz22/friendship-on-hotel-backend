@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
 use App\Http\Controllers\Api\FinancePolicyController;
 use App\Http\Controllers\Api\FinanceWebhookController;
+use App\Http\Controllers\Api\PayMongoSandboxController;
 use App\Http\Controllers\Api\FinanceEventReviewController;
 use App\Http\Controllers\Api\RoomInventoryController;
 use App\Http\Controllers\Api\ReservationScenarioController;
@@ -34,6 +35,7 @@ use Illuminate\Support\Facades\Route;
 Route::prefix('v1')->group(function (): void {
     Route::get('/health', HealthController::class);
     Route::post('/integrations/finance/custom-hmac-v1/events', FinanceWebhookController::class)->middleware('throttle:30,1');
+    Route::post('/integrations/paymongo/sandbox/events', [PayMongoSandboxController::class, 'webhook'])->middleware('throttle:30,1');
 
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
     Route::post('/auth/spa-login', [SpaSessionController::class, 'login'])->middleware('throttle:5,1');
@@ -97,6 +99,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/finance/charge-policy-drafts', [FinancePolicyController::class, 'draft']);
                 Route::post('/finance/charge-policy-drafts/{policy}/review', [FinancePolicyController::class, 'reviewDraft'])->whereNumber('policy');
                 Route::get('/finance/events', [FinanceEventReviewController::class, 'inbox']);
+                Route::get('/finance/paymongo-sandbox/events', [PayMongoSandboxController::class, 'index']);
                 Route::post('/bookings/{booking}/finance-event-reviews', [FinanceEventReviewController::class, 'match'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/refund-requests', [FinancePolicyController::class, 'requestRefund'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/refund-requests/{refund}/review', [FinancePolicyController::class, 'reviewRefund'])->whereNumber('booking')->whereNumber('refund');
