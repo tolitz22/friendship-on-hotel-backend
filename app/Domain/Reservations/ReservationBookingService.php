@@ -23,13 +23,18 @@ final class ReservationBookingService
             throw new HttpException(422, 'Stay must be between 1 and 31 nights.');
         }
 
-        $fingerprint = hash('sha256', json_encode([
+        // Keep the original hash byte-for-byte for legacy unpriced retries.
+        // Include the selected plan only when this is a priced booking.
+        $fingerprintFields = [
             'guestId' => (int) $data['guestId'],
             'roomTypeId' => (int) $data['roomTypeId'],
-            'ratePlanId' => isset($data['ratePlanId']) ? (int) $data['ratePlanId'] : null,
             'checkIn' => $period->arrival,
             'checkOut' => $period->departure,
-        ], JSON_THROW_ON_ERROR));
+        ];
+        if (isset($data['ratePlanId'])) {
+            $fingerprintFields['ratePlanId'] = (int) $data['ratePlanId'];
+        }
+        $fingerprint = hash('sha256', json_encode($fingerprintFields, JSON_THROW_ON_ERROR));
 
         return DB::transaction(function () use ($hotel, $actorId, $data, $period, $fingerprint): array {
             // Lock a stable parent row, not a possibly empty set of reservation rows.
