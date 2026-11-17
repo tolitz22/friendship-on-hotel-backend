@@ -27,7 +27,11 @@ final class GuestController
             // Escaping wildcard metacharacters makes literal searching consistent.
             $term = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term);
             $pattern = '%'.$term.'%';
-            $query->where(function ($builder) use ($pattern): void {
+            $fullNameSql = \Illuminate\Support\Facades\DB::connection()->getDriverName() === 'mysql'
+                ? "CONCAT(first_name, ' ', last_name)"
+                : "(first_name || ' ' || last_name)";
+            $query->where(function ($builder) use ($pattern, $fullNameSql): void {
+                $builder->orWhereRaw("LOWER(".$fullNameSql.") LIKE ? ESCAPE '!'", [$pattern]);
                 foreach (['first_name', 'last_name', 'email', 'phone'] as $column) {
                     $builder->orWhereRaw('LOWER('.$column.') LIKE ? ESCAPE \'!\'', [$pattern]);
                 }
