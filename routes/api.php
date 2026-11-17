@@ -98,6 +98,15 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/readiness/enforcement-policy', [ReadinessEnforcementPolicyController::class, 'show']);
             Route::get('/readiness/enforcement-policy/history', [ReadinessEnforcementPolicyController::class, 'history']);
 
+            // Phase 50: explicit low-risk operational permissions; all other
+            // sensitive mutations remain inside the administrator group.
+            Route::post('/bookings', [ReservationBookingController::class, 'store'])
+                ->middleware('hotel.permission:booking.create');
+            Route::post('/bookings/{booking}/check-in', [ReservationBookingController::class, 'checkIn'])
+                ->whereNumber('booking')->middleware('hotel.permission:booking.check_in');
+            Route::post('/bookings/{booking}/check-out', [ReservationBookingController::class, 'checkOut'])
+                ->whereNumber('booking')->middleware('hotel.permission:booking.check_out');
+
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::get('/operational-exceptions', OperationalExceptionsController::class);
@@ -124,11 +133,8 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/bookings/{booking}/folio-adjustments', [FolioAccountingController::class, 'adjust'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/payment-records', [FolioAccountingController::class, 'recordPayment'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/payment-records/{payment}/review', [FolioAccountingController::class, 'reviewPayment'])->whereNumber('booking')->whereNumber('payment');
-                Route::post('/bookings', [ReservationBookingController::class, 'store']);
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
-                Route::post('/bookings/{booking}/check-in', [ReservationBookingController::class, 'checkIn'])->whereNumber('booking');
-                Route::post('/bookings/{booking}/check-out', [ReservationBookingController::class, 'checkOut'])->whereNumber('booking');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
                 Route::get('/reservation-policy-draft/history', [ReservationPolicyDraftController::class, 'history']);
                 Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
