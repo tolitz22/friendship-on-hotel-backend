@@ -146,3 +146,7 @@ Added `catalog_audit_logs` migration plus admin-only PATCH endpoints for room ty
 ## Phase 9 — Structural Reservation Demand
 
 Added authenticated, read-only `GET /api/v1/hotels/{hotel}/reservation-demand?from=YYYY-MM-DD&to=YYYY-MM-DD`. It reports per-night assigned and unassigned **stored reservation record counts** grouped by room type, **not availability or occupancy**. It includes all lifecycle states until the hotel approves which statuses consume inventory. No booking POST/PATCH routes were added. See [Phase 9](docs/PHASE_9_RESERVATION_DEMAND.md).
+
+## Phase 10 — Hotel Reservation Policy Drafts
+
+Added `reservation_policy_drafts` and `reservation_policy_draft_revisions` migrations, property-protected read/admin update and revision-history endpoints, and stale-edit 409 conflict checks. These are *planning records only* (`effectiveForBookings: false`), not operational booking rules. **Run `php artisan migrate`** and `php artisan test`. See [Phase 10](docs/PHASE_10_POLICY_DRAFTS.md).
