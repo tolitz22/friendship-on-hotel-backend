@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CatalogEditController;
 use App\Http\Controllers\Api\GuestController;
+use App\Http\Controllers\Api\MaintenanceWorkOrderController;
 use App\Http\Controllers\Api\PropertyCatalogSummaryController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HotelController;
@@ -37,6 +38,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-simulation', ReservationScenarioController::class);
             Route::get('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'show']);
             Route::get('/reservation-policy-readiness', ReservationPolicyReadinessController::class);
+            Route::get('/maintenance-work-orders', [MaintenanceWorkOrderController::class, 'index']);
+            Route::get('/maintenance-work-orders/{order}', [MaintenanceWorkOrderController::class, 'show'])->whereNumber('order');
+            Route::get('/maintenance-work-orders/{order}/history', [MaintenanceWorkOrderController::class, 'history'])->whereNumber('order');
             Route::get('/guests', [GuestController::class, 'index']);
             Route::get('/guests/{guest}', [GuestController::class, 'show'])->whereNumber('guest');
             Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
@@ -50,6 +54,8 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/room-types/{type}', [CatalogEditController::class, 'updateType'])->whereNumber('type');
                 Route::patch('/rooms/{room}', [CatalogEditController::class, 'updateRoom'])->whereNumber('room');
                 Route::get('/catalog-audit', [CatalogEditController::class, 'audit']);
+                Route::post('/maintenance-work-orders', [MaintenanceWorkOrderController::class, 'store']);
+                Route::patch('/maintenance-work-orders/{order}', [MaintenanceWorkOrderController::class, 'update'])->whereNumber('order');
                 Route::post('/guests', [GuestController::class, 'store']);
                 Route::patch('/guests/{guest}', [GuestController::class, 'update'])->whereNumber('guest');
             });
