@@ -153,6 +153,11 @@ final class FolioAccountingService
             if ($payment->status !== 'pending_review') {
                 throw new HttpException(409, 'Only pending payment records may be reviewed.');
             }
+            if ($payment->method === 'bank_transfer' && (int) $payment->recorded_by === $actor
+                && $input['decision'] === 'confirm') {
+                throw new HttpException(403, 'Bank transfer confirmation requires a different administrator.');
+            }
+
             DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
                 ->where('id', $paymentId)->update([
                     'status' => $input['decision'] === 'confirm' ? 'staff_confirmed' : 'rejected',
