@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\RoomCatalogController;
 use App\Http\Controllers\Api\ReservationRecordController;
 use App\Http\Controllers\Api\ReservationBookingController;
 use App\Http\Controllers\Api\FrontDeskReservationController;
+use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\RoomInventoryController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
@@ -51,6 +52,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-demand', ReservationDemandReportController::class);
             Route::get('/room-type-availability', [RoomInventoryController::class, 'availability']);
             Route::get('/front-desk/manifest', [FrontDeskReservationController::class, 'manifest']);
+            Route::get('/rate-plans', [ReservationFinanceController::class, 'rates']);
+            Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
+            Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking');
             Route::get('/reservation-simulation', ReservationScenarioController::class);
             Route::get('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'show']);
             Route::get('/reservation-policy-readiness', ReservationPolicyReadinessController::class);
@@ -79,6 +83,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/inventory-blocks', [RoomInventoryController::class, 'block']);
                 Route::post('/inventory-blocks/{block}/release', [RoomInventoryController::class, 'release'])->whereNumber('block');
                 Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])->whereNumber('booking');
+                Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
                 Route::post('/bookings', [ReservationBookingController::class, 'store']);
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
