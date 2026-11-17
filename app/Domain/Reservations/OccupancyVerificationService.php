@@ -71,7 +71,8 @@ final class OccupancyVerificationService
         return [
             'data' => $page->getCollection()->map(fn (object $row) => $this->present($row))->values(),
             'meta' => ['page' => $page->currentPage(), 'perPage' => $page->perPage(),
-                'total' => $page->total(), 'totalPages' => $page->lastPage()],
+                'total' => $page->total(), 'totalPages' => $page->lastPage(),
+                'hotelDate' => now($hotel->timezone ?: 'Asia/Manila')->toDateString()],
         ];
     }
 
