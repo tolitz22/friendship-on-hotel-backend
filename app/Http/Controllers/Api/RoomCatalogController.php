@@ -42,6 +42,7 @@ class RoomCatalogController
 
         // Serialize changes to physical room capacity with booking/block writers.
         $result = DB::transaction(function () use ($hotel, $data): array {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $type = $hotel->roomTypes()->whereKey($data['roomTypeId'])->lockForUpdate()->first();
             if (! $type) {
                 throw ValidationException::withMessages(['roomTypeId' => ['The room type does not belong to this property.']]);
