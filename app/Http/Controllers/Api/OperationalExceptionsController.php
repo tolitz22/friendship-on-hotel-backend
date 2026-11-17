@@ -115,6 +115,10 @@ final class OperationalExceptionsController
             ->get(['ev.id', 'ev.actor_id', 'ev.event_type', 'ev.created_at',
                 'booking.id as booking_id', 'booking.reference']), 'reservation activity');
 
+        if (count($items) > 2000) {
+            throw new HttpException(422, 'Too many exception records for synchronous review. No partial totals returned.');
+        }
+
         $counts = ['critical' => 0, 'attention' => 0, 'review' => 0];
         foreach ($items as $item) {
             $counts[$item['severity']]++;
