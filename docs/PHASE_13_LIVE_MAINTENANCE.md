@@ -107,3 +107,7 @@ These tests and source files have been published, but passing CI, local migratio
 Reservation creation, live occupancy, housekeeping, billing, front desk actions and operational reports remain mock previews or unimplemented. The old Maintenance mock experience is preserved in mock mode. This milestone does not enable booking or inventory blocking.
 
 Next: dedicated maintenance scheduling and approved room-night inventory blocks, or live Housekeeping tasks, depending on confirmed hotel operational requirements.
+
+## Phase 15 permission supersession
+
+Phase 15 changes the earlier admin-only PATCH behavior: assigned active maintenance members may now update the status/note of their **own linked `assigned_user_id` tickets**, with existing revision, audit and transition checks. Admins still control creation and assignments; free-text `assigned_to` names confer no permission. See `docs/PHASE_15_STAFF_PERMISSIONS.md`.
