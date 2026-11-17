@@ -186,3 +186,49 @@ it('does not invent a priced folio for legacy reservations', function (): void {
         'amountMinor' => 1000, 'reason' => 'No priced folio',
     ])->assertNotFound();
 });
+
+
+it('reverses an unpaid priced booking atomically without claiming a refund', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-11-20 10:00:00 Asia/Manila'));
+    [$hotel, $type, $guest, $actor, $booking] = phase25Fixture();
+    $base = phase25Base($hotel, $booking);
+    $this->postJson($base.'/cancel-priced-unpaid')->assertOk()
+        ->assertJsonPath('data.status', 'cancelled')
+        ->assertJsonPath('data.roomChargesReversedMinor', 500000)
+        ->assertJsonPath('data.refundIssued', false);
+    $this->postJson($base.'/cancel-priced-unpaid')->assertStatus(409);
+    $this->getJson($base.'/folio-ledger')->assertOk()
+        ->assertJsonPath('data.summary.roomSubtotalMinor', 500000)
+        ->assertJsonPath('data.summary.creditsMinor', 500000)
+        ->assertJsonPath('data.summary.netRecordedChargesMinor', 0)
+        ->assertJsonPath('data.summary.isSettled', false);
+    expect(DB::table('folio_adjustments')->count())->toBe(1);
+    expect(DB::table('reservation_records')->find($booking)->lifecycle_state)->toBe('cancelled');
+    expect(DB::table('reservation_booking_events')->where('event_type', 'cancelled_priced_unpaid')->count())->toBe(1);
+});
+
+it('refuses priced cancellation whenever payment evidence exists', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-11-20 10:00:00 Asia/Manila'));
+    [$hotel, $type, $guest, $actor, $booking] = phase25Fixture();
+    $base = phase25Base($hotel, $booking);
+    $this->postJson($base.'/payment-records', [
+        'requestKey' => 'cancellation-pmt-001', 'method' => 'bank_transfer',
+        'reference' => 'TRANSFER-CANCEL-001', 'amountMinor' => 100000,
+    ])->assertCreated();
+    $this->postJson($base.'/cancel-priced-unpaid')->assertStatus(409);
+    expect(DB::table('folio_adjustments')->count())->toBe(0);
+    expect(DB::table('reservation_records')->find($booking)->lifecycle_state)->toBe('confirmed');
+});
+
+it('refuses priced cancellation on manually adjusted folios', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-11-20 10:00:00 Asia/Manila'));
+    [$hotel, $type, $guest, $actor, $booking] = phase25Fixture();
+    $base = phase25Base($hotel, $booking);
+    $this->postJson($base.'/folio-adjustments', [
+        'requestKey' => 'cancellation-adj-001', 'kind' => 'credit',
+        'amountMinor' => 10000, 'reason' => 'Manager adjustment',
+    ])->assertCreated();
+    $this->postJson($base.'/cancel-priced-unpaid')->assertStatus(409);
+    expect(DB::table('folio_adjustments')->count())->toBe(1);
+    expect(DB::table('reservation_records')->find($booking)->lifecycle_state)->toBe('confirmed');
+});
