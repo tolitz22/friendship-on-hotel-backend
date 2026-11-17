@@ -103,3 +103,10 @@ The frontend may set `VITE_AUTH_MODE=cookie` with backend `SPA_SESSION_ENABLED=t
 ## Phase 18 — Invitation onboarding
 
 API-mode Hotel staff now exposes administrator-only invitation issue/list/revoke endpoints. The public token-based `POST /api/v1/auth/accept-invitation` creates a verified account and hotel membership after secure password setup. The frontend uses `/accept-invitation`; the backend builds this link from trusted `STAFF_INVITE_URL`. See `docs/PHASE_18_STAFF_INVITATIONS.md`.
+
+
+## Phase 20 — Initial admin-only booking writes (2026-11-17)
+
+Backend `main` now includes `POST /api/v1/hotels/{hotel}/bookings` and `POST /api/v1/hotels/{hotel}/bookings/{booking}/cancel` for active hotel administrators with `hotel:write`. Bookings sell a room type, count registered rooms per night, are created `confirmed`, and require an existing property-scoped guest plus an idempotency key. A booked room remains unassigned. Cancellation releases demand and writes an audit event.
+
+**Do not connect the existing React booking wizard yet.** It still assumes mock rate quotes, operations and availability states that are not provided by this Phase 20 API. The new backend has no integrated maintenance blocks, payments, pricing, reservation amendments, or checkout/assignment workflow. See `docs/PHASE_20_LIVE_RESERVATIONS.md`. API mode can continue using previously integrated real Guest, Catalogue, Staff and Maintenance endpoints. Before enabling a live booking UI, run the backend tests and MySQL/PostgreSQL concurrency tests and design a frontend contract that does not claim real pricing or room readiness.
