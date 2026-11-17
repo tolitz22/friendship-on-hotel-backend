@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
+use App\Support\TaskStaffAccess;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -41,6 +42,7 @@ final class HousekeepingTaskController
             'type' => $row->type,
             'status' => $row->status,
             'assignedTo' => $row->assigned_to,
+            'assignedUserId' => $row->assigned_user_id===null?null:(string)$row->assigned_user_id,
             'dueAt' => $row->due_at,
             'completedAt' => $row->completed_at,
             'revision' => (int) $row->revision,
@@ -53,6 +55,7 @@ final class HousekeepingTaskController
         return [
             'status' => $row->status,
             'assignedTo' => $row->assigned_to,
+            'assignedUserId' => $row->assigned_user_id===null?null:(string)$row->assigned_user_id,
             'dueAt' => $row->due_at,
         ];
     }
@@ -103,16 +106,19 @@ final class HousekeepingTaskController
             'roomId'=>['required','integer','min:1'],
             'type'=>['required',Rule::in(self::TYPES)],
             'assignedTo'=>['sometimes','nullable','string','max:120'],
+            'assignedUserId'=>['sometimes','nullable','integer','min:1'],
             'dueAt'=>['sometimes','nullable','date_format:Y-m-d H:i:s'],
             'note'=>['sometimes','nullable','string','max:2000'],
         ]);
         if (!$hotel->rooms()->whereKey($data['roomId'])->exists()) {
             throw ValidationException::withMessages(['roomId'=>['Select a room belonging to this hotel.']]);
         }
+        TaskStaffAccess::verifyAssignee($hotel,isset($data['assignedUserId'])?(int)$data['assignedUserId']:null,'housekeeping');
         $id=DB::transaction(function () use ($hotel,$request,$data): int {
             $id=DB::table('housekeeping_tasks')->insertGetId([
                 'hotel_id'=>$hotel->id, 'room_id'=>$data['roomId'], 'type'=>$data['type'],
                 'status'=>'todo', 'assigned_to'=>$data['assignedTo']??null,
+                'assigned_user_id'=>$data['assignedUserId']??null,
                 'due_at'=>$data['dueAt']??null, 'revision'=>1,
                 'created_by'=>$request->user()->id, 'created_at'=>now(), 'updated_at'=>now(),
             ]);
@@ -136,10 +142,14 @@ final class HousekeepingTaskController
             $row=DB::table('housekeeping_tasks')
                 ->where('hotel_id',$hotel->id)->where('id',$task)->lockForUpdate()->first();
             abort_if($row===null,404);
+            if (!TaskStaffAccess::canOperate($request,$hotel,$row,'housekeeping')) abort(403);
+            if (!TaskStaffAccess::isAdmin($request,$hotel)
+                && (array_key_exists('assignedTo',$data)||array_key_exists('assignedUserId',$data)||array_key_exists('dueAt',$data))) abort(403);
+            if (array_key_exists('assignedUserId',$data)) TaskStaffAccess::verifyAssignee($hotel,$data['assignedUserId']===null?null:(int)$data['assignedUserId'],'housekeeping');
             if ((int)$row->revision!==(int)$data['expectedRevision']) return ['conflict'=>true];
 
             $changes=[];
-            foreach (['status'=>'status','assignedTo'=>'assigned_to','dueAt'=>'due_at'] as $key=>$column) {
+            foreach (['status'=>'status','assignedTo'=>'assigned_to','assignedUserId'=>'assigned_user_id','dueAt'=>'due_at'] as $key=>$column) {
                 if (array_key_exists($key,$data)) $changes[$column]=$data[$key];
             }
             if (isset($changes['status']) && $changes['status']!==$row->status
