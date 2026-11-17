@@ -67,3 +67,7 @@ React now allows hotel administrators to update existing room/type catalogue met
 ## Phase 9 diagnostic continuity
 
 React API mode now offers a read-only Demand diagnostic screen, backed by `/api/v1/hotels/{hotel}/reservation-demand`. It includes per-night unassigned/assigned provisional records with prominent non-availability warnings. The existing Reservations calendar, quote and booking wizard remain mock previews. Neither backend nor frontend enables reservation mutation. See `docs/PHASE_9_RESERVATION_DEMAND.md`.
+
+## Phase 10 — Booking policy draft planning
+
+React API mode now exposes the hotel policy draft editor and revision history via `/reservation-policy-draft` endpoints. Drafts store explicit preliminary choices only, with no approval or activation. The backend still has no reservation create/update API. See `docs/PHASE_10_POLICY_DRAFTS.md`.
