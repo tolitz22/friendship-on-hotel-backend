@@ -216,3 +216,32 @@ it('rejects a replacement after initial mock authorization is revoked and permit
     expect(DB::table('keycard_authorizations')->where('id', $replacement)->value('status'))
         ->toBe('rejected');
 });
+
+it('retires only mock keycard authorizations as part of successful hotel checkout', function (): void {
+    $fx = phase54Fixture();
+    $booking = phase54CheckedIn($fx, $this);
+    $endpoint = $fx['base'].'/keycard-authorizations';
+
+    Sanctum::actingAs($fx['reception'], ['hotel:read', 'booking:write']);
+    $id = $this->postJson($endpoint, [
+        'idempotencyKey' => 'p54-checkout-initial-'.uniqid(),
+        'kind' => 'initial', 'bookingId' => (int) $booking,
+        'reason' => 'Guest currently checked in and room assignment verified.',
+    ])->assertCreated()->assertJsonPath('data.status', 'authorized_mock')->json('data.id');
+
+    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
+    $date = now('Asia/Manila')->addDays(2)->toDateString();
+    $this->travelTo(new DateTimeImmutable($date.' 10:00:00 Asia/Manila'));
+    $this->postJson($fx['base'].'/bookings/'.$booking.'/check-out')
+        ->assertOk()->assertJsonPath('data.status', 'checked_out');
+    $this->getJson($endpoint)->assertOk()
+        ->assertJsonPath('data.0.status', 'revoked')
+        ->assertJsonPath('data.0.physicalCardEncoded', false);
+    expect(DB::table('keycard_authorizations')->where('id', $id)->value('revoked_by'))
+        ->toBe($fx['manager']->id);
+    expect(DB::table('keycard_authorization_events')->where('authorization_id', $id)
+        ->orderBy('id')->pluck('event')->all())->toBe(['requested', 'authorized_mock', 'revoked']);
+    $this->postJson($fx['base'].'/bookings/'.$booking.'/check-out')->assertStatus(409);
+    expect(DB::table('keycard_authorization_events')->where('authorization_id', $id)
+        ->where('event', 'revoked')->count())->toBe(1);
+});
