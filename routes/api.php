@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CatalogEditController;
 use App\Http\Controllers\Api\GuestController;
 use App\Http\Controllers\Api\PropertyCatalogSummaryController;
 use App\Http\Controllers\Api\HealthController;
@@ -36,6 +37,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
                 Route::post('/rooms', [RoomCatalogController::class, 'createRoom']);
+                Route::patch('/room-types/{type}', [CatalogEditController::class, 'updateType'])->whereNumber('type');
+                Route::patch('/rooms/{room}', [CatalogEditController::class, 'updateRoom'])->whereNumber('room');
+                Route::get('/catalog-audit', [CatalogEditController::class, 'audit']);
                 Route::post('/guests', [GuestController::class, 'store']);
                 Route::patch('/guests/{guest}', [GuestController::class, 'update'])->whereNumber('guest');
             });
