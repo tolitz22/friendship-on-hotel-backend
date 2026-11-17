@@ -44,9 +44,12 @@ final class EnsureHotelPermission
 
         $allowed = in_array($permission, self::ROLE_PERMISSIONS[$membership->role] ?? [], true);
 
-        // Existing admin write tokens are still required for admin actions.
-        // A receptionist's read token can only write through explicitly mapped routes.
-        if (! $allowed || ($membership->role === 'admin' && ! $user->tokenCan('hotel:write'))) {
+        // Admin tokens require the legacy write ability. Receptionist tokens
+        // require an explicitly issued booking capability (never read alone).
+        $tokenAllowed = $membership->role === 'admin'
+            ? $user->tokenCan('hotel:write')
+            : $user->tokenCan('booking:write');
+        if (! $allowed || ! $tokenAllowed) {
             abort(403, 'Your hotel role does not permit this operation.');
         }
 
