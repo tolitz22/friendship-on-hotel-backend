@@ -147,3 +147,8 @@ The React/Vite frontend's Billing page, when `VITE_DATA_SOURCE=api`, includes an
 ## Phase 27 — Finance event inbox and review boundaries
 
 Backend `main` adds a disabled-by-default signed generic HMAC event inbox at `POST /api/v1/integrations/finance/custom-hmac-v1/events`, admin matching at `POST /hotels/{hotel}/bookings/{booking}/finance-event-reviews`, and read-only review listing at `GET /hotels/{hotel}/bookings/{booking}/finance-event-reviews`. The event transport is an internal **adapter protocol**, not a deployed provider/bank integration. Reference matches do not verify settlement and must not change financial UI to `paid`, `refunded`, or `settled`. Admin-only `POST /finance/charge-policy-drafts/{policy}/review` records independent review but not legal tax validation or activation. Preserve React Billing's read-only live folio lookup and demo-only general folio table until provider-specific, tax-authoritative backend contracts are implemented. See `docs/PHASE_27_SIGNED_FINANCE_EVENTS.md`.
+
+
+## Phase 28 — PayMongo sandbox event observation only
+
+The backend now supports a test-mode PayMongo webhook at `POST /api/v1/integrations/paymongo/sandbox/events` and an admin-scoped read inbox at `GET /api/v1/hotels/{hotel}/finance/paymongo-sandbox/events`. This verifies test transport signatures and stores limited event metadata only. It does not create checkout sessions, collect real funds, mark payments settled, change folio balances, or execute refunds. The React/Vite Billing live ledger lookup remains read-only, and the main billing table remains demo-only. See `docs/PHASE_28_PAYMONGO_SANDBOX.md`. Do not display a Pay Now action until actual charge totals, invoice/tax policy and provider settlement are implemented.
