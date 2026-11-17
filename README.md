@@ -170,3 +170,7 @@ Added hotel-scoped housekeeping task and event tables with active-member reads, 
 ## Phase 15 — Hotel Staff and Least-Privilege Task Assignments
 
 Added admin-managed hotel membership roles (`admin`, `front_desk`, `housekeeping`, `maintenance`), immutable staff-event audit history, and linked user assignments on housekeeping/maintenance tasks. Assigned workers can update only their own task status and notes, **without admin rights**. A new migration is required (`php artisan migrate`); controlled developer provisioning is available via `php artisan hotel:staff-user email@example.com "Staff Name"`. See [Phase 15](docs/PHASE_15_STAFF_PERMISSIONS.md). Secure production invitations/password-reset and SPA session authentication are still pending.
+
+## Phase 16 — Staff Password Security
+
+Staff can request emailed password resets, redeem one-use broker reset tokens, and change passwords while signed in. All Sanctum API tokens are revoked on successful password reset/change, and account-enumeration-safe recovery responses are returned. Configure `STAFF_PASSWORD_RESET_URL` and the mail transport in `.env`; development mail logging is **not** production delivery. No new migration. See [Phase 16](docs/PHASE_16_STAFF_PASSWORD_SECURITY.md). Cookie-based SPA authentication and secure invitation onboarding remain future work.
