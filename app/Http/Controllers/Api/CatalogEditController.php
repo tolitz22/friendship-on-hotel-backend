@@ -99,9 +99,12 @@ final class CatalogEditController
                         $query->where('assigned_room_id', $room->id)
                             ->orWhere('room_type_id', $room->room_type_id);
                     })->exists();
-                if ($referenced) {
+                $destinationReferenced = DB::table('reservation_records')
+                    ->where('hotel_id', $hotel->id)
+                    ->where('room_type_id', $newType->id)->exists();
+                if ($referenced || $destinationReferenced) {
                     throw ValidationException::withMessages([
-                        'roomTypeId' => ['Room type reassignment is blocked when the room or its current type has reservation records.'],
+                        'roomTypeId' => ['Room type reassignment is blocked when the room, its current type or destination type has reservation records.'],
                     ]);
                 }
                 $room->room_type_id = $newType->id;
