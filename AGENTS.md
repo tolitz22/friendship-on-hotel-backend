@@ -33,3 +33,7 @@ Review `docs/RESERVATION_DOMAIN.md` and `docs/PHASE_2.md`. `StayPeriod` uses hal
 ## Cross-engine database compatibility
 
 MySQL 8.4 and PostgreSQL 16+ are both supported targets. Read `docs/DATABASE_COMPATIBILITY.md`. Do not add a PostgreSQL-only migration or inventory SQL without adding a MySQL-equivalent implementation and tests. Protect reservation room/type composite constraints, valid positive date ranges, and tenant scoping across both databases. Use SQLite only as fast test support, not a substitute for production-engine verification.
+
+## Backend Phase 3
+
+Read `docs/PHASE_3.md`. The room-conflict diagnostic is scoped to one physical room and supplied date window. It is read-only and explicitly not an availability function. Do not let the absence of collision pairs trigger a booking, room release, price quote, or check-in eligibility decision. Preserve both MySQL and PostgreSQL regression coverage.
