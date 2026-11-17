@@ -45,12 +45,19 @@ final class ReservationPolicyDraftController
         foreach (ReservationPolicyDraft::FIELDS as $field => $options) {
             $rules['decisions.'.$field] = ['sometimes', 'nullable', 'string', Rule::in($options)];
         }
+        // Inspect the original submitted object before Laravel strips unvalidated
+        // nested keys. Unknown policy choices must fail, not be silently ignored.
+        $rawDecisions = $request->input('decisions');
+        if (is_array($rawDecisions)) {
+            $unknown = array_diff(array_keys($rawDecisions), array_keys(ReservationPolicyDraft::FIELDS));
+            if ($unknown !== []) {
+                throw ValidationException::withMessages([
+                    'decisions' => ['Unknown policy decision fields: '.implode(', ', $unknown)],
+                ]);
+            }
+        }
         $data = Validator::make($request->all(), $rules)->validate();
         $submitted = $data['decisions'];
-        $unknown = array_diff(array_keys($submitted), array_keys(ReservationPolicyDraft::FIELDS));
-        if ($unknown !== []) {
-            throw ValidationException::withMessages(['decisions' => ['Unknown policy decision fields: '.implode(', ', $unknown)]]);
-        }
 
         $result = DB::transaction(function () use ($hotel, $request, $data, $submitted): array {
             // Serialize draft creation, revision checks and updates across both MySQL/InnoDB and PostgreSQL.
