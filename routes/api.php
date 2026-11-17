@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\RoomCatalogController;
 use App\Http\Controllers\Api\ReservationRecordController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
+use App\Http\Controllers\Api\ReservationPolicyDraftController;
 use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use Illuminate\Support\Facades\Route;
 
@@ -31,12 +32,15 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/catalog-summary', PropertyCatalogSummaryController::class);
             Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
             Route::get('/reservation-demand', ReservationDemandReportController::class);
+            Route::get('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'show']);
             Route::get('/guests', [GuestController::class, 'index']);
             Route::get('/guests/{guest}', [GuestController::class, 'show'])->whereNumber('guest');
             Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
+                Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
+                Route::get('/reservation-policy-draft/history', [ReservationPolicyDraftController::class, 'history']);
                 Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
                 Route::post('/rooms', [RoomCatalogController::class, 'createRoom']);
                 Route::patch('/room-types/{type}', [CatalogEditController::class, 'updateType'])->whereNumber('type');
