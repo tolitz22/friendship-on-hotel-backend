@@ -135,3 +135,10 @@ Backend `main` adds selected-property `GET/POST /rate-plans`, read-only `GET /ro
 ## Phase 25 — Provisional finance ledger and manual evidence review
 
 Backend `main` adds read-only `GET /bookings/{booking}/folio-ledger`, administrator-only `POST /folio-adjustments`, `POST /payment-records`, `POST /payment-records/{payment}/review`, and `POST /cancel-priced-unpaid`, under the scoped hotel/booking prefix. These represent **provisional amounts and manually reviewed evidence only**. No backend response represents tax-complete final payable amounts, a payment gateway reconciliation, actual bank settlement, receipt or refund. The React Billing mock screens must not be relabeled as live payment or settled folio workflows. See `docs/PHASE_25_PROVISIONAL_FINANCE_LEDGER.md`.
+
+
+## Phase 26 — Draft charge preview, refund review and read-only live ledger
+
+The backend exposes hotel-scoped draft fiscal policies (`GET/POST /finance/charge-policy-drafts`), `GET /bookings/{booking}/charge-preview`, and `GET/POST /bookings/{booking}/refund-requests` plus `POST /bookings/{booking}/refund-requests/{refund}/review`. Every draft charge is **hypothetical**, not automatically applied to folios, and every refund approval is **internal only**, not disbursement.
+
+The React/Vite frontend's Billing page, when `VITE_DATA_SOURCE=api`, includes an explicit **read-only** lookup using the authenticated `GET /bookings/{booking}/folio-ledger` endpoint. It does not silently fallback on errors; the original general folio table remains clearly demo-only. Never equate staff-confirmed evidence with settled funds, draft tax with statutory tax, or the provisional difference with final payable balance. See `docs/PHASE_26_FINANCE_POLICY_AND_REFUNDS.md`.
