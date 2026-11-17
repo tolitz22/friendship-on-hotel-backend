@@ -25,6 +25,8 @@ jobs:
           tools: composer:v2
       - name: Install dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
+      - name: Check PHP syntax
+        run: find app routes database tests -type f -name '*.php' -print0 | xargs -0 -r -n1 php -l
       - name: Validate route registration
         run: php artisan route:list --path=api
       - name: Execute feature tests (SQLite)
