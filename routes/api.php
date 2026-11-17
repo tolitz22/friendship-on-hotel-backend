@@ -34,6 +34,7 @@ use App\Http\Controllers\Api\RoomReadinessDashboardController;
 use App\Http\Controllers\Api\RoomInventoryStatusController;
 use App\Http\Controllers\Api\NightAuditPreviewController;
 use App\Http\Controllers\Api\GuestStayHistoryController;
+use App\Http\Controllers\Api\ReservationSpecialRequestController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
@@ -74,6 +75,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-records', [ReservationRecordController::class, 'index'])->middleware('hotel.permission:reservation.read');
             Route::get('/reservation-records/{booking}', [ReservationRecordController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:reservation.read');
             Route::get('/bookings/{booking}/history', ReservationHistoryController::class)->whereNumber('booking')->middleware('hotel.permission:reservation.read');
+            Route::get('/bookings/{booking}/special-requests', [ReservationSpecialRequestController::class,'index'])->whereNumber('booking')->middleware('hotel.permission:reservation.read');
+            Route::post('/bookings/{booking}/special-requests', [ReservationSpecialRequestController::class,'store'])->whereNumber('booking')->middleware('hotel.permission:booking.special_request');
             Route::get('/bookings/{booking}/turnover', ReservationTurnoverController::class)->whereNumber('booking')->middleware('hotel.permission:reservation.read');
             Route::get('/reservation-demand', ReservationDemandReportController::class);
             Route::get('/room-type-availability', [RoomInventoryController::class, 'availability']);
