@@ -212,31 +212,35 @@ final class KeycardAuthorizationService
                 throw new HttpException(409, 'This keycard exception was already handled.');
             }
             if ((int) $row->requested_by === $actor) abort(403);
-            $activeRequester = DB::table('hotel_memberships as m')
-                ->join('users as u', 'u.id', '=', 'm.user_id')
-                ->where('m.hotel_id', $hotel->id)
-                ->where('m.user_id', $row->requested_by)
-                ->where('m.is_active', true)->where('u.is_active', true)
-                ->whereIn('m.role', ['front_desk', 'admin'])->exists();
-            if (! $activeRequester) {
-                throw new HttpException(409, 'Requester no longer has an active authorized hotel role.');
-            }
-            if ($row->kind === 'emergency_access') {
-                if ($row->valid_from !== now($hotel->timezone ?: 'Asia/Manila')->toDateString()) {
-                    throw new HttpException(409, 'Emergency request has expired.');
+            // Rejection is always possible for a pending request. Only
+            // approval must re-qualify the requester and current room/stay.
+            if ($input['decision'] === 'approve') {
+                $activeRequester = DB::table('hotel_memberships as m')
+                    ->join('users as u', 'u.id', '=', 'm.user_id')
+                    ->where('m.hotel_id', $hotel->id)
+                    ->where('m.user_id', $row->requested_by)
+                    ->where('m.is_active', true)->where('u.is_active', true)
+                    ->whereIn('m.role', ['front_desk', 'admin'])->exists();
+                if (! $activeRequester) {
+                    throw new HttpException(409, 'Requester no longer has an active authorized hotel role.');
                 }
-                abort_unless(DB::table('rooms')->where('hotel_id', $hotel->id)
-                    ->where('id', $row->room_id)->exists(), 404);
-            } else {
-                $booking = $this->verifyBooking($hotel, (int) $row->reservation_record_id, (int) $row->room_id);
-                if ($booking->check_in !== $row->valid_from || $booking->check_out !== $row->valid_until) {
-                    throw new HttpException(409, 'Booking dates changed after the request.');
-                }
-                if ($row->kind === 'replacement' && ! DB::table('keycard_authorizations')
-                    ->where('hotel_id', $hotel->id)->where('reservation_record_id', $row->reservation_record_id)
-                    ->where('room_id', $row->room_id)->where('kind', 'initial')
-                    ->where('status', 'authorized_mock')->exists()) {
-                    throw new HttpException(409, 'The original authorization was revoked. Replacement request is no longer eligible.');
+                if ($row->kind === 'emergency_access') {
+                    if ($row->valid_from !== now($hotel->timezone ?: 'Asia/Manila')->toDateString()) {
+                        throw new HttpException(409, 'Emergency request has expired.');
+                    }
+                    abort_unless(DB::table('rooms')->where('hotel_id', $hotel->id)
+                        ->where('id', $row->room_id)->exists(), 404);
+                } else {
+                    $booking = $this->verifyBooking($hotel, (int) $row->reservation_record_id, (int) $row->room_id);
+                    if ($booking->check_in !== $row->valid_from || $booking->check_out !== $row->valid_until) {
+                        throw new HttpException(409, 'Booking dates changed after the request.');
+                    }
+                    if ($row->kind === 'replacement' && ! DB::table('keycard_authorizations')
+                        ->where('hotel_id', $hotel->id)->where('reservation_record_id', $row->reservation_record_id)
+                        ->where('room_id', $row->room_id)->where('kind', 'initial')
+                        ->where('status', 'authorized_mock')->exists()) {
+                        throw new HttpException(409, 'The original authorization was revoked. Replacement request is no longer eligible.');
+                    }
                 }
             }
             $status = $input['decision'] === 'approve' ? 'approved' : 'rejected';
