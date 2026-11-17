@@ -130,3 +130,8 @@ Backend `main` adds read-only `GET /api/v1/hotels/{hotel}/front-desk/manifest?da
 ## Phase 24 — Backend nightly rates and immutable folio snapshots
 
 Backend `main` adds selected-property `GET/POST /rate-plans`, read-only `GET /room-quotes`, and `GET /bookings/{booking}/folio`. Admin bookings may optionally include `ratePlanId` to snapshot room-night charges in minor units and hotel currency. Quote and folio provide room subtotal only: taxes, fees, deposits, payments and final balance are NOT calculated. Priced bookings currently cannot be cancelled or amended because no reversal/repricing workflow exists. Do not wire up the mock billing UI as a functioning invoice/payment screen. See `docs/PHASE_24_FINANCE_FOUNDATION.md`.
+
+
+## Phase 25 — Provisional finance ledger and manual evidence review
+
+Backend `main` adds read-only `GET /bookings/{booking}/folio-ledger`, administrator-only `POST /folio-adjustments`, `POST /payment-records`, `POST /payment-records/{payment}/review`, and `POST /cancel-priced-unpaid`, under the scoped hotel/booking prefix. These represent **provisional amounts and manually reviewed evidence only**. No backend response represents tax-complete final payable amounts, a payment gateway reconciliation, actual bank settlement, receipt or refund. The React Billing mock screens must not be relabeled as live payment or settled folio workflows. See `docs/PHASE_25_PROVISIONAL_FINANCE_LEDGER.md`.
