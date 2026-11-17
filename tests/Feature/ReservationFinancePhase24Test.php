@@ -137,3 +137,28 @@ it('restricts rate plan creation to property admins but allows member reads', fu
         'roomTypeId' => $type->id, 'name' => 'Standard BAR', 'nightlyMinor' => 1,
     ])->assertUnprocessable();
 });
+
+
+it('keeps pre-Phase-24 unpriced idempotency hashes compatible', function (): void {
+    [$hotel, $type, $guest] = phase24Hotel();
+    phase24Staff($hotel);
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $payload = [
+        'idempotencyKey' => 'legacy-key-before-phase24',
+        'guestId' => $guest->id, 'roomTypeId' => $type->id,
+        'checkIn' => '2026-12-10', 'checkOut' => '2026-12-12',
+    ];
+    $id = $this->postJson($base.'/bookings', $payload)->assertCreated()->json('data.id');
+
+    $legacyFingerprint = hash('sha256', json_encode([
+        'guestId' => (int) $guest->id, 'roomTypeId' => (int) $type->id,
+        'checkIn' => '2026-12-10', 'checkOut' => '2026-12-12',
+    ], JSON_THROW_ON_ERROR));
+    DB::table('reservation_booking_requests')->where('hotel_id', $hotel->id)
+        ->where('idempotency_key', $payload['idempotencyKey'])
+        ->update(['payload_sha256' => $legacyFingerprint]);
+
+    $this->postJson($base.'/bookings', $payload)->assertOk()
+        ->assertJsonPath('data.id', $id)->assertJsonPath('data.idempotentReplay', true);
+    expect(DB::table('reservation_records')->count())->toBe(1);
+});
