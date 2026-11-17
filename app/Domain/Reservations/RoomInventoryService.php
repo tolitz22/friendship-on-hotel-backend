@@ -76,6 +76,13 @@ final class RoomInventoryService
             ->where('id', $bookingId)->first();
         abort_unless($booking !== null, 404);
 
+        $roomTypeName = DB::table('room_types')
+            ->where('hotel_id', $hotel->id)->where('id', $booking->room_type_id)
+            ->value('name');
+        $currentRoomNumber = $booking->assigned_room_id === null ? null
+            : DB::table('rooms')->where('hotel_id', $hotel->id)
+                ->where('id', $booking->assigned_room_id)->value('number');
+
         $rooms = DB::table('rooms')->where('hotel_id', $hotel->id)
             ->where('room_type_id', $booking->room_type_id)
             ->orderBy('number')->orderBy('id')->paginate($perPage, ['*'], 'page', $page);
@@ -116,6 +123,8 @@ final class RoomInventoryService
                 'hotelId' => (string) $hotel->id,
                 'bookingId' => (string) $bookingId,
                 'roomTypeId' => (string) $booking->room_type_id,
+                'roomTypeName' => (string) $roomTypeName,
+                'currentRoomNumber' => $currentRoomNumber,
                 'checkIn' => $booking->check_in,
                 'checkOut' => $booking->check_out,
                 'page' => $rooms->currentPage(), 'perPage' => $rooms->perPage(),
