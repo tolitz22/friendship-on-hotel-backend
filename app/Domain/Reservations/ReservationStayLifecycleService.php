@@ -14,13 +14,13 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
  */
 final class ReservationStayLifecycleService
 {
-    public function transition(Hotel $hotel, int $actor, int $bookingId, string $operation): array
+    public function transition(Hotel $hotel, int $actor, int $bookingId, string $operation, ?int $earlyApprovalId = null): array
     {
         if (! in_array($operation, ['check_in', 'check_out'], true)) {
             throw new \InvalidArgumentException('Unsupported reservation transition.');
         }
 
-        return DB::transaction(function () use ($hotel, $actor, $bookingId, $operation): array {
+        return DB::transaction(function () use ($hotel, $actor, $bookingId, $operation, $earlyApprovalId): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $snapshot = DB::table('reservation_records')
                 ->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
@@ -43,9 +43,27 @@ final class ReservationStayLifecycleService
             // Default front-desk policy: no advance check-in and no
             // premature checkout (early departures need an amendment workflow).
             $hotelDate = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
-            if ($operation === 'check_in'
-                && ($hotelDate < $record->check_in || $hotelDate >= $record->check_out)) {
-                throw new HttpException(409, 'Check-in is allowed from arrival day until departure day.');
+            $early = $operation === 'check_in' && $hotelDate < $record->check_in;
+            $earlyApproval = null;
+            if ($early) {
+                // Only the manager approval service can supply this ID.
+                // Public check-in always calls transition without an approval.
+                if ($earlyApprovalId === null
+                    || \Carbon\CarbonImmutable::parse($record->check_in, $hotel->timezone ?: 'Asia/Manila')
+                        ->subDay()->toDateString() !== $hotelDate) {
+                    throw new HttpException(409, 'Early check-in requires a manager-approved request for the day before arrival.');
+                }
+                $earlyApproval = DB::table('manager_approval_requests')
+                    ->where('hotel_id', $hotel->id)->where('reservation_record_id', $record->id)
+                    ->where('id', $earlyApprovalId)->where('action', 'early_check_in')
+                    ->where('status', 'pending')->lockForUpdate()->first();
+                if ($earlyApproval === null || (int) $earlyApproval->requested_by === $actor
+                    || now()->greaterThanOrEqualTo($earlyApproval->expires_at)) {
+                    throw new HttpException(409, 'Early check-in manager approval is invalid or expired.');
+                }
+            }
+            if ($operation === 'check_in' && $hotelDate >= $record->check_out) {
+                throw new HttpException(409, 'The stay has already reached its departure date.');
             }
             if ($operation === 'check_out' && $hotelDate < $record->check_out) {
                 throw new HttpException(409, 'Early check-out requires a separate stay amendment.');
@@ -66,7 +84,7 @@ final class ReservationStayLifecycleService
                     ->where('room_id', $record->assigned_room_id)
                     ->where('is_active', true)
                     ->where('check_in', '<', $record->check_out)
-                    ->where('check_out', '>', $record->check_in)->exists();
+                    ->where('check_out', '>', $early ? $hotelDate : $record->check_in)->exists();
                 if ($blocked) {
                     throw new HttpException(409, 'The assigned room has an active inventory block.');
                 }
@@ -76,7 +94,7 @@ final class ReservationStayLifecycleService
                     ->where('assigned_room_id', $record->assigned_room_id)
                     ->where('id', '!=', $record->id)
                     ->where('check_in', '<', $record->check_out)
-                    ->where('check_out', '>', $record->check_in)
+                    ->where('check_out', '>', $early ? $hotelDate : $record->check_in)
                     ->where(function ($query): void {
                         $query->whereNull('lifecycle_state')->orWhereNotIn(
                             'lifecycle_state',
@@ -132,11 +150,29 @@ final class ReservationStayLifecycleService
                 ]);
             }
 
+            if ($early && $earlyApproval !== null) {
+                DB::table('reservation_early_check_ins')->insert([
+                    'hotel_id' => $hotel->id,
+                    'reservation_record_id' => $record->id,
+                    'approval_request_id' => $earlyApproval->id,
+                    'requested_by' => $earlyApproval->requested_by,
+                    'approved_by' => $actor, 'checked_in_by' => $actor,
+                    'room_id' => $record->assigned_room_id,
+                    'scheduled_check_in' => $record->check_in,
+                    'scheduled_check_out' => $record->check_out,
+                    'actual_check_in_date' => $hotelDate,
+                    'actual_checked_in_at' => now(),
+                    'reason' => $earlyApproval->reason,
+                    'manager_note' => $earlyApproval->review_note ?: 'Approved by hotel manager.',
+                    'created_at' => now(), 'updated_at' => now(),
+                ]);
+            }
+
             DB::table('reservation_booking_events')->insert([
                 'hotel_id' => $hotel->id,
                 'reservation_record_id' => $record->id,
                 'actor_id' => $actor,
-                'event_type' => $operation,
+                'event_type' => $early ? 'early_check_in' : $operation,
                 'old_state' => $expected,
                 'new_state' => $next,
                 'created_at' => now(),
