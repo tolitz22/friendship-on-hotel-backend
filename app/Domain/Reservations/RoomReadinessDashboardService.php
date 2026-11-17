@@ -139,8 +139,12 @@ final class RoomReadinessDashboardService
             ->where('r.lifecycle_state', 'confirmed')
             ->where('r.check_in', '>=', $asOf)->where('r.check_in', '<', $through)
             ->orderBy('r.check_in')->orderBy('r.id')
+            ->limit(2001)
             ->get(['r.id', 'r.reference', 'r.check_in', 'r.check_out',
                 'r.assigned_room_id', 'rm.number as room_number']);
+        if ($arrivals->count() > 2000) {
+            throw new HttpException(422, 'Upcoming arrival count exceeds the synchronous readiness dashboard limit. No partial arrival totals are provided.');
+        }
         $arrivalResults = $arrivals->map(function (object $arrival) use ($roomStatuses): array {
             $roomId = $arrival->assigned_room_id === null ? null : (int) $arrival->assigned_room_id;
             $room = $roomId === null ? null : ($roomStatuses[$roomId] ?? null);
