@@ -137,7 +137,7 @@ it('does not disclose another hotel room readiness dashboard', function (): void
     [$hotel] = phase37Fixture();
     $other = Hotel::create(['name' => 'Another Phase37 Hotel']);
     $url = '/api/v1/hotels/'.$other->id.'/readiness/dashboard';
-    $this->getJson($url)->assertForbidden();
+    $this->getJson($url)->assertNotFound();
     $this->getJson('/api/v1/hotels/'.$hotel->id.'/readiness/dashboard')
         ->assertOk()->assertJsonPath('data.summary.totalRooms', 2);
 });
