@@ -155,6 +155,11 @@ final class CashierShiftService
                 throw new HttpException(403, 'Only the owning cashier can record cash in their open shift.');
             }
             $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId);
+            $lifecycle = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->value('lifecycle_state');
+            if (! in_array($lifecycle, ['confirmed', 'checked_in', 'checked_out'], true)) {
+                throw new HttpException(409, 'Cash collection requires an active or completed registered stay.');
+            }
             if ($folio->currency !== $shift->currency) {
                 throw new HttpException(409, 'Folio currency does not match the shift.');
             }
