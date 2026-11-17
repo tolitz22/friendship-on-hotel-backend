@@ -165,7 +165,7 @@ final class OperationalExceptionsController
         string $reference, string $reason, string $suggestion, string $recordDate): array
     {
         return [
-            'id' => $type.':'.$bookingId.':'.substr(hash('sha256', $reason.$recordDate), 0, 12),
+            'id' => $type.':'.$bookingId.':'.substr(hash('sha256', $reason.$suggestion.$recordDate), 0, 12),
             'type' => $type, 'severity' => $severity,
             'bookingId' => (string) $bookingId, 'reference' => $reference,
             'reason' => $reason, 'suggestion' => $suggestion, 'recordDate' => $recordDate,
