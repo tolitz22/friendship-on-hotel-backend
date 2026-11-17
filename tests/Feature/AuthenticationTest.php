@@ -39,3 +39,39 @@ it('denies access to a disabled staff account', function (): void {
         'password' => 'a-long-password',
     ])->assertUnprocessable();
 });
+
+
+it('lists only active hotel memberships for frontend property selection', function (): void {
+    $user = User::create([
+        'name' => 'Hotel Staff',
+        'email' => 'staff-context@example.test',
+        'password' => 'secure-test-password',
+    ]);
+    $active = \App\Models\Hotel::create(['name' => 'Friendship On Hotel']);
+    $inactive = \App\Models\Hotel::create(['name' => 'Inactive Membership Hotel']);
+    \App\Models\HotelMembership::create([
+        'hotel_id' => $active->id,
+        'user_id' => $user->id,
+        'role' => 'admin',
+        'is_active' => true,
+    ]);
+    \App\Models\HotelMembership::create([
+        'hotel_id' => $inactive->id,
+        'user_id' => $user->id,
+        'role' => 'front_desk',
+        'is_active' => false,
+    ]);
+
+    $response = $this->postJson('/api/v1/auth/login', [
+        'email' => 'staff-context@example.test',
+        'password' => 'secure-test-password',
+    ])->assertOk();
+
+    $this->withToken($response->json('data.token'))
+        ->getJson('/api/v1/auth/me')
+        ->assertOk()
+        ->assertJsonCount(1, 'data.hotels')
+        ->assertJsonPath('data.hotels.0.id', (string) $active->id)
+        ->assertJsonPath('data.hotels.0.name', 'Friendship On Hotel')
+        ->assertJsonPath('data.hotels.0.role', 'admin');
+});
