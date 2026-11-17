@@ -91,3 +91,7 @@ React API mode now uses `housekeeping-tasks` list/detail/history and admin creat
 ## Phase 15 — Hotel staff and assigned workers
 
 The API-mode frontend now offers `Hotel staff` to administrators and linked `assignedUserId` selectors on live housekeeping/maintenance forms. Active assigned role members may PATCH only the status and note of their own linked task; the API retains server-side authorization. Legacy assignment strings grant no rights. See `docs/PHASE_15_STAFF_PERMISSIONS.md`.
+
+## Phase 16 — Staff account recovery
+
+React API mode adds public `/forgot-password` and `/reset-password` routes plus authenticated `/change-password`; Laravel provides matching password broker endpoints and revokes all personal access tokens on reset/change. Backend SMTP and `STAFF_PASSWORD_RESET_URL` configuration are required for delivery. See `docs/PHASE_16_STAFF_PASSWORD_SECURITY.md`.
