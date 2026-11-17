@@ -79,3 +79,7 @@ The live Booking policies page now consumes the backend's scoped GET `/reservati
 ## Phase 12 — Stay simulator
 
 React API mode adds the read-only Stay simulator based on `GET /api/v1/hotels/{hotel}/reservation-simulation` with room ID and inclusive/exclusive date range. It presents assigned-room overlaps, unassigned type demand and other assigned records without claiming availability or activating booking writes. See `docs/PHASE_12_RESERVATION_SIMULATION.md`.
+
+## Phase 13 live maintenance
+
+React API mode now consumes `maintenance-work-orders` (scoped list, detail, history, creation and update). Staff read, admins write. Room impact remains an informational flag and cannot block bookable inventory or alter reservations. See `docs/PHASE_13_LIVE_MAINTENANCE.md`.
