@@ -135,6 +135,7 @@ final class HousekeepingTaskController
             'expectedRevision'=>['required','integer','min:1'],
             'status'=>['sometimes',Rule::in(self::STATUSES)],
             'assignedTo'=>['sometimes','nullable','string','max:120'],
+            'assignedUserId'=>['sometimes','nullable','integer','min:1'],
             'dueAt'=>['sometimes','nullable','date_format:Y-m-d H:i:s'],
             'note'=>['sometimes','nullable','string','max:2000'],
         ]);
