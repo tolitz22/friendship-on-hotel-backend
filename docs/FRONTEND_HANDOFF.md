@@ -152,3 +152,17 @@ Backend `main` adds a disabled-by-default signed generic HMAC event inbox at `PO
 ## Phase 28 — PayMongo sandbox event observation only
 
 The backend now supports a test-mode PayMongo webhook at `POST /api/v1/integrations/paymongo/sandbox/events` and an admin-scoped read inbox at `GET /api/v1/hotels/{hotel}/finance/paymongo-sandbox/events`. This verifies test transport signatures and stores limited event metadata only. It does not create checkout sessions, collect real funds, mark payments settled, change folio balances, or execute refunds. The React/Vite Billing live ledger lookup remains read-only, and the main billing table remains demo-only. See `docs/PHASE_28_PAYMONGO_SANDBOX.md`. Do not display a Pay Now action until actual charge totals, invoice/tax policy and provider settlement are implemented.
+
+
+## Frontend Phase 32 — Real room assignment, check-in/out and booking audit history
+
+Frontend `main` now opens administrator reservation operations from real saved records. The existing backend assignment and lifecycle endpoints are connected:
+`PATCH /hotels/{hotel}/bookings/{booking}/assign-room`,
+`POST /hotels/{hotel}/bookings/{booking}/check-in`, and
+`POST /hotels/{hotel}/bookings/{booking}/check-out`.
+
+To support a real, non-mocked event timeline, backend `main` adds read-only, hotel-member scoped
+`GET /hotels/{hotel}/bookings/{booking}/history?page=1&per_page=20`.
+This returns recorded booking events, actor IDs, old/new state and timestamps. It is **not** a financial audit, guest identity verification or evidence of room readiness. It is covered by `tests/Feature/ReservationHistoryPhase32Test.php`.
+
+The frontend reads physical rooms and active dated blocks before enabling assignment, but the Laravel transaction remains the source of truth for collisions and maintenance blocks. Frontend check-in/out buttons require explicit staff UI acknowledgement; that acknowledgement is **not recorded by Laravel**. Check-out generates the existing linked `checkout_clean` task. No automatic payment, settlement, identity approval, housekeeper attestation or early departure is enabled. All POST/PATCH operations require property administration. See frontend `docs/API_CONTRACT.md` Phase 32.
