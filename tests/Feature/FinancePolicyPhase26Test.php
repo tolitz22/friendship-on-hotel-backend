@@ -19,7 +19,7 @@ function phase26Fixture(): array
     $staff = User::create(['name' => 'Finance Author', 'email' => uniqid('p26a-').'@example.test', 'password' => 'Password123456!']);
     HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $staff->id, 'role' => 'admin', 'is_active' => true]);
     Sanctum::actingAs($staff, ['hotel:read', 'hotel:write']);
-    $rate = $testRate = DB::table('room_rate_plans')->insertGetId([
+    $rate = DB::table('room_rate_plans')->insertGetId([
         'hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'name' => 'BAR',
         'nightly_minor' => 10001, 'currency' => 'PHP', 'is_active' => true,
         'created_by' => $staff->id, 'created_at' => now(), 'updated_at' => now(),
