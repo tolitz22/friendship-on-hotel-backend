@@ -52,8 +52,9 @@ it('executes one independent manager-approved cancellation with complete audit h
         ->assertJsonPath('data.payload', [])->json('data.id');
     // The JSON wire shape must be an object, not PHP's [] array
     // (which breaks strict frontend validation in the manager inbox).
-    $this->assertSame('{}', json_encode($this->getJson($base.'/approval-requests')
-        ->assertOk()->json('data.0.payload'), JSON_FORCE_OBJECT));
+    $inbox = $this->getJson($base.'/approval-requests')->assertOk();
+    expect(json_decode($inbox->getContent(), false, 512, JSON_THROW_ON_ERROR)
+        ->data[0]->payload)->toBeInstanceOf(\stdClass::class);
     $this->postJson($endpoint, $request)->assertCreated()->assertJsonPath('data.id', $approval);
     $this->postJson($endpoint, array_merge($request, ['reason' => 'Changed request reason']))
         ->assertStatus(409);
