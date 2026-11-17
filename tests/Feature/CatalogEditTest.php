@@ -135,3 +135,26 @@ it('enforces admin membership, token abilities and catalogue uniqueness', functi
     $this->patchJson($url,['floor'=>-1])->assertUnprocessable();
     expect(DB::table('catalog_audit_logs')->count())->toBe(0);
 });
+
+it('blocks room-type moves into categories already referenced by unassigned reservations', function (): void {
+    $hotel=Hotel::create(['name'=>'Destination Inventory Hotel']);
+    [$standard,$room]=editCatalogSeed($hotel);
+    $suite=RoomType::create(['hotel_id'=>$hotel->id,'name'=>'Suite','max_occupancy'=>4]);
+    editReservation($hotel,$suite,null,'SUITE-DEMAND');
+    editCatalogStaff($hotel);
+
+    $this->patchJson('/api/v1/hotels/'.$hotel->id.'/rooms/'.$room->id, [
+        'roomTypeId'=>(string)$suite->id,
+    ])->assertUnprocessable()->assertJsonValidationErrors(['roomTypeId']);
+
+    expect((int)$room->fresh()->room_type_id)->toBe((int)$standard->id);
+    expect(DB::table('catalog_audit_logs')->count())->toBe(0);
+});
+
+it('prevents non-admins from reading catalogue audit events', function (): void {
+    $hotel=Hotel::create(['name'=>'Audit Visibility Hotel']);
+    [$type,$room]=editCatalogSeed($hotel);
+    editCatalogStaff($hotel,'front_desk',['hotel:read','hotel:write']);
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/catalog-audit?subjectType=room&subjectId='.$room->id)
+        ->assertForbidden();
+});
