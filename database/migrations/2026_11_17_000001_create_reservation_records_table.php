@@ -26,12 +26,17 @@ return new class extends Migration {
             $table->index(['hotel_id', 'assigned_room_id', 'check_in', 'check_out']);
             $table->foreign(['hotel_id', 'room_type_id'])
                 ->references(['hotel_id', 'id'])->on('room_types')->restrictOnDelete();
-            $table->foreign(['hotel_id', 'assigned_room_id'])
-                ->references(['hotel_id', 'id'])->on('rooms')->restrictOnDelete();
+            $table->foreign(['hotel_id', 'room_type_id', 'assigned_room_id'], 'reservation_room_type_match')
+                ->references(['hotel_id', 'room_type_id', 'id'])->on('rooms')->restrictOnDelete();
         });
 
-        // Date order is a structural invariant, independent of any booking policy.
-        DB::statement('ALTER TABLE reservation_records ADD CONSTRAINT reservation_period_positive CHECK (check_out > check_in)');
+        // DB-level date integrity without relying on an unsupported SQLite ALTER TABLE command.
+        if (DB::getDriverName() === 'pgsql') {
+            DB::statement('ALTER TABLE reservation_records ADD CONSTRAINT reservation_period_positive CHECK (check_out > check_in)');
+        } elseif (DB::getDriverName() === 'sqlite') {
+            DB::statement("CREATE TRIGGER reservation_period_insert BEFORE INSERT ON reservation_records WHEN NEW.check_out <= NEW.check_in BEGIN SELECT RAISE(ABORT, 'departure must follow arrival'); END");
+            DB::statement("CREATE TRIGGER reservation_period_update BEFORE UPDATE ON reservation_records WHEN NEW.check_out <= NEW.check_in BEGIN SELECT RAISE(ABORT, 'departure must follow arrival'); END");
+        }
     }
 
     public function down(): void
