@@ -119,7 +119,10 @@ final class ReservationFinanceController
                 ])->values(),
                 'taxesCalculated' => false,
                 'feesCalculated' => false,
-                'paymentsRecorded' => false,
+                'paymentsRecorded' => DB::table('folio_payment_records')
+                    ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)->exists(),
+                'paymentsIncludedInSubtotal' => false,
+                'ledgerEndpoint' => '/api/v1/hotels/'.$hotel->id.'/bookings/'.$record->id.'/folio-ledger',
                 'isFinalPayableTotal' => false,
             ],
         ]);
