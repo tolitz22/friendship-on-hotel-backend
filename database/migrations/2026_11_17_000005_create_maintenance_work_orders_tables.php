@@ -9,6 +9,10 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
+        // A composite foreign key requires an explicitly unique referenced key on PostgreSQL.
+        Schema::table('rooms', function (Blueprint $table): void {
+            $table->unique(['hotel_id', 'id'], 'rooms_hotel_id_id_unique');
+        });
         Schema::create('maintenance_work_orders', function (Blueprint $table): void {
             $table->id();
             $table->foreignId('hotel_id')->constrained()->restrictOnDelete();
@@ -45,5 +49,8 @@ return new class extends Migration {
     {
         Schema::dropIfExists('maintenance_work_order_events');
         Schema::dropIfExists('maintenance_work_orders');
+        Schema::table('rooms', function (Blueprint $table): void {
+            $table->dropUnique('rooms_hotel_id_id_unique');
+        });
     }
 };
