@@ -14,7 +14,7 @@ Laravel 12 / PHP 8.3+ API foundation. Separate React + Vite frontend: [friendshi
 
 ## Requirements
 
-PHP >=8.3, Composer 2, required PHP extensions for Laravel. PostgreSQL for normal development; SQLite extension for tests.
+PHP >=8.3, Composer 2, required PHP extensions for Laravel. MySQL 8.4 LTS **or** PostgreSQL 16+ for normal development; SQLite extension for fast tests.
 
 ### Windows PowerShell quickstart
 
@@ -26,7 +26,7 @@ Copy-Item .env.example .env
 php artisan key:generate
 ```
 
-Create a PostgreSQL database named `friendship_on_hotel` (or update the values in `.env`), then:
+Create a database named `friendship_on_hotel` in MySQL or PostgreSQL, then set `DB_CONNECTION=mysql` or `DB_CONNECTION=pgsql` and the matching credentials in `.env`. See [database setup](docs/DATABASE_COMPATIBILITY.md). Next:
 
 ```powershell
 php artisan migrate
@@ -86,7 +86,7 @@ php artisan test
 vendor/bin/pint --test
 ```
 
-Tests use SQLite `:memory:` via phpunit.xml; normal development uses PostgreSQL.
+Fast tests use SQLite `:memory:` via phpunit.xml; CI also exercises PostgreSQL and MySQL. Normal development supports either database.
 
 The repository does not yet have a generated `composer.lock`; after a successful first installation, commit one for reproducible dependency resolution. GitHub Actions workflow: [Backend validation](.github/workflows/backend.yml).
 
@@ -101,3 +101,7 @@ For business decisions still pending, read [BUSINESS_RULES.md](docs/BUSINESS_RUL
 ## Backend Phase 2 — reservation foundations (no live bookings)
 
 Phase 2 adds a schema for hotel-scoped reservation records, strict half-open date period semantics, pure known-room overlap detection, composite room/type integrity, and a read-only `GET /api/v1/hotels/{hotel}/reservation-records` endpoint. **It is not an availability or reservation creation engine.** Run `php artisan migrate` and `php artisan test` after pulling changes. See [Phase 2](docs/PHASE_2.md) and [reservation domain decisions](docs/RESERVATION_DOMAIN.md) before implementing booking writes.
+
+## Dual database compatibility
+
+Both **MySQL 8.4 LTS/InnoDB** and **PostgreSQL 16+** are supported targets. Set `DB_CONNECTION=mysql` or `pgsql` without changing application code. Reservation date CHECK constraints are enforced on both, and CI now includes a MySQL job. Read [DATABASE_COMPATIBILITY.md](docs/DATABASE_COMPATIBILITY.md) for engine-specific configuration, version requirements, database provisioning, and testing. Switching database engines does **not** automatically copy data.
