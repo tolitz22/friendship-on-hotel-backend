@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
+use App\Notifications\StaffPasswordResetNotification;
 use Laravel\Sanctum\HasApiTokens;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
@@ -22,6 +23,11 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return ['email_verified_at' => 'datetime', 'password' => 'hashed', 'is_active' => 'boolean'];
+    }
+
+    public function sendPasswordResetNotification($token): void
+    {
+        $this->notify(new StaffPasswordResetNotification($token));
     }
 
     public function memberships(): HasMany
