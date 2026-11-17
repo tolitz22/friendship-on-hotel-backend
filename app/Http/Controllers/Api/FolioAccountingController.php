@@ -12,6 +12,13 @@ use Illuminate\Validation\ValidationException;
 
 final class FolioAccountingController
 {
+    public function cancelUnpaid(Request $request, Hotel $hotel, string $booking, FolioAccountingService $accounting): JsonResponse
+    {
+        return response()->json(['data' => $accounting->cancelUnpaidPriced(
+            $hotel, (int) $booking, (int) $request->user()->id
+        )]);
+    }
+
     public function show(Hotel $hotel, string $booking, FolioAccountingService $accounting): JsonResponse
     {
         return response()->json(['data' => $accounting->entries($hotel, (int) $booking)]);
