@@ -41,3 +41,58 @@ it('does not expose reservation mutations over the API', function (): void {
         'checkIn'=>'2026-11-17','checkOut'=>'2026-11-19',
     ])->assertNotFound();
 });
+
+
+it('rejects an assigned room of another room type within the same hotel', function (): void {
+    $hotel = Hotel::create(['name' => 'Example Hotel']);
+    $standard = RoomType::create(['hotel_id'=>$hotel->id,'name'=>'Standard','max_occupancy'=>2]);
+    $suite = RoomType::create(['hotel_id'=>$hotel->id,'name'=>'Suite','max_occupancy'=>4]);
+    $suiteRoom = Room::create(['hotel_id'=>$hotel->id,'room_type_id'=>$suite->id,'number'=>'501']);
+
+    expect(fn () => DB::table('reservation_records')->insert([
+        'hotel_id'=>$hotel->id,'room_type_id'=>$standard->id,
+        'reference'=>'WRONG-TYPE','assigned_room_id'=>$suiteRoom->id,
+        'check_in'=>'2026-11-17','check_out'=>'2026-11-19',
+    ]))->toThrow(\Illuminate\Database\QueryException::class);
+});
+
+it('enforces positive stay dates at the database layer', function (): void {
+    $hotel = Hotel::create(['name' => 'Example Hotel']);
+    $type = RoomType::create(['hotel_id'=>$hotel->id,'name'=>'Standard','max_occupancy'=>2]);
+
+    expect(fn () => DB::table('reservation_records')->insert([
+        'hotel_id'=>$hotel->id,'room_type_id'=>$type->id,
+        'reference'=>'ZERO-NIGHTS','check_in'=>'2026-11-19','check_out'=>'2026-11-19',
+    ]))->toThrow(\Illuminate\Database\QueryException::class);
+});
+
+it('returns scoped structural records without implying room availability', function (): void {
+    $hotel = Hotel::create(['name'=>'Hotel A']);
+    $other = Hotel::create(['name'=>'Hotel B']);
+    $type = RoomType::create(['hotel_id'=>$hotel->id,'name'=>'Standard','max_occupancy'=>2]);
+    $otherType = RoomType::create(['hotel_id'=>$other->id,'name'=>'Standard','max_occupancy'=>2]);
+
+    DB::table('reservation_records')->insert([
+        ['hotel_id'=>$hotel->id,'room_type_id'=>$type->id,'reference'=>'LOCAL',
+         'check_in'=>'2026-11-17','check_out'=>'2026-11-19'],
+        ['hotel_id'=>$other->id,'room_type_id'=>$otherType->id,'reference'=>'OTHER',
+         'check_in'=>'2026-11-17','check_out'=>'2026-11-19'],
+    ]);
+
+    $staff = \App\Models\User::create([
+        'name'=>'Desk','email'=>'desk-reservation@example.test','password'=>'example-password',
+    ]);
+    \App\Models\HotelMembership::create([
+        'hotel_id'=>$hotel->id,'user_id'=>$staff->id,'role'=>'front_desk',
+    ]);
+    \Laravel\Sanctum\Sanctum::actingAs($staff, ['hotel:read']);
+
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/reservation-records')
+        ->assertOk()
+        ->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.reference', 'LOCAL')
+        ->assertJsonPath('meta.isAvailability', false);
+
+    $this->getJson('/api/v1/hotels/'.$other->id.'/reservation-records')
+        ->assertNotFound();
+});
