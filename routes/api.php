@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\GuestController;
+use App\Http\Controllers\Api\PropertyCatalogSummaryController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\RoomCatalogController;
@@ -25,6 +26,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/', [HotelController::class, 'show']);
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
+            Route::get('/catalog-summary', PropertyCatalogSummaryController::class);
             Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
             Route::get('/guests', [GuestController::class, 'index']);
             Route::get('/guests/{guest}', [GuestController::class, 'show'])->whereNumber('guest');
