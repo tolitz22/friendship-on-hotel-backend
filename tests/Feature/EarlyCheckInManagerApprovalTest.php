@@ -92,7 +92,7 @@ it('requires manager-approved day-before check-in and retains the original stay 
     ])->assertOk()->assertJsonPath('data.status', 'executed');
     $this->assertDatabaseHas('reservation_records', [
         'id' => $booking, 'lifecycle_state' => 'checked_in',
-        'check_in' => now('Asia/Manila')->addDay()->toDateString(),
+        'check_in' => now('Asia/Manila')->toDateString(),
     ]);
     $this->assertDatabaseHas('reservation_early_check_ins', [
         'hotel_id' => $fx['hotel']->id,
@@ -102,9 +102,11 @@ it('requires manager-approved day-before check-in and retains the original stay 
         'approved_by' => $fx['manager']->id,
         'checked_in_by' => $fx['manager']->id,
         'actual_check_in_date' => now('Asia/Manila')->toDateString(),
+        'scheduled_check_in' => now('Asia/Manila')->addDay()->toDateString(),
     ]);
     $this->getJson($fx['base'].'/reservation-records/'.$booking)
-        ->assertOk()->assertJsonPath('data.lifecycleState', 'checked_in')
+        ->assertOk()->assertJsonPath('data.checkIn', now('Asia/Manila')->toDateString())
+        ->assertJsonPath('data.lifecycleState', 'checked_in')
         ->assertJsonPath('data.earlyCheckIn.scheduledCheckIn', now('Asia/Manila')->addDay()->toDateString())
         ->assertJsonPath('data.earlyCheckIn.actualCheckInDate', now('Asia/Manila')->toDateString())
         ->assertJsonPath('data.earlyCheckIn.approvalRequestId', (string) $approval);
