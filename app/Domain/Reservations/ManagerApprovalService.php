@@ -180,6 +180,11 @@ final class ManagerApprovalService
                     throw new HttpException(409, 'Booking changed after the request. Reopen the reservation and submit a new request.');
                 }
 
+                if ($request->action === 'early_check_in'
+                    && now($hotel->timezone ?: 'Asia/Manila')->toDateString() >= $booking->check_in) {
+                    throw new HttpException(409, 'This is no longer an early arrival. Use the standard check-in flow.');
+                }
+
                 // The domain services preserve all inventory/folio checks and
                 // audit actor attribution. Any failure rolls back approval too.
                 $payload = json_decode($request->request_payload, true, 512, JSON_THROW_ON_ERROR);
