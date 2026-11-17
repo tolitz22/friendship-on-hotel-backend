@@ -96,6 +96,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
                 Route::post('/finance/charge-policy-drafts', [FinancePolicyController::class, 'draft']);
                 Route::post('/finance/charge-policy-drafts/{policy}/review', [FinancePolicyController::class, 'reviewDraft'])->whereNumber('policy');
+                Route::get('/finance/events', [FinanceEventReviewController::class, 'inbox']);
                 Route::post('/bookings/{booking}/finance-event-reviews', [FinanceEventReviewController::class, 'match'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/refund-requests', [FinancePolicyController::class, 'requestRefund'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/refund-requests/{refund}/review', [FinancePolicyController::class, 'reviewRefund'])->whereNumber('booking')->whereNumber('refund');
