@@ -264,6 +264,10 @@ final class KeycardAuthorizationService
             if ($row->status !== 'authorized_mock') {
                 throw new HttpException(409, 'Only an active mock authorization can be revoked.');
             }
+            $revokeResult = app(KeycardProvider::class)->revoke((int) $hotel->id, $id);
+            if ($revokeResult['provider'] !== 'mock' || $revokeResult['physicalCardRevoked'] !== false) {
+                throw new HttpException(503, 'Physical keycard revocation is not configured.');
+            }
             DB::table('keycard_authorizations')->where('id', $id)->update([
                 'status' => 'revoked', 'revoked_by' => $actor,
                 'revocation_note' => trim($note),
