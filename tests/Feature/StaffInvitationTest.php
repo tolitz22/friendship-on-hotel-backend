@@ -91,19 +91,25 @@ it('expires and revokes invitations before account creation', function (): void 
         'email'=>'expire-'.uniqid().'@example.test','name'=>'Temp Employee','role'=>'front_desk',
     ])->assertCreated();
     $row=DB::table('staff_invitations')->where('hotel_id',$hotel->id)->first();
+    $revokedToken=str_repeat('a',64);
+    DB::table('staff_invitations')->where('id',$row->id)->update(['token_hash'=>hash('sha256',$revokedToken)]);
     $this->patchJson($base.'/'.$row->id.'/revoke')->assertOk();
     $this->patchJson($base.'/'.$row->id.'/revoke')->assertNotFound();
     $this->postJson('/api/v1/auth/accept-invitation',[
-        'token'=>str_repeat('a',64),'password'=>'SecureWorkerPass123!',
+        'token'=>$revokedToken,'password'=>'SecureWorkerPass123!',
         'password_confirmation'=>'SecureWorkerPass123!',
     ])->assertUnprocessable();
     $this->postJson($base,[
         'email'=>'expire-2-'.uniqid().'@example.test','name'=>'Temp Employee','role'=>'housekeeping',
     ])->assertCreated();
     $second=DB::table('staff_invitations')->orderByDesc('id')->first();
-    DB::table('staff_invitations')->where('id',$second->id)->update(['expires_at'=>now()->subMinute()]);
+    $expiredToken=str_repeat('b',64);
+    DB::table('staff_invitations')->where('id',$second->id)->update([
+        'token_hash'=>hash('sha256',$expiredToken),
+        'expires_at'=>now()->subMinute(),
+    ]);
     $this->postJson('/api/v1/auth/accept-invitation',[
-        'token'=>str_repeat('b',64),'password'=>'SecureWorkerPass123!',
+        'token'=>$expiredToken,'password'=>'SecureWorkerPass123!',
         'password_confirmation'=>'SecureWorkerPass123!',
     ])->assertUnprocessable();
 });
