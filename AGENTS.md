@@ -129,3 +129,7 @@ The GET /api/v1/hotels/{hotel}/reservation-records/{booking} route is member-rea
 ## Phase 40 — Exact turnover task handoff
 
 See frontend docs/PHASE_40_EXACT_RECORD_RELIABILITY.md. GET /bookings/{booking}/turnover is a hotel-member-scoped, read-only lookup of the actual linked checkout-clean task. Keep the booking lookup and linked task joined under the same hotel ID. Do not create a task on GET, claim completed housekeeping verifies readiness, or return cross-tenant task details. Test CheckoutTurnoverHandoffPhase40Test; CI status not verified.
+
+## Phase 41 — PHP syntax CI gate
+
+The backend GitHub Actions workflow now runs php -l on all PHP files under app, routes, database and tests before route listing and the feature suite. This is a source syntax gate, not confirmation of passing Laravel feature tests, MySQL migration checks or true multi-process room-readiness locking tests. Preserve hotel-first locking and do not enable enforced check-in in a production property without those checks.
