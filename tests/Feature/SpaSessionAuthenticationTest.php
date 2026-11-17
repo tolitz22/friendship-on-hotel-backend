@@ -62,6 +62,7 @@ it('uses the web guard for first-party session login without issuing a personal 
     $this->getJson('/api/v1/auth/me')
         ->assertOk()
         ->assertJsonPath('data.id',(string)$user->id);
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/staff')->assertOk();
 });
 
 it('rejects bad or disabled staff credentials in cookie login', function (): void {
@@ -120,4 +121,23 @@ it('refuses SPA logout without an established first-party browser session', func
         'Origin'=>'https://untrusted.example',
         'Referer'=>'https://untrusted.example/',
     ])->postJson('/api/v1/auth/spa-logout')->assertUnauthorized();
+});
+
+it('logs out a first-party cookie session without touching API token authentication', function (): void {
+    enableSpaSessionForTest();
+    $user=spaTestUser();
+
+    $this->withHeaders([
+        'Origin'=>'http://localhost:5173',
+        'Referer'=>'http://localhost:5173/',
+    ])->postJson('/api/v1/auth/spa-login',[
+        'email'=>$user->email,'password'=>'CorrectPassword123!',
+    ])->assertOk();
+
+    $this->postJson('/api/v1/auth/spa-logout')->assertOk()
+        ->assertJsonPath('message','Signed out.');
+
+    expect(Auth::guard('web')->check())->toBeFalse();
+    expect(PersonalAccessToken::count())->toBe(0);
+    $this->getJson('/api/v1/auth/me')->assertUnauthorized();
 });
