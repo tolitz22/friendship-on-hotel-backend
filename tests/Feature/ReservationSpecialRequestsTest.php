@@ -12,6 +12,7 @@ use Laravel\Sanctum\Sanctum;
 it('records hotel-scoped staff special requests without booking or price mutation', function (): void {
     $hotel=Hotel::create(['name'=>'Requests Property']);
     $type=RoomType::create(['hotel_id'=>$hotel->id,'name'=>'Standard','max_occupancy'=>2]);
+    \App\Models\Room::create(['hotel_id'=>$hotel->id,'room_type_id'=>$type->id,'number'=>'101']);
     $guest=$hotel->guests()->create(['first_name'=>'Request','last_name'=>'Guest']);
     $staff=User::create([
         'name'=>'Request Reception','email'=>uniqid('req-',true).'@example.test',
