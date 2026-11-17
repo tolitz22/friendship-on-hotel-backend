@@ -30,13 +30,13 @@ Thus a checkout on the 20th and an incoming guest checking in on the 20th do **n
 `RoomOverlapDetector` only identifies overlaps among supplied **known physical-room stays**; it does not filter statuses, calculate inventory, reserve a lock, account for unassigned room-type reservations or apply maintenance blocks. An empty result never means availability.
 
 ### Schema constraints
-- Positive-length stays enforced by PostgreSQL CHECK and SQLite insert/update triggers.
+- Positive-length stays enforced by MySQL 8.4 and PostgreSQL CHECK constraints, and SQLite insert/update triggers.
 - Property-scoped reference uniqueness and reservation date indexes.
 - Room type constrained within the property.
 - Optional physical-room assignment constrained to **the same property AND room type**, using a composite key.
 - Room type and physical-room deletes are restricted when referenced.
 
-These database invariants intentionally do **not** prevent overlapping reservations. A concurrency-safe inventory engine will need an approved status/hold model and transaction strategy, followed by PostgreSQL-specific concurrency tests.
+These database invariants intentionally do **not** prevent overlapping reservations. A concurrency-safe inventory engine will need an approved status/hold model and transaction strategy, followed by MySQL/InnoDB and PostgreSQL concurrency tests.
 
 ## Read-only endpoint
 
@@ -73,3 +73,7 @@ No database-level simultaneous booking tests yet, because there is intentionally
 ## Frontend continuity
 
 The last completed frontend milestone remains **Hotel Settings & Configuration**. Its reservation calendar, physical-room timeline and mock booking wizard continue in mock mode. There is no corresponding live reservation mutation to integrate.
+
+## Both SQL database engines
+
+The same room-type/physical-room FK schema and date ordering constraint are intended for MySQL 8.4 LTS and PostgreSQL 16+. Database engine selection happens in `.env`. See [Database compatibility](DATABASE_COMPATIBILITY.md). This does not add an inventory availability allocator or any reservation write API.
