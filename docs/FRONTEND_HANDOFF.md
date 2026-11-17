@@ -59,3 +59,7 @@ Frontend API mode now reads real selected-hotel settings, registered room/type c
 ## Phase 7 frontend admin creation
 
 The React frontend can now create room types and physical rooms for the selected hotel via the existing Laravel administrator-only POST APIs. Room counts and listings invalidate after successful creation. Existing read-only views and mock-mode screens remain available. No room catalogue edit/delete, booking writes or availability state is implied. See `docs/PHASE_7_CATALOG_ADMIN.md`.
+
+## Phase 8 — Frontend audited catalogue editing
+
+React now allows hotel administrators to update existing room/type catalogue metadata through new Laravel PATCH endpoints and inspect per-record audit history. Successful edits invalidate room and room type caches. See `docs/PHASE_8_CATALOG_EDITS.md`; the frontend mock modules and business-rule restrictions remain intact.
