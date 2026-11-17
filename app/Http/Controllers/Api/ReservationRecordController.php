@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 final class ReservationRecordController
 {
@@ -16,12 +17,18 @@ final class ReservationRecordController
      */
     public function show(Hotel $hotel, string $booking): JsonResponse
     {
-        $record = $hotel->reservationRecords()->whereKey($booking)->firstOrFail();
+        $record = $hotel->reservationRecords()->with(['roomType:id,name', 'assignedRoom:id,number'])
+            ->whereKey($booking)->firstOrFail();
+        $guest = DB::table('guests')->where('hotel_id', $hotel->id)
+            ->where('id', $record->guest_id)->first(['first_name', 'last_name']);
 
         return response()->json(['data' => [
             'id' => (string) $record->id,
             'hotelId' => (string) $record->hotel_id,
             'reference' => $record->reference,
+            'guestName' => $guest === null ? null : trim($guest->first_name.' '.$guest->last_name),
+            'roomTypeName' => $record->roomType?->name,
+            'assignedRoomNumber' => $record->assignedRoom?->number,
             'roomTypeId' => (string) $record->room_type_id,
             'assignedRoomId' => $record->assigned_room_id === null ? null : (string) $record->assigned_room_id,
             'checkIn' => $record->check_in->format('Y-m-d'),
@@ -42,6 +49,7 @@ final class ReservationRecordController
 
         $perPage = (int) ($data['per_page'] ?? 20);
         $records = $hotel->reservationRecords()
+            ->with(['roomType:id,name', 'assignedRoom:id,number'])
             ->orderBy('check_in')
             ->orderBy('id')
             ->paginate($perPage);
@@ -51,6 +59,8 @@ final class ReservationRecordController
                 'id' => (string) $record->id,
                 'hotelId' => (string) $record->hotel_id,
                 'reference' => $record->reference,
+                'roomTypeName' => $record->roomType?->name,
+                'assignedRoomNumber' => $record->assignedRoom?->number,
                 'roomTypeId' => (string) $record->room_type_id,
                 'assignedRoomId' => $record->assigned_room_id !== null ? (string) $record->assigned_room_id : null,
                 'checkIn' => $record->check_in->format('Y-m-d'),
