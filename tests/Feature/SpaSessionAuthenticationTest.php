@@ -24,7 +24,9 @@ function enableSpaSessionForTest(): void
     config()->set('cors.supports_credentials', true);
 }
 
-it('does not enable the SPA session login by default', function (): void {
+it('rejects SPA session login when the feature is disabled', function (): void {
+    // Keep this security test independent of each developer's .env settings.
+    config()->set('spa_auth.enabled', false);
     $user=spaTestUser();
 
     $this->withHeaders([
