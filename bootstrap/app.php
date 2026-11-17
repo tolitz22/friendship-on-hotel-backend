@@ -3,6 +3,7 @@
 use App\Http\Middleware\EnsureHotelMember;
 use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureHotelAdmin;
+use App\Http\Middleware\EnsureHotelPermission;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -21,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'hotel.member' => EnsureHotelMember::class,
             'active.user' => EnsureActiveUser::class,
             'hotel.admin' => EnsureHotelAdmin::class,
+            'hotel.permission' => EnsureHotelPermission::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
