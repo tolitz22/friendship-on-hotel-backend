@@ -35,3 +35,7 @@ Backend uses property-scoped API paths `/api/v1/hotels/{hotel}/rooms`, `.../room
 - Only then replace mock adapters screen-by-screen with actual Laravel responses and integration tests.
 
 The logo is still represented as a fallback brand mark in the frontend GitHub checkout unless the original uploaded image is explicitly copied into `public/logo.png`.
+
+## Backend Phase 2 update (2026-11-17)
+
+Added backend reservation-record schema, overlap helper, date-only tests, and a property-scoped read-only reservation-record endpoint. No frontend files or screens have been replaced or connected to these records. **The frontend remains paused after Settings, on mock mode.** The new backend endpoint is not equivalent to the frontend's `/reservations` or `/reservations/calendar` contract. Resume frontend integration only after hotel-scoped authentication, operational DTOs and approved booking inventory policies are ready. See `docs/RESERVATION_DOMAIN.md`.
