@@ -115,3 +115,8 @@ Backend `main` now includes `POST /api/v1/hotels/{hotel}/bookings` and `POST /ap
 ## Phase 21 — Availability and room assignment backend
 
 The Laravel backend now exposes selected-hotel room-type availability by night, dated room inventory blocks and room assignment for confirmed reservations. `canBook` reports instantaneous capacity only, not a held room or verified housekeeping readiness; booking creation rechecks under lock. No rate, payment or check-in status is returned. Do not silently connect the existing mock booking wizard until its full contract has been reconciled. See `docs/PHASE_21_ROOM_INVENTORY.md`.
+
+
+## Phase 22 — Front-desk backend lifecycle and inventory block review
+
+Backend `main` now has admin-only `POST /bookings/{booking}/check-in`, `POST /bookings/{booking}/check-out` and paginated `GET /inventory-blocks` under `/api/v1/hotels/{hotel}`. Check-in requires an assigned room and hotel-local valid dates, checkout cannot occur before planned departure. No automated housekeeping readiness, billing, refund or guest identity confirmation is implied. Preserve existing React mock workflows until the typed API contract, role behavior and production database concurrency verification are completed. See `docs/PHASE_22_RESERVATION_OPERATIONS.md`.
