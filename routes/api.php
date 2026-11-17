@@ -55,6 +55,7 @@ Route::prefix('v1')->group(function (): void {
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::get('/staff', [HotelStaffController::class, 'index']);
+                Route::get('/staff/history', [HotelStaffController::class, 'history']);
                 Route::post('/staff', [HotelStaffController::class, 'attach']);
                 Route::patch('/staff/{userId}', [HotelStaffController::class, 'update'])->whereNumber('userId');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
