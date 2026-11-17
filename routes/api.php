@@ -107,6 +107,8 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('hotel.permission:booking.assign_room');
             Route::post('/bookings', [ReservationBookingController::class, 'store'])
                 ->middleware('hotel.permission:booking.create');
+            Route::get('/bookings/{booking}/room-choices', [RoomInventoryController::class, 'assignmentOptions'])
+                ->whereNumber('booking')->middleware('hotel.permission:booking.assign_room');
             Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])
                 ->whereNumber('booking')->middleware('hotel.permission:booking.assign_room');
             Route::post('/bookings/{booking}/check-in', [ReservationBookingController::class, 'checkIn'])
