@@ -150,3 +150,7 @@ Added authenticated, read-only `GET /api/v1/hotels/{hotel}/reservation-demand?fr
 ## Phase 10 — Hotel Reservation Policy Drafts
 
 Added `reservation_policy_drafts` and `reservation_policy_draft_revisions` migrations, property-protected read/admin update and revision-history endpoints, and stale-edit 409 conflict checks. These are *planning records only* (`effectiveForBookings: false`), not operational booking rules. **Run `php artisan migrate`** and `php artisan test`. See [Phase 10](docs/PHASE_10_POLICY_DRAFTS.md).
+
+## Phase 11 — Reservation Policy Readiness
+
+A new read-only `/api/v1/hotels/{hotel}/reservation-policy-readiness` endpoint reports missing policy choices, potentially conflicting options, and specifications required before safe booking implementation. Results are always advisory (`readyForBookings: false`, `approved: false`). No reservation writes or new tables are introduced. See [Phase 11](docs/PHASE_11_POLICY_READINESS.md).
