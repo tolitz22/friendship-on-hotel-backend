@@ -96,7 +96,7 @@ final class RoomReadinessService
             'blockers' => $blockers,
             'advisoryReady' => $latest !== null && $latest->status === 'approved'
                 && ! in_array(true, array_values($blockers), true),
-            'enforcedAtCheckIn' => false,
+            'enforcedAtCheckIn' => app(ReadinessWriteGuard::class)->enabled($hotel),
             'inventoryGuaranteed' => false,
         ];
     }
