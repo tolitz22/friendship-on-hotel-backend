@@ -13,6 +13,10 @@ class User extends Authenticatable
 
     protected $fillable = ['name', 'email', 'password', 'is_active'];
 
+    // Match the database default on newly created, in-memory Eloquent models.
+    // Sanctum::actingAs() uses that instance before it is refreshed from the DB.
+    protected $attributes = ['is_active' => true];
+
     protected $hidden = ['password', 'remember_token'];
 
     protected function casts(): array
