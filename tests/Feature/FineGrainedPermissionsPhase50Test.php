@@ -45,7 +45,7 @@ it('lets active receptionists book with an actor audit but denies housekeeping b
     $this->postJson($url, $payload)->assertForbidden();
 
     $receptionist = phase50Staff($hotel, 'front_desk');
-    Sanctum::actingAs($receptionist, ['hotel:read']);
+    Sanctum::actingAs($receptionist, ['hotel:read', 'booking:write']);
     $id = $this->postJson($url, $payload)->assertCreated()->json('data.id');
     expect(DB::table('reservation_booking_events')
         ->where('hotel_id', $hotel->id)
@@ -60,7 +60,7 @@ it('checks current hotel membership on every operational write including token a
     $staff = phase50Staff($hotel, 'front_desk');
     $checkIn = '/api/v1/hotels/'.$hotel->id.'/bookings/999999/check-in';
 
-    Sanctum::actingAs($staff, ['hotel:read']);
+    Sanctum::actingAs($staff, ['hotel:read', 'booking:write']);
     $this->postJson($checkIn)->assertNotFound();
     $this->postJson('/api/v1/hotels/'.$other->id.'/bookings/999999/check-in')->assertNotFound();
 
@@ -68,7 +68,7 @@ it('checks current hotel membership on every operational write including token a
     $this->postJson($checkIn)->assertNotFound();
 
     HotelMembership::where('hotel_id', $hotel->id)->where('user_id', $staff->id)->update(['is_active' => true]);
-    Sanctum::actingAs($staff, []);
+    Sanctum::actingAs($staff, ['hotel:read']);
     $this->postJson($checkIn)->assertForbidden();
 });
 
