@@ -111,14 +111,11 @@ it('versions inactive tax and service previews with exact integer rounding', fun
 });
 
 it('records refund requests against reviewed payments but never marks funds disbursed', function (): void {
-    [$hotel, $booking] = phase26Fixture();
+    [$hotel, $booking, $actor] = phase26Fixture();
     $paymentId = phase26Payment($hotel, $booking);
     // The original administrator initiates the refund; payment confirmation
     // happened under an independent manager identity.
-    $originalManager = User::query()->where('id', DB::table('hotel_memberships')
-        ->where('hotel_id', $hotel->id)->where('role', 'admin')
-        ->orderBy('id')->value('user_id'))->firstOrFail();
-    Sanctum::actingAs($originalManager, ['hotel:read', 'hotel:write']);
+    Sanctum::actingAs($actor, ['hotel:read', 'hotel:write']);
     $base = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking;
     $input = [
         'requestKey' => 'phase26-refund-001', 'paymentRecordId' => $paymentId,
@@ -149,15 +146,12 @@ it('records refund requests against reviewed payments but never marks funds disb
 });
 
 it('rejects unconfirmed payments for refund requests and isolates properties', function (): void {
-    [$hotel, $booking] = phase26Fixture();
+    [$hotel, $booking, $actor] = phase26Fixture();
     $base = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking;
     $id = phase26CashReceipt($hotel, $booking, 4000, 'pending');
     // Resume the hotel admin to test the refund policy, not the cashier's
     // distinct inability to create refund requests.
-    $manager = User::query()->where('id', DB::table('hotel_memberships')
-        ->where('hotel_id', $hotel->id)->where('role', 'admin')
-        ->orderBy('id')->value('user_id'))->firstOrFail();
-    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    Sanctum::actingAs($actor, ['hotel:read', 'hotel:write']);
     $this->postJson($base.'/refund-requests', [
         'requestKey' => 'phase26-refund-pend', 'paymentRecordId' => $id,
         'amountMinor' => 1000, 'reason' => 'Attempt on pending evidence',
