@@ -28,7 +28,12 @@ final class StaffPasswordController
         $email = strtolower(trim($data['email']));
         $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
         if ($user !== null && $user->is_active) {
-            Password::broker('users')->sendResetLink(['email' => $user->email]);
+            try {
+                Password::broker('users')->sendResetLink(['email' => $user->email]);
+            } catch (\\Throwable $error) {
+                // Do not reveal account existence through email-delivery errors.
+                report($error);
+            }
         }
 
         return response()->json([
