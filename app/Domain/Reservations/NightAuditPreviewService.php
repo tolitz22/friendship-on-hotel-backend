@@ -59,12 +59,17 @@ final class NightAuditPreviewService
             }
             $entries = $roomEntries->get($folio->folio_id, collect());
             if ($entries->count() !== 1 || $folio->currency !== $currency) {
-                ($entries->count() > 1 ? $duplicate : $missing)[] = [
+                $issue = [
                     'bookingId' => (string) $booking->id,
                     'reference' => $booking->reference,
                     'reason' => $folio->currency !== $currency ? 'currency_mismatch'
                         : ($entries->count() > 1 ? 'duplicate_night' : 'missing_night'),
                 ];
+                if ($entries->count() > 1) {
+                    $duplicate[] = $issue;
+                } else {
+                    $missing[] = $issue;
+                }
                 continue;
             }
             $postedMinor += (int) $entries->first()->amount_minor;
