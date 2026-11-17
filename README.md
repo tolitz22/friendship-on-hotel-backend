@@ -105,3 +105,7 @@ Phase 2 adds a schema for hotel-scoped reservation records, strict half-open dat
 ## Dual database compatibility
 
 Both **MySQL 8.4 LTS/InnoDB** and **PostgreSQL 16+** are supported targets. Set `DB_CONNECTION=mysql` or `pgsql` without changing application code. Reservation date CHECK constraints are enforced on both, and CI now includes a MySQL job. Read [DATABASE_COMPATIBILITY.md](docs/DATABASE_COMPATIBILITY.md) for engine-specific configuration, version requirements, database provisioning, and testing. Switching database engines does **not** automatically copy data.
+
+## Backend Phase 3 — assigned-room conflict diagnostics
+
+Added a protected read-only endpoint: `GET /api/v1/hotels/{hotel}/rooms/{room}/reservation-overlaps?from=YYYY-MM-DD&to=YYYY-MM-DD`. It reports known assigned reservation records and intersecting date pairs for a selected physical room. Results are **not availability or overbooking determinations**; unassigned stays, holds and operational rules are not evaluated. Both MySQL and PostgreSQL CI jobs now run the full PHP suite. See [Phase 3](docs/PHASE_3.md).
