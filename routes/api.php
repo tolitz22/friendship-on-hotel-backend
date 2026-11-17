@@ -27,6 +27,7 @@ use App\Http\Controllers\Api\PayMongoSandboxController;
 use App\Http\Controllers\Api\FinanceEventReviewController;
 use App\Http\Controllers\Api\RoomInventoryController;
 use App\Http\Controllers\Api\RoomReadinessController;
+use App\Http\Controllers\Api\ReadinessEnforcementPolicyController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
@@ -86,6 +87,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
             Route::get('/rooms/{room}/readiness', [RoomReadinessController::class, 'show'])->whereNumber('room');
             Route::get('/rooms/{room}/readiness/history', [RoomReadinessController::class, 'history'])->whereNumber('room');
+            Route::get('/readiness/enforcement-policy', [ReadinessEnforcementPolicyController::class, 'show']);
+            Route::get('/readiness/enforcement-policy/history', [ReadinessEnforcementPolicyController::class, 'history']);
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
@@ -124,6 +127,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/room-types/{type}', [CatalogEditController::class, 'updateType'])->whereNumber('type');
                 Route::patch('/rooms/{room}', [CatalogEditController::class, 'updateRoom'])->whereNumber('room');
                 Route::get('/catalog-audit', [CatalogEditController::class, 'audit']);
+                Route::patch('/readiness/enforcement-policy', [ReadinessEnforcementPolicyController::class, 'update']);
                 Route::post('/rooms/{room}/readiness/inspections', [RoomReadinessController::class, 'inspect'])->whereNumber('room');
                 Route::post('/rooms/{room}/readiness/inspections/{inspection}/review', [RoomReadinessController::class, 'review'])->whereNumber('room')->whereNumber('inspection');
                 Route::post('/housekeeping-tasks', [HousekeepingTaskController::class, 'store']);
