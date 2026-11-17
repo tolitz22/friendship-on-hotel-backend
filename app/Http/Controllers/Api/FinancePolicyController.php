@@ -38,6 +38,21 @@ final class FinancePolicyController
         )], 201);
     }
 
+    public function reviewDraft(Request $request, Hotel $hotel, string $policy, ChargePolicyPreviewService $service): JsonResponse
+    {
+        $input = $request->validate([
+            'decision' => ['required', 'in:approve,reject'],
+            'note' => ['required', 'string', 'min:5', 'max:500'],
+        ]);
+        if (trim($input['note']) === '') {
+            throw ValidationException::withMessages(['note' => ['A review note is required.']]);
+        }
+
+        return response()->json(['data' => $service->reviewDraft(
+            $hotel, (int) $request->user()->id, (int) $policy, $input
+        )]);
+    }
+
     public function preview(Request $request, Hotel $hotel, string $booking, ChargePolicyPreviewService $service): JsonResponse
     {
         $data = $request->validate(['policyId' => ['required', 'integer', 'min:1']]);
