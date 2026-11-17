@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\RoomCatalogController;
 use App\Http\Controllers\Api\ReservationRecordController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
+use App\Http\Controllers\Api\ReservationPolicyReadinessController;
 use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use Illuminate\Support\Facades\Route;
 
@@ -33,6 +34,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
             Route::get('/reservation-demand', ReservationDemandReportController::class);
             Route::get('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'show']);
+            Route::get('/reservation-policy-readiness', ReservationPolicyReadinessController::class);
             Route::get('/guests', [GuestController::class, 'index']);
             Route::get('/guests/{guest}', [GuestController::class, 'show'])->whereNumber('guest');
             Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
