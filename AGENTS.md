@@ -121,3 +121,7 @@ See \`docs/PHASE_37_READINESS_MONITORING.md\`. \`RoomReadinessDashboardService\`
 ## Phase 38 — Automated backend checks
 
 The repository now has \`.github/workflows/phase38-backend-checks.yml\`: PHP 8.4 Composer install, Laravel route checks and feature tests under SQLite, plus an independent MySQL 8.4 migration job. Its existence is not proof that tests or migrations have passed; review real GitHub Actions job results and logs. This is not a true multi-process transaction race test. Do not enable Phase 36 readiness enforcement in a production hotel until the concurrency and lock-contention runbook in \`docs/PHASE_37_READINESS_MONITORING.md\` is carried out on target database engines.
+
+## Phase 39 — Direct hotel-scoped reservation handoff
+
+The GET /api/v1/hotels/{hotel}/reservation-records/{booking} route is member-readable and uses the hotel->reservationRecords() relation before whereKey. It powers exact booking deep links from Front Desk and newly created reservations. Return only the existing structural LiveRecord fields and never bypass hotel.member middleware or expose other hotels' bookings. The frontend uses a validated numeric booking query parameter, while all booking creation, room assignment and lifecycle mutations retain Laravel's existing admin permissions. See frontend docs/PHASE_39_CONNECTED_STAFF_JOURNEY.md for browser acceptance. New feature test: DirectReservationWorkflowPhase39Test. Source is committed but tests not yet verified.
