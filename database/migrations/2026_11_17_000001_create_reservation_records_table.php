@@ -30,8 +30,8 @@ return new class extends Migration {
                 ->references(['hotel_id', 'room_type_id', 'id'])->on('rooms')->restrictOnDelete();
         });
 
-        // DB-level date integrity without relying on an unsupported SQLite ALTER TABLE command.
-        if (DB::getDriverName() === 'pgsql') {
+        // MySQL 8.0.16+ and PostgreSQL enforce CHECK; SQLite uses triggers because its ALTER TABLE cannot add CHECK constraints.
+        if (in_array(DB::getDriverName(), ['pgsql', 'mysql'], true)) {
             DB::statement('ALTER TABLE reservation_records ADD CONSTRAINT reservation_period_positive CHECK (check_out > check_in)');
         } elseif (DB::getDriverName() === 'sqlite') {
             DB::statement("CREATE TRIGGER reservation_period_insert BEFORE INSERT ON reservation_records WHEN NEW.check_out <= NEW.check_in BEGIN SELECT RAISE(ABORT, 'departure must follow arrival'); END");
