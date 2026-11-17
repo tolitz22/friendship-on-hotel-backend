@@ -116,3 +116,8 @@ Read \`docs/PHASE_36_TRANSACTIONAL_READINESS_ENFORCEMENT.md\`. A hotel administr
 ## Phase 37 — Readiness dashboard and operational reporting
 
 See \`docs/PHASE_37_READINESS_MONITORING.md\`. \`RoomReadinessDashboardService\` and member-readable \`GET /hotels/{hotel}/readiness/dashboard\` aggregate hotel-wide current room inspection coverage, six current blockers and confirmed upcoming arrivals over a bounded 1–14-day window. Room details are server paginated, but summary totals are calculated for **all** registered rooms, and all eligible upcoming arrivals are considered. Reject hotels exceeding the synchronous 1,000-room/2,000-arrival limits instead of reporting partial totals. Only current readiness is assessed, not future-night inventory or guaranteed room allocation. Report is a non-atomic snapshot; the Phase 36 check-in transaction remains the authoritative opt-in gate. There are no dashboard write actions. Multi-process MySQL/PostgreSQL race tests and hotel-lock contention benchmarks are documented but have not been performed; do not present them as passing CI.
+
+
+## Phase 38 — Automated backend checks
+
+The repository now has \`.github/workflows/phase38-backend-checks.yml\`: PHP 8.4 Composer install, Laravel route checks and feature tests under SQLite, plus an independent MySQL 8.4 migration job. Its existence is not proof that tests or migrations have passed; review real GitHub Actions job results and logs. This is not a true multi-process transaction race test. Do not enable Phase 36 readiness enforcement in a production hotel until the concurrency and lock-contention runbook in \`docs/PHASE_37_READINESS_MONITORING.md\` is carried out on target database engines.
