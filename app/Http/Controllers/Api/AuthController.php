@@ -32,6 +32,10 @@ class AuthController
             $abilities[] = 'hotel:write';
         }
 
+        if ($user->memberships()->where('role', 'front_desk')->where('is_active', true)->exists()) {
+            $abilities[] = 'booking:write';
+        }
+
         $token = $user->createToken('hotel-pms', $abilities);
 
         return response()->json([
