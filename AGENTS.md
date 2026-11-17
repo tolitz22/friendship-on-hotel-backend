@@ -29,3 +29,7 @@ Read `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`, and `docs/FRONTEND_HANDOF
 ## Reservation Phase 2
 
 Review `docs/RESERVATION_DOMAIN.md` and `docs/PHASE_2.md`. `StayPeriod` uses half-open nights. `RoomOverlapDetector` only identifies conflicts among given physical-room records; it never determines availability or enforces inventory. Reservation records have **no write routes** and an intentionally unsettled state machine. Do not introduce booking mutations, inventory locks or cancellation rules until the hotel has approved the inventory unit and lifecycle.
+
+## Cross-engine database compatibility
+
+MySQL 8.4 and PostgreSQL 16+ are both supported targets. Read `docs/DATABASE_COMPATIBILITY.md`. Do not add a PostgreSQL-only migration or inventory SQL without adding a MySQL-equivalent implementation and tests. Protect reservation room/type composite constraints, valid positive date ranges, and tenant scoping across both databases. Use SQLite only as fast test support, not a substitute for production-engine verification.
