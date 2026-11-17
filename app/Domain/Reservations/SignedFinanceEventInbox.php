@@ -73,15 +73,9 @@ final class SignedFinanceEventInbox
         $digest = hash('sha256', $canonical);
 
         return DB::transaction(function () use ($eventId, $eventType, $occurredAt, $canonical, $digest): array {
-            $previous = DB::table('finance_gateway_events')->where('provider', 'custom_hmac_v1')
-                ->where('event_id', $eventId)->first();
-            if ($previous !== null) {
-                if (! hash_equals($previous->payload_sha256, $digest)) {
-                    throw new HttpException(409, 'Event identifier was reused with different content.');
-                }
-                return ['id' => (string) $previous->id, 'replayed' => true, 'status' => 'unmapped'];
-            }
-            $id = DB::table('finance_gateway_events')->insertGetId([
+            // Unique provider+event_id enforces deduplication even during a
+            // race between two HTTP workers. Never read a missing-row lock.
+            $inserted = DB::table('finance_gateway_events')->insertOrIgnore([
                 'provider' => 'custom_hmac_v1', 'event_id' => $eventId,
                 'event_type' => $eventType,
                 'provider_occurred_at' => (new \DateTimeImmutable($occurredAt))->format('Y-m-d H:i:s'),
@@ -91,7 +85,16 @@ final class SignedFinanceEventInbox
                 'payload_json' => $canonical,
                 'created_at' => now(), 'updated_at' => now(),
             ]);
-            return ['id' => (string) $id, 'replayed' => false, 'status' => 'unmapped'];
+            $record = DB::table('finance_gateway_events')->where('provider', 'custom_hmac_v1')
+                ->where('event_id', $eventId)->first();
+            if ($record === null) {
+                throw new HttpException(503, 'Finance event could not be persisted.');
+            }
+            if (! hash_equals($record->payload_sha256, $digest)) {
+                throw new HttpException(409, 'Event identifier was reused with different content.');
+            }
+            return ['id' => (string) $record->id, 'replayed' => ! (bool) $inserted,
+                'status' => $record->processing_status];
         }, 3);
     }
 
