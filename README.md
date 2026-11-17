@@ -142,3 +142,7 @@ The React Settings and Room Inventory screens now use the existing admin-only ro
 ## Phase 8 — Audited Room Catalogue Edits
 
 Added `catalog_audit_logs` migration plus admin-only PATCH endpoints for room types and physical rooms, with scoped before/after history. Structural room type/capacity changes are denied when reservation records refer to the affected room or types; no booking/availability mutation is enabled. **Run `php artisan migrate`** then `php artisan test`. See [Phase 8](docs/PHASE_8_CATALOG_EDITS.md).
+
+## Phase 9 — Structural Reservation Demand
+
+Added authenticated, read-only `GET /api/v1/hotels/{hotel}/reservation-demand?from=YYYY-MM-DD&to=YYYY-MM-DD`. It reports per-night assigned and unassigned **stored reservation record counts** grouped by room type, **not availability or occupancy**. It includes all lifecycle states until the hotel approves which statuses consume inventory. No booking POST/PATCH routes were added. See [Phase 9](docs/PHASE_9_RESERVATION_DEMAND.md).
