@@ -33,7 +33,7 @@ final class OperationalExceptionsController
             ->where('hotel_id', $hotel->id)->where('lifecycle_state', 'confirmed')
             ->whereNull('assigned_room_id')
             ->where('check_in', '>=', $today)->where('check_in', '<', $through)
-            ->orderBy('id')
+            ->orderBy('id')->limit(self::MAX_SOURCE + 1)
             ->get(['id', 'reference', 'check_in', 'check_out']), 'unassigned arrivals');
         foreach ($arrivals as $row) {
             $items[] = $this->signal('unassigned_arrival', 'attention', $row->id, $row->reference,
@@ -57,7 +57,7 @@ final class OperationalExceptionsController
             ->whereIn('lifecycle_state', ['confirmed', 'checked_in'])
             ->where('check_in', '<', $through)->where('check_out', '>', $today)
             ->orderBy('assigned_room_id')->orderBy('check_in')->orderBy('id')
-            ->get(['id', 'reference', 'assigned_room_id', 'check_in', 'check_out']), 'assigned stays');
+            ->limit(self::MAX_SOURCE + 1)->get(['id', 'reference', 'assigned_room_id', 'check_in', 'check_out']), 'assigned stays');
         $byRoom = $stays->groupBy('assigned_room_id');
         foreach ($byRoom as $roomId => $roomStays) {
             $ordered = $roomStays->values();
@@ -90,7 +90,7 @@ final class OperationalExceptionsController
             })
             ->where('pay.hotel_id', $hotel->id)
             ->where('pay.status', 'pending_review')
-            ->orderBy('pay.id')
+            ->orderBy('pay.id')->limit(self::MAX_SOURCE + 1)
             ->get(['pay.id', 'pay.amount_minor', 'pay.created_at', 'booking.id as booking_id',
                 'booking.reference']), 'payment reviews');
         foreach ($pending as $payment) {
