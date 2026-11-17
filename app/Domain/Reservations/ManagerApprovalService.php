@@ -80,6 +80,11 @@ final class ManagerApprovalService
                 ->where('reservation_record_id', $bookingId)->exists()) {
                 throw new HttpException(409, 'Priced reservations require a separate finance-approved workflow.');
             }
+            if ($action === 'amend_dates'
+                && $payload['checkIn'] === $booking->check_in
+                && $payload['checkOut'] === $booking->check_out) {
+                throw new HttpException(422, 'Choose dates different from the recorded stay.');
+            }
             if ($action === 'amend_dates' && now($hotel->timezone ?: 'Asia/Manila')->toDateString() >= $booking->check_in) {
                 throw new HttpException(409, 'Date changes must be requested before planned arrival.');
             }
