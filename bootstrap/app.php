@@ -14,6 +14,9 @@ return Application::configure(basePath: dirname(__DIR__))
         health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware): void {
+        // Stateful API middleware applies only to trusted Sanctum first-party origins.
+        // Existing bearer-token clients remain supported.
+        $middleware->statefulApi();
         $middleware->alias([
             'hotel.member' => EnsureHotelMember::class,
             'active.user' => EnsureActiveUser::class,
