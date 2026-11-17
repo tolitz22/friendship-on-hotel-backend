@@ -61,3 +61,8 @@ Production use is gated on a green Laravel suite and parallel last-room tests on
 ## Phase 21 — Live room-type inventory and explicit dated blocks
 
 Read `docs/PHASE_21_ROOM_INVENTORY.md` before editing inventory behavior. `RoomInventoryService` owns nightly availability, dated physical-room inventory blocks, and confirmed reservation room assignment. Booking creation rechecks availability while holding the same room-type lock. Do not treat work-order `affects_room` or housekeeping completion as automatic inventory status; those records currently have no approved effective-night rules. Admin only for blocks, release, and room assignment. Production concurrency and catalogue shrink safeguards remain unverified.
+
+
+## Phase 22 — Reservation operations and catalogue locking
+
+Read `docs/PHASE_22_RESERVATION_OPERATIONS.md`. New admin-only check-in/check-out transitions are audited and constrained by planned dates in hotel-local time; check-in requires a physical room assignment. Admin inventory-block listing supports reviewing active and released records. Catalog room creation and physical room type edits must serialize with reservation inventory locks. Do not infer housekeeping readiness, billing settlement or identity verification from a reservation lifecycle state. Parallel MySQL/PostgreSQL booking-and-block concurrency verification remains a production gate.
