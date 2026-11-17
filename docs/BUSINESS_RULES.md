@@ -24,3 +24,7 @@ Read `docs/PHASE_9_RESERVATION_DEMAND.md` before implementing any booking mutati
 ## Phase 10 owner decision capture
 
 Hotel administrators can now record **draft** selections via `GET/PATCH /api/v1/hotels/{hotel}/reservation-policy-draft` and inspect version history. The default is undecided for every field. A complete draft is still **not approved** (`effectiveForBookings: false`). Additional requirements such as timed-hold duration, cancellation cutoff/fees, capacity/rate engine and idempotent MySQL/PostgreSQL concurrency safeguards remain unresolved. No real booking writes are authorized merely by filling the draft. See `docs/PHASE_10_POLICY_DRAFTS.md`.
+
+## Phase 11 readiness review
+
+The `/reservation-policy-readiness` report identifies missing draft fields, potentially incompatible settings, and unresolved operational requirements. Even with eight populated fields, `approved`, `readyForImplementation`, and `readyForBookings` remain false. The hotel must explicitly approve detailed allocation/hold/cancellation/pricing rules before booking writes are implemented. See `docs/PHASE_11_POLICY_READINESS.md`.
