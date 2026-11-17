@@ -39,7 +39,7 @@ it('lets administrators attach existing staff without creating a user or exposin
     $url='/api/v1/hotels/'.$hotel->id.'/staff';
     $this->postJson($url,['email'=>$worker->email,'role'=>'housekeeping'])
         ->assertCreated()->assertJsonCount(2,'data');
-    $this->getJson($url)->assertOk()->assertJsonFragment(['role'=>'housekeeping','name'=>'Cleaner']);
+    $this->getJson($url)->assertOk()->assertJsonFragment(['role'=>'housekeeping'])->assertJsonFragment(['name'=>'Cleaner']);
     $this->postJson($url,['email'=>$worker->email,'role'=>'maintenance'])
         ->assertUnprocessable()->assertJsonValidationErrors(['email']);
     expect(User::count())->toBe(2);
@@ -60,7 +60,7 @@ it('guards staff role updates, admin self lockout, and property isolation', func
     $this->patchJson($url.'/'.$admin->id,['isActive'=>false])
         ->assertUnprocessable();
     $this->patchJson($url.'/'.$worker->id,['role'=>'housekeeping'])
-        ->assertOk()->assertJsonFragment(['role'=>'housekeeping','name'=>'Engineer']);
+        ->assertOk()->assertJsonFragment(['role'=>'housekeeping'])->assertJsonFragment(['name'=>'Engineer']);
     $this->getJson('/api/v1/hotels/'.$b->id.'/staff')->assertNotFound();
     $this->patchJson('/api/v1/hotels/'.$b->id.'/staff/'.$worker->id,['role'=>'admin'])->assertNotFound();
     expect(HotelMembership::where('hotel_id',$a->id)->where('role','admin')->where('is_active',true)->count())->toBe(1);
