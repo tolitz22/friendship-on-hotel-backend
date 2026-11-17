@@ -50,6 +50,10 @@ it('supports literal search and pagination without cross-hotel leaks', function 
     $url = '/api/v1/hotels/'.$hotel->id.'/guests';
     $this->getJson($url.'?search=MARIA')->assertOk()->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.lastName', 'Dela Cruz');
+    $this->getJson($url.'?search=Maria%20Dela%20Cruz')->assertOk()->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.firstName', 'Maria');
+    $this->getJson($url.'?search=maria%20dela%20cruz')->assertOk()->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.lastName', 'Dela Cruz');
     $this->getJson($url.'?search=%25')->assertOk()->assertJsonCount(0, 'data');
     $this->getJson($url.'?per_page=1&page=2')->assertOk()->assertJsonCount(1, 'data')
         ->assertJsonPath('meta.total', 3)->assertJsonPath('meta.totalPages', 3);
