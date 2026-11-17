@@ -42,11 +42,11 @@ final class RoomReadinessService
             ->where('tasks.hotel_id', $hotel->id)
             ->where('tasks.room_id', $roomId)
             ->orderByDesc('links.id')
-            ->first(['tasks.id', 'tasks.status', 'links.created_at']);
+            ->first(['links.id', 'tasks.status', 'links.created_at']);
         $unfinishedTurnover = $turnover !== null && $turnover->status !== 'done';
         $lastInspection = $this->latest($hotel, $roomId);
         $newTurnoverSinceInspection = $turnover !== null && $lastInspection !== null
-            && $turnover->created_at > $lastInspection->created_at;
+            && (int) $turnover->id > (int) $lastInspection->latest_turnover_link_id;
 
         return [
             'activeInventoryBlockToday' => $blocks,
@@ -127,6 +127,12 @@ final class RoomReadinessService
                 'cleaning_verified' => $input['cleaningVerified'],
                 'safety_verified' => $input['safetyVerified'],
                 'amenities_verified' => $input['amenitiesVerified'],
+                'latest_turnover_link_id' => (int) DB::table('reservation_turnover_links')
+                    ->where('hotel_id', $hotel->id)->where('room_id', $roomId)
+                    ->join('housekeeping_tasks as tasks', function ($join): void {
+                        $join->on('tasks.id', '=', 'reservation_turnover_links.housekeeping_task_id')
+                            ->on('tasks.hotel_id', '=', 'reservation_turnover_links.hotel_id');
+                    })->max('reservation_turnover_links.id'),
                 'inspector_note' => trim($input['note']),
                 'inspected_by' => $actor, 'created_at' => now(), 'updated_at' => now(),
             ]);
