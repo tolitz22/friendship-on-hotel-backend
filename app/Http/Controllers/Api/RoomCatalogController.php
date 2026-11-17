@@ -76,10 +76,24 @@ class RoomCatalogController
 
     public function rooms(Request $request, Hotel $hotel): JsonResponse
     {
-        $perPage = min(100, max(1, (int) $request->query('per_page', 20)));
+        $params = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'floor' => ['sometimes', 'integer', 'min:0', 'max:65535'],
+            'search' => ['sometimes', 'string', 'max:120'],
+        ]);
+        $perPage = (int) ($params['per_page'] ?? 20);
 
-        $results = $hotel->rooms()->with('roomType:id,name,max_occupancy')
-            ->orderBy('number')->paginate($perPage);
+        $query = $hotel->rooms()->with('roomType:id,name,max_occupancy');
+        if (array_key_exists('floor', $params)) {
+            $query->where('floor_number', (int) $params['floor']);
+        }
+        if (isset($params['search']) && trim($params['search']) !== '') {
+            $term = mb_strtolower(trim($params['search']));
+            $term = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term);
+            $query->whereRaw("LOWER(number) LIKE ? ESCAPE '!'", ['%'.$term.'%']);
+        }
+        $results = $query->orderBy('number')->orderBy('id')->paginate($perPage);
 
         return response()->json([
             'data' => $results->getCollection()->map(fn ($room): array => [
