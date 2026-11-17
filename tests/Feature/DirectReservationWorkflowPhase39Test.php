@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Models\Hotel;
 use App\Models\HotelMembership;
 use App\Models\RoomType;
+use App\Models\Room;
 use App\Models\User;
 use Laravel\Sanctum\Sanctum;
 
@@ -15,6 +16,7 @@ it('opens an exact reservation without relying on a paginated room list', functi
         'name' => 'Standard',
         'max_occupancy' => 2,
     ]);
+    Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => 'P39-101']);
     $guest = $hotel->guests()->create(['first_name' => 'Direct', 'last_name' => 'Guest']);
     $admin = User::create([
         'name' => 'Direct Admin',
@@ -55,6 +57,7 @@ it('never discloses a booking from another hotel or to a non-member', function (
         'name' => 'Standard',
         'max_occupancy' => 2,
     ]);
+    Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => 'P39-201']);
     $guest = $hotel->guests()->create(['first_name' => 'Scoped', 'last_name' => 'Guest']);
     $admin = User::create([
         'name' => 'Scoped Admin',
@@ -77,7 +80,7 @@ it('never discloses a booking from another hotel or to a non-member', function (
     ])->assertCreated()->json('data.id');
 
     $this->getJson('/api/v1/hotels/'.$other->id.'/reservation-records/'.$booking)
-        ->assertForbidden();
+        ->assertNotFound();
 
     $member = User::create([
         'name' => 'Direct Read Staff',
