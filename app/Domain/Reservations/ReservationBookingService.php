@@ -65,7 +65,7 @@ final class ReservationBookingService
                 // released states stop consuming inventory.
                 ->where(function ($query): void {
                     $query->whereNull('lifecycle_state')
-                        ->orWhereNotIn('lifecycle_state', ['cancelled', 'checked_out', 'no_show']);
+                        ->orWhereNotIn('lifecycle_state', config('booking.released_states', ['cancelled', 'checked_out', 'no_show']));
                 })
                 ->get(['check_in', 'check_out']);
 
