@@ -125,3 +125,7 @@ The repository now has \`.github/workflows/phase38-backend-checks.yml\`: PHP 8.4
 ## Phase 39 — Direct hotel-scoped reservation handoff
 
 The GET /api/v1/hotels/{hotel}/reservation-records/{booking} route is member-readable and uses the hotel->reservationRecords() relation before whereKey. It powers exact booking deep links from Front Desk and newly created reservations. Return only the existing structural LiveRecord fields and never bypass hotel.member middleware or expose other hotels' bookings. The frontend uses a validated numeric booking query parameter, while all booking creation, room assignment and lifecycle mutations retain Laravel's existing admin permissions. See frontend docs/PHASE_39_CONNECTED_STAFF_JOURNEY.md for browser acceptance. New feature test: DirectReservationWorkflowPhase39Test. Source is committed but tests not yet verified.
+
+## Phase 40 — Exact turnover task handoff
+
+See frontend docs/PHASE_40_EXACT_RECORD_RELIABILITY.md. GET /bookings/{booking}/turnover is a hotel-member-scoped, read-only lookup of the actual linked checkout-clean task. Keep the booking lookup and linked task joined under the same hotel ID. Do not create a task on GET, claim completed housekeeping verifies readiness, or return cross-tenant task details. Test CheckoutTurnoverHandoffPhase40Test; CI status not verified.
