@@ -77,3 +77,7 @@ The last completed frontend milestone remains **Hotel Settings & Configuration**
 ## Both SQL database engines
 
 The same room-type/physical-room FK schema and date ordering constraint are intended for MySQL 8.4 LTS and PostgreSQL 16+. Database engine selection happens in `.env`. See [Database compatibility](DATABASE_COMPATIBILITY.md). This does not add an inventory availability allocator or any reservation write API.
+
+## Phase 3 diagnostic extension
+
+Backend now has a read-only, single-room structural overlap diagnostic. It takes a half-open date window, excludes unassigned records and does not filter lifecycle states. An empty conflict list never grants availability. Detailed contract and tests: [PHASE_3.md](PHASE_3.md).
