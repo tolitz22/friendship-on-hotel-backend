@@ -113,6 +113,13 @@ it('rejects stale policy changes and requires hotel administrators', function ()
         'expectedRevision' => 0, 'enforceAtCheckIn' => false,
         'reason' => 'Stale revision must not deactivate',
     ])->assertStatus(409);
+    $this->patchJson($base, [
+        'expectedRevision' => 1, 'enforceAtCheckIn' => false,
+        'reason' => 'Authorized audited rollback of readiness gate',
+    ])->assertOk()->assertJsonPath('data.enforceAtCheckIn', false)
+        ->assertJsonPath('data.revision', 2);
+    $this->getJson($base.'/history')->assertOk()->assertJsonCount(2, 'data')
+        ->assertJsonPath('data.0.nextEnabled', false);
 
     $member = User::create([
         'name' => 'Phase36 Reader',
