@@ -92,3 +92,18 @@ it('requires active membership and read permission for diagnostics', function ()
     Sanctum::actingAs(diagnosticStaff($hotel), []);
     $this->getJson($url)->assertForbidden();
 });
+
+
+it('returns a non-availability diagnostic even when no assigned records match', function (): void {
+    $hotel = Hotel::create(['name' => 'Empty Diagnostic']);
+    $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2]);
+    $room = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '301']);
+    Sanctum::actingAs(diagnosticStaff($hotel), ['hotel:read']);
+
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/rooms/'.$room->id.'/reservation-overlaps?from=2026-11-17&to=2026-11-20')
+        ->assertOk()
+        ->assertJsonCount(0, 'data.records')
+        ->assertJsonCount(0, 'data.overlappingPairs')
+        ->assertJsonPath('meta.isAvailability', false)
+        ->assertJsonPath('meta.complete', true);
+});
