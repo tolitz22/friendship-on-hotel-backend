@@ -178,3 +178,7 @@ Staff can request emailed password resets, redeem one-use broker reset tokens, a
 ## Phase 17 — Opt-in Sanctum SPA Cookie Authentication
 
 Laravel now supports first-party browser sessions using Sanctum's stateful API middleware, `/sanctum/csrf-cookie`, token-free `POST /api/v1/auth/spa-login`, and session-invalidating `POST /api/v1/auth/spa-logout`. The old bearer-token auth remains the default. For local opt-in, set `SPA_SESSION_ENABLED=true`, `SANCTUM_STATEFUL_DOMAINS=localhost:5173`, and `FRONTEND_ORIGINS=http://localhost:5173`, with matching frontend cookie mode. Run `php artisan optimize:clear` after configuration changes. See [Phase 17](docs/PHASE_17_SANCTUM_SPA_SESSIONS.md). HTTPS, CSRF and browser validation are required before production rollout.
+
+## Phase 18 — Secure Staff Invitations
+
+Hotel administrators can invite **new staff accounts** by email without distributing passwords. Each invitation uses a one-time, hashed 48-hour token; the recipient creates a password and receives membership in only the invited hotel upon acceptance. Admins can review and revoke pending invitations. **Run `php artisan migrate`**, configure `STAFF_INVITE_URL`, and use a real SMTP transport for production email delivery. `MAIL_MAILER=log` only logs emails locally. See [Phase 18](docs/PHASE_18_STAFF_INVITATIONS.md).
