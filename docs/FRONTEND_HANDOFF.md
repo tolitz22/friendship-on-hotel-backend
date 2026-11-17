@@ -183,3 +183,11 @@ The policy defaults to \`enforceAtCheckIn:false\` with revision \`0\` (no row). 
 In \`VITE_DATA_SOURCE=api\`, the React Rooms page contains \`ReadinessEnforcementPanel\` and its room inspection panel accurately shows policy state. Front Desk reservation operations disable check-in when mandatory readiness is enabled and the current selected room has no approved clean assessment. The backend ALWAYS checks again under its hotel-first write lock, independent of frontend state. Missing policy data fails closed on the frontend.
 
 Default-off behavior preserves existing check-in rules until the administrator explicitly enables the policy. Enable only after migrated staging tests and a verified operational rollout. See \`docs/PHASE_36_TRANSACTIONAL_READINESS_ENFORCEMENT.md\` for lock scope, migration order, concurrency tests and audited rollback.
+
+## Phase 39 — Exact reservation read for linked staff operations
+
+GET /api/v1/hotels/{hotel}/reservation-records/{booking}
+
+The member-readable controller method returns a single saved structural reservation with the same shape as the /reservation-records list rows: id, hotelId, reference, roomTypeId, assignedRoomId, checkIn, checkOut, lifecycleState. The hotel->reservationRecords() relation scopes the lookup; no cross-tenant booking should be exposed. Backend booking mutations and authorization are unchanged.
+
+The React Front Desk uses this URL for direct per-arrival booking links; newly created bookings also open exact reservation operations without relying on list pagination. Inspect docs/PHASE_39_CONNECTED_STAFF_JOURNEY.md in frontend. Targeted backend test: DirectReservationWorkflowPhase39Test (written; not yet executed).
