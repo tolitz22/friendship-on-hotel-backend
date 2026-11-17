@@ -81,6 +81,9 @@ it('links a completed checkout to the exact hotel-scoped cleaning task', functio
         'role' => 'housekeeping', 'is_active' => true,
     ]);
     Sanctum::actingAs($staff, ['hotel:read']);
-    $this->getJson($turnover)->assertOk()
-        ->assertJsonPath('data.task.id', (string) $taskId);
+    // Phase 50 intentionally hides guest/booking relationships from housekeeping.
+    // Housekeeping operates on its own assigned task instead of reading turnover.
+    $this->getJson($turnover)->assertForbidden();
+    $this->getJson($base.'/housekeeping-tasks/'.$taskId)->assertOk()
+        ->assertJsonPath('data.id', (string) $taskId);
 });
