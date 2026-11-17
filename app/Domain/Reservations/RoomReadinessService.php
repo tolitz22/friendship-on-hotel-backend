@@ -127,12 +127,14 @@ final class RoomReadinessService
                 'cleaning_verified' => $input['cleaningVerified'],
                 'safety_verified' => $input['safetyVerified'],
                 'amenities_verified' => $input['amenitiesVerified'],
-                'latest_turnover_link_id' => (int) DB::table('reservation_turnover_links')
-                    ->where('hotel_id', $hotel->id)->where('room_id', $roomId)
+                'latest_turnover_link_id' => (int) DB::table('reservation_turnover_links as links')
                     ->join('housekeeping_tasks as tasks', function ($join): void {
-                        $join->on('tasks.id', '=', 'reservation_turnover_links.housekeeping_task_id')
-                            ->on('tasks.hotel_id', '=', 'reservation_turnover_links.hotel_id');
-                    })->max('reservation_turnover_links.id'),
+                        $join->on('tasks.id', '=', 'links.housekeeping_task_id')
+                            ->on('tasks.hotel_id', '=', 'links.hotel_id');
+                    })
+                    ->where('links.hotel_id', $hotel->id)
+                    ->where('tasks.room_id', $roomId)
+                    ->max('links.id'),
                 'inspector_note' => trim($input['note']),
                 'inspected_by' => $actor, 'created_at' => now(), 'updated_at' => now(),
             ]);
