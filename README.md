@@ -126,3 +126,7 @@ Do not run `composer install --no-dev` in local testing or CI. If you already ha
 ## Backend Phase 4 — Guest Management
 
 Added a hotel-scoped guest directory and validated profile create/update endpoints. Active hotel members can list/search/view; for this initial permissions model, only hotel admins with write-capable tokens may create or edit. No guest deletion endpoint or automatic reservation-to-guest linkage has been enabled. The frontend Guests page remains on mock data until its selected-hotel API routing and browser authentication are implemented. See [Guest Management Phase 4](docs/PHASE_4_GUESTS.md).
+
+## Phase 5 — Frontend sign-in and live guest directory
+
+The React frontend now supports developer-only in-memory Sanctum bearer sign-in, selected active hotel membership and a real Guests directory (search/read and admin create/edit). All other screens remain explicit previews. The backend's local CORS defaults include both `localhost:5173` and `127.0.0.1:5173`. Restart/clear config after changing `FRONTEND_ORIGINS` in the backend `.env`. Read [Phase 5 frontend integration](docs/PHASE_5_FRONTEND_INTEGRATION.md) and the frontend's `docs/PHASE_5_LARAVEL_INTEGRATION.md`.
