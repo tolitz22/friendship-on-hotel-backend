@@ -21,6 +21,7 @@ it('returns only selected hotel room bookings and blocks for a week', function (
     $room = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '101']);
     $guest = $hotel->guests()->create(['first_name' => 'Synthetic', 'last_name' => 'Calendar']);
     $otherRoom = Room::create(['hotel_id' => $other->id, 'room_type_id' => $otherType->id, 'number' => '900']);
+    $otherGuest = $other->guests()->create(['first_name' => 'Other', 'last_name' => 'Hotel']);
     DB::table('reservation_records')->insert([
         ['hotel_id' => $hotel->id, 'room_type_id' => $type->id,
             'guest_id' => $guest->id,
@@ -28,10 +29,12 @@ it('returns only selected hotel room bookings and blocks for a week', function (
             'check_in' => '2026-11-18', 'check_out' => '2026-11-20',
             'lifecycle_state' => 'confirmed'],
         ['hotel_id' => $other->id, 'room_type_id' => $otherType->id,
+            'guest_id' => $otherGuest->id,
             'assigned_room_id' => $otherRoom->id, 'reference' => 'SECRET',
             'check_in' => '2026-11-18', 'check_out' => '2026-11-20',
             'lifecycle_state' => 'confirmed'],
         ['hotel_id' => $hotel->id, 'room_type_id' => $type->id,
+            'guest_id' => $guest->id,
             'assigned_room_id' => null, 'reference' => 'UNASSIGNED',
             'check_in' => '2026-11-18', 'check_out' => '2026-11-20',
             'lifecycle_state' => 'confirmed'],
