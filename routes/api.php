@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
 use App\Http\Controllers\Api\ReservationPolicyReadinessController;
 use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
+use App\Http\Controllers\Api\OperationalExceptionsController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -99,6 +100,7 @@ Route::prefix('v1')->group(function (): void {
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
+                Route::get('/operational-exceptions', OperationalExceptionsController::class);
                 Route::get('/staff', [HotelStaffController::class, 'index']);
                 Route::get('/staff/invitations', [StaffInvitationController::class, 'index']);
                 Route::post('/staff/invitations', [StaffInvitationController::class, 'store'])->middleware('throttle:10,1');
