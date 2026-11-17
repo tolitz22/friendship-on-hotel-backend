@@ -114,6 +114,7 @@ final class RoomReadinessService
     public function inspect(Hotel $hotel, int $roomId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $roomId, $actor, $input): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $room = $this->room($hotel, $roomId, true);
             $previous = $this->latest($hotel, $roomId);
             if ($previous !== null && $previous->status === 'submitted') {
@@ -143,6 +144,7 @@ final class RoomReadinessService
     public function review(Hotel $hotel, int $roomId, int $inspectionId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $roomId, $inspectionId, $actor, $input): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $this->room($hotel, $roomId, true);
             $latest = $this->latest($hotel, $roomId);
             abort_unless($latest !== null && (int) $latest->id === $inspectionId, 404);
