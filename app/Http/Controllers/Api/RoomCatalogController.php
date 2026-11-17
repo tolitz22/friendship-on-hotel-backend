@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
 
 class RoomCatalogController
 {
@@ -39,17 +40,22 @@ class RoomCatalogController
             'floor' => ['nullable', 'integer', 'min:0', 'max:65535'],
         ])->validate();
 
-        $type = $hotel->roomTypes()->find($data['roomTypeId']);
+        // Serialize changes to physical room capacity with booking/block writers.
+        $result = DB::transaction(function () use ($hotel, $data): array {
+            $type = $hotel->roomTypes()->whereKey($data['roomTypeId'])->lockForUpdate()->first();
+            if (! $type) {
+                throw ValidationException::withMessages(['roomTypeId' => ['The room type does not belong to this property.']]);
+            }
 
-        if (! $type) {
-            throw ValidationException::withMessages(['roomTypeId' => ['The room type does not belong to this property.']]);
-        }
+            $room = $hotel->rooms()->create([
+                'room_type_id' => $type->id,
+                'number' => $data['number'],
+                'floor_number' => $data['floor'] ?? null,
+            ]);
 
-        $room = $hotel->rooms()->create([
-            'room_type_id' => $type->id,
-            'number' => $data['number'],
-            'floor_number' => $data['floor'] ?? null,
-        ]);
+            return [$room, $type];
+        }, 3);
+        [$room, $type] = $result;
 
         return response()->json(['data' => [
             'id' => (string) $room->id,
