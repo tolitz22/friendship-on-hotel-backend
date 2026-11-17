@@ -48,11 +48,29 @@ final class RoomReadinessService
         $newTurnoverSinceInspection = $turnover !== null && $lastInspection !== null
             && (int) $turnover->id > (int) $lastInspection->latest_turnover_link_id;
 
+        $unfinishedHousekeeping = DB::table('housekeeping_tasks')
+            ->where('hotel_id', $hotel->id)->where('room_id', $roomId)
+            ->where('status', '!=', 'done')->exists();
+        $latestHousekeepingId = (int) DB::table('housekeeping_tasks')
+            ->where('hotel_id', $hotel->id)->where('room_id', $roomId)->max('id');
+        $latestImpactOrderId = (int) DB::table('maintenance_work_orders')
+            ->where('hotel_id', $hotel->id)->where('room_id', $roomId)
+            ->where('affects_room', true)->max('id');
+        $latestBlockId = (int) DB::table('room_inventory_blocks')
+            ->where('hotel_id', $hotel->id)->where('room_id', $roomId)->max('id');
+        $newWorkSinceInspection = $lastInspection !== null
+            && ($latestHousekeepingId > (int) $lastInspection->latest_housekeeping_task_id
+                || $latestImpactOrderId > (int) $lastInspection->latest_room_impact_order_id
+                || $latestBlockId > (int) $lastInspection->latest_inventory_block_id);
+
+
         return [
             'activeInventoryBlockToday' => $blocks,
             'activeRoomImpactMaintenance' => $maintenance,
             'latestTurnoverIncomplete' => $unfinishedTurnover,
             'newTurnoverSinceInspection' => $newTurnoverSinceInspection,
+            'unfinishedHousekeeping' => $unfinishedHousekeeping,
+            'newRoomWorkSinceInspection' => $newWorkSinceInspection,
         ];
     }
 
@@ -135,6 +153,13 @@ final class RoomReadinessService
                     ->where('links.hotel_id', $hotel->id)
                     ->where('tasks.room_id', $roomId)
                     ->max('links.id'),
+                'latest_housekeeping_task_id' => (int) DB::table('housekeeping_tasks')
+                    ->where('hotel_id', $hotel->id)->where('room_id', $roomId)->max('id'),
+                'latest_room_impact_order_id' => (int) DB::table('maintenance_work_orders')
+                    ->where('hotel_id', $hotel->id)->where('room_id', $roomId)
+                    ->where('affects_room', true)->max('id'),
+                'latest_inventory_block_id' => (int) DB::table('room_inventory_blocks')
+                    ->where('hotel_id', $hotel->id)->where('room_id', $roomId)->max('id'),
                 'inspector_note' => trim($input['note']),
                 'inspected_by' => $actor, 'created_at' => now(), 'updated_at' => now(),
             ]);
