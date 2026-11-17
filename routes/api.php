@@ -60,6 +60,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
             Route::get('/catalog-summary', PropertyCatalogSummaryController::class);
             Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
+            Route::get('/reservation-records/{booking}', [ReservationRecordController::class, 'show'])->whereNumber('booking');
             Route::get('/bookings/{booking}/history', ReservationHistoryController::class)->whereNumber('booking');
             Route::get('/reservation-demand', ReservationDemandReportController::class);
             Route::get('/room-type-availability', [RoomInventoryController::class, 'availability']);
