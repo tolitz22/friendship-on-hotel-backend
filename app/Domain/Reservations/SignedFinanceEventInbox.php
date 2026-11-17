@@ -45,11 +45,12 @@ final class SignedFinanceEventInbox
         if (! is_array($decoded) || array_is_list($decoded)) {
             throw new HttpException(422, 'Expected a finance event JSON object.');
         }
-        if (array_keys($decoded) !== ['eventId','eventType','reference','amountMinor','currency','occurredAt']) {
+        if (array_keys($decoded) !== ['eventId','hotelId','eventType','reference','amountMinor','currency','occurredAt']) {
             throw new HttpException(422, 'Unexpected finance event fields.');
         }
 
         $eventId = $decoded['eventId'];
+        $hotelId = $decoded['hotelId'];
         $eventType = $decoded['eventType'];
         $reference = $decoded['reference'];
         $amount = $decoded['amountMinor'];
@@ -57,6 +58,7 @@ final class SignedFinanceEventInbox
         $occurredAt = $decoded['occurredAt'];
 
         if (! is_string($eventId) || ! preg_match('/^[A-Za-z0-9_.:-]{8,160}$/D', $eventId)
+            || ! is_int($hotelId) || $hotelId < 1
             || ! in_array($eventType, ['payment.observed','refund.observed'], true)
             || ! is_string($reference) || ! preg_match('/^[A-Za-z0-9_.:-]{3,120}$/D', $reference)
             || ! is_int($amount) || $amount <= 0 || $amount > 100000000000
@@ -67,16 +69,21 @@ final class SignedFinanceEventInbox
             throw new HttpException(422, 'Invalid finance event attributes.');
         }
 
+        if (! DB::table('hotels')->where('id', $hotelId)->exists()) {
+            throw new HttpException(422, 'Signed event refers to an unknown hotel.');
+        }
+
         // Canonical JSON contains *only* allowlisted fields; never retain the
         // raw HTTP envelope, secrets, arbitrary metadata, or personal data.
         $canonical = json_encode($decoded, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
         $digest = hash('sha256', $canonical);
 
-        return DB::transaction(function () use ($eventId, $eventType, $occurredAt, $canonical, $digest): array {
+        return DB::transaction(function () use ($eventId, $hotelId, $eventType, $occurredAt, $canonical, $digest): array {
             // Unique provider+event_id enforces deduplication even during a
             // race between two HTTP workers. Never read a missing-row lock.
             $inserted = DB::table('finance_gateway_events')->insertOrIgnore([
                 'provider' => 'custom_hmac_v1', 'event_id' => $eventId,
+                'hotel_id' => $hotelId,
                 'event_type' => $eventType,
                 'provider_occurred_at' => (new \DateTimeImmutable($occurredAt))->format('Y-m-d H:i:s'),
                 'payload_sha256' => $digest,
@@ -90,7 +97,7 @@ final class SignedFinanceEventInbox
             if ($record === null) {
                 throw new HttpException(503, 'Finance event could not be persisted.');
             }
-            if (! hash_equals($record->payload_sha256, $digest)) {
+            if ((int) $record->hotel_id !== $hotelId || ! hash_equals($record->payload_sha256, $digest)) {
                 throw new HttpException(409, 'Event identifier was reused with different content.');
             }
             return ['id' => (string) $record->id, 'replayed' => ! (bool) $inserted,
