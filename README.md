@@ -97,3 +97,7 @@ The React frontend's last completed milestone is **Hotel Settings & Configuratio
 **Do not set `VITE_DATA_SOURCE=api` and expect the existing UI to work yet.** Backend routes are property-scoped, and the frontend currently expects different paths plus operational status fields the backend does not have. Integrate one screen at a time after designing selected-hotel context and the browser authentication strategy.
 
 For business decisions still pending, read [BUSINESS_RULES.md](docs/BUSINESS_RULES.md). See [PHASE_1.md](docs/PHASE_1.md) for the exact scope and limitations.
+
+## Backend Phase 2 — reservation foundations (no live bookings)
+
+Phase 2 adds a schema for hotel-scoped reservation records, strict half-open date period semantics, pure known-room overlap detection, composite room/type integrity, and a read-only `GET /api/v1/hotels/{hotel}/reservation-records` endpoint. **It is not an availability or reservation creation engine.** Run `php artisan migrate` and `php artisan test` after pulling changes. See [Phase 2](docs/PHASE_2.md) and [reservation domain decisions](docs/RESERVATION_DOMAIN.md) before implementing booking writes.
