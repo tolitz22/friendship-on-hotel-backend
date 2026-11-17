@@ -100,6 +100,8 @@ Route::prefix('v1')->group(function (): void {
 
             // Phase 50: explicit low-risk operational permissions; all other
             // sensitive mutations remain inside the administrator group.
+            Route::get('/inventory-blocks', [RoomInventoryController::class, 'blocks'])
+                ->middleware('hotel.permission:booking.assign_room');
             Route::post('/bookings', [ReservationBookingController::class, 'store'])
                 ->middleware('hotel.permission:booking.create');
             Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])
@@ -119,7 +121,6 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/staff/history', [HotelStaffController::class, 'history']);
                 Route::post('/staff', [HotelStaffController::class, 'attach']);
                 Route::patch('/staff/{userId}', [HotelStaffController::class, 'update'])->whereNumber('userId');
-                Route::get('/inventory-blocks', [RoomInventoryController::class, 'blocks']);
                 Route::post('/inventory-blocks', [RoomInventoryController::class, 'block']);
                 Route::post('/inventory-blocks/{block}/release', [RoomInventoryController::class, 'release'])->whereNumber('block');
                 Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
