@@ -117,3 +117,7 @@ Source changes are published; successful local migrations, CI and browser end-to
 ## Phase 16 account recovery supersession
 
 Phase 16 adds real password reset emails and password-change APIs, addressing part of the previous staff-account provisioning gap. It does not yet provide secure invitation links, first-login password rotation, or production-ready HttpOnly SPA cookie authentication. See `docs/PHASE_16_STAFF_PASSWORD_SECURITY.md`.
+
+## Phase 18 secure invitation continuation
+
+New staff members can now be invited by email without the CLI temporary-password process. An invitation does not create a user or membership until the recipient accepts its hashed, 48-hour, single-use token and sets a password. Existing accounts still use the hotel staff attach flow. See `docs/PHASE_18_STAFF_INVITATIONS.md`.
