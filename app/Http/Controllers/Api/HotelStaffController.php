@@ -1,0 +1,93 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\Api;
+
+use App\Models\Hotel;
+use App\Models\HotelMembership;
+use App\Models\User;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
+
+final class HotelStaffController
+{
+    private const ROLES = ['admin','front_desk','housekeeping','maintenance'];
+
+    private function staffList(Hotel $hotel): array
+    {
+        return $hotel->memberships()->with('user:id,name,email,is_active')
+            ->orderBy('user_id')->get()
+            ->map(fn ($m): array => [
+                'userId'=>(string)$m->user_id,
+                'name'=>$m->user->name,
+                'email'=>$m->user->email,
+                'role'=>$m->role,
+                'isActive'=>(bool)$m->is_active,
+                'accountActive'=>(bool)$m->user->is_active,
+            ])->all();
+    }
+
+    public function index(Hotel $hotel): JsonResponse
+    {
+        return response()->json(['data'=>$this->staffList($hotel)]);
+    }
+
+    public function attach(Request $request, Hotel $hotel): JsonResponse
+    {
+        $data=$request->validate([
+            'email'=>['required','email','max:255'],
+            'role'=>['required',Rule::in(self::ROLES)],
+        ]);
+        $user=User::where('email',trim($data['email']))->first();
+        if (!$user || !$user->is_active) {
+            throw ValidationException::withMessages(['email'=>['An existing active account with this email is required.']]);
+        }
+
+        DB::transaction(function () use ($hotel,$user,$data): void {
+            DB::table('hotels')->where('id',$hotel->id)->lockForUpdate()->first();
+            if (HotelMembership::where('hotel_id',$hotel->id)->where('user_id',$user->id)->exists()) {
+                throw ValidationException::withMessages(['email'=>['This account already belongs to the hotel.']]);
+            }
+            HotelMembership::create([
+                'hotel_id'=>$hotel->id,'user_id'=>$user->id,
+                'role'=>$data['role'],'is_active'=>true,
+            ]);
+        });
+        return response()->json(['data'=>$this->staffList($hotel)],201);
+    }
+
+    public function update(Request $request, Hotel $hotel, string $userId): JsonResponse
+    {
+        $data=$request->validate([
+            'role'=>['sometimes','required',Rule::in(self::ROLES)],
+            'isActive'=>['sometimes','required','boolean'],
+        ]);
+
+        DB::transaction(function () use ($request,$hotel,$userId,$data): void {
+            // Lock the hotel to serialize membership changes and preserve at least one administrator.
+            DB::table('hotels')->where('id',$hotel->id)->lockForUpdate()->first();
+            $m=HotelMembership::where('hotel_id',$hotel->id)
+                ->where('user_id',$userId)->lockForUpdate()->firstOrFail();
+            $nextRole=$data['role']??$m->role;
+            $nextActive=$data['isActive']??$m->is_active;
+            if ((string)$request->user()->id===(string)$m->user_id
+                && (!$nextActive || $nextRole!=='admin')) {
+                throw ValidationException::withMessages(['role'=>['You cannot remove your own administrator access.']]);
+            }
+            if ($m->role==='admin' && $m->is_active && (!$nextActive || $nextRole!=='admin')) {
+                $count=HotelMembership::where('hotel_id',$hotel->id)
+                    ->where('role','admin')->where('is_active',true)->count();
+                if ($count<=1) {
+                    throw ValidationException::withMessages(['role'=>['The hotel must keep an active administrator.']]);
+                }
+            }
+            $m->update(['role'=>$nextRole,'is_active'=>$nextActive]);
+        });
+
+        return response()->json(['data'=>$this->staffList($hotel)]);
+    }
+}
