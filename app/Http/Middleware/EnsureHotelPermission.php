@@ -17,7 +17,7 @@ final class EnsureHotelPermission
 {
     private const ROLE_PERMISSIONS = [
         'admin' => ['booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room', 'guest.read', 'reservation.read', 'finance.read', 'approval.read', 'approval.request', 'cashier.read', 'cashier.write'],
-        'front_desk' => ['booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room', 'guest.read', 'reservation.read', 'finance.read', 'approval.read', 'approval.request'],
+        'front_desk' => ['booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room', 'guest.read', 'reservation.read', 'finance.read', 'approval.read', 'approval.request', 'cashier.read', 'cashier.write'],
         'housekeeping' => [],
         'maintenance' => [],
     ];
