@@ -49,3 +49,10 @@ Preserve property-bound Sanctum authorization. Frontend Phase 5 uses a temporary
 ## Phase 8 catalogue editing
 
 Read `docs/PHASE_8_CATALOG_EDITS.md`. Room/type edit PATCH calls must use the selected hotel's relationships, admin role and write token, transactionally audit actual changes, and block structural changes touching referenced reservation inventory. Never add a room type reassignment or max-occupancy override without explicit booking policy approval. Keep MySQL and PostgreSQL parity. No delete endpoint.
+
+
+## Phase 20 — Initial live reservation writes
+
+Read `docs/PHASE_20_LIVE_RESERVATIONS.md` before changing bookings. The Phase 1–19 prohibition on booking writes was superseded **only for the narrow, admin-only Phase 20 endpoints** `POST /bookings` and `POST /bookings/{booking}/cancel`. The initial policy is room-type selling, optional deferred assignment, confirmed-at-creation, no overbooking, no pricing or holds; all mutations must use `ReservationBookingService` and stable room-type locks. An unknown/nullable legacy lifecycle consumes capacity until reconciled. Do not enable front desk/public booking, availability claims, automatic room assignment, maintenance blocks, payment collection or frontend live-booking mode without implementing their full policies and tests.
+
+Production use is gated on a green Laravel suite and parallel last-room tests on **both MySQL/InnoDB and PostgreSQL**, plus maintenance/capacity review. SQLite tests alone do not verify inventory concurrency. Client-specific policy changes require versioning and relevant code/schema changes, not silent config toggles.
