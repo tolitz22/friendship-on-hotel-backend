@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\RoomCatalogController;
+use App\Http\Controllers\Api\ReservationRecordController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -22,6 +23,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/', [HotelController::class, 'show']);
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
+            Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
