@@ -43,6 +43,7 @@ All writes first lock the hotel row, then validate current hotel membership and 
 - A different manager can approve or reject a pending exception with a written reason.
 - Invalid/stale/revoked circumstances prevent approval; rejection is still possible to clear the queue.
 - Only an active `authorized_mock` entry may be revoked, by a hotel administrator, with a written reason. **Physical card revocation is not supported**.
+- Successful reservation **check-out automatically retires all active mock authorizations** for that booking in the same hotel-locked transaction and writes a per-authorization revocation audit event. A failed checkout rolls back the mock revocations. This does not communicate with physical locks.
 - Request/approval/rejection/mock-authorization/revocation events are append-only in the app and have no delete routes; privileged SQL can still alter records without database-level auditing.
 - The state reflects mock authorization decisions, not whether the guest has a working physical card or whether a lock accepted credentials.
 
