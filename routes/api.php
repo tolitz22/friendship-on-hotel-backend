@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\ReadinessEnforcementPolicyController;
 use App\Http\Controllers\Api\RoomReadinessDashboardController;
 use App\Http\Controllers\Api\RoomInventoryStatusController;
 use App\Http\Controllers\Api\NightAuditPreviewController;
+use App\Http\Controllers\Api\GuestStayHistoryController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
@@ -98,6 +99,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/maintenance-work-orders/{order}/history', [MaintenanceWorkOrderController::class, 'history'])->whereNumber('order');
             Route::get('/guests', [GuestController::class, 'index'])->middleware('hotel.permission:guest.read');
             Route::get('/guests/{guest}', [GuestController::class, 'show'])->whereNumber('guest')->middleware('hotel.permission:guest.read');
+            Route::get('/guests/{guest}/stays', GuestStayHistoryController::class)->whereNumber('guest')->middleware('hotel.permission:guest.read');
             Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
             Route::get('/rooms/{room}/readiness', [RoomReadinessController::class, 'show'])->whereNumber('room');
             Route::get('/rooms/{room}/readiness/history', [RoomReadinessController::class, 'history'])->whereNumber('room');
