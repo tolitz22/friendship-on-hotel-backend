@@ -41,3 +41,7 @@ Read `docs/PHASE_3.md`. The room-conflict diagnostic is scoped to one physical r
 ## Guest Management Phase 4
 
 Read `docs/PHASE_4_GUESTS.md` before expanding guest profiles. Guests are property-scoped personal data, not globally shared contacts. Current authorization: active hotel members can read; active hotel admins with `hotel:write` can create/update. No guest delete, merging or reservation-link workflow without explicit policy, audit and retention requirements. Keep both MySQL and PostgreSQL tests and protect personal information.
+
+## Phase 5 authentication and browser integration
+
+Preserve property-bound Sanctum authorization. Frontend Phase 5 uses a temporary in-memory bearer token only; production SPA auth design is still pending. The real Guests API must never silently use mock data on network/authorization failures. Do not grant write permissions based on frontend role labels. See `docs/PHASE_5_FRONTEND_INTEGRATION.md`.
