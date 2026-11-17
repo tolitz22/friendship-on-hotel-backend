@@ -105,6 +105,10 @@ final class ReservationRecordController
             ->where('hotel_id', $hotel->id)
             ->whereIn('id', $records->getCollection()->pluck('guest_id')->filter()->all())
             ->get(['id', 'first_name', 'last_name'])->keyBy('id');
+        $earlyRecords = DB::table('reservation_early_check_ins')
+            ->where('hotel_id', $hotel->id)
+            ->whereIn('reservation_record_id', $records->getCollection()->pluck('id')->all())
+            ->get()->keyBy('reservation_record_id');
 
         return response()->json([
             'data' => $records->getCollection()->map(fn ($record): array => [
@@ -121,6 +125,17 @@ final class ReservationRecordController
                 'checkIn' => $record->check_in->format('Y-m-d'),
                 'checkOut' => $record->check_out->format('Y-m-d'),
                 'lifecycleState' => $record->lifecycle_state,
+                'earlyCheckIn' => isset($earlyRecords[$record->id]) ? [
+                    'scheduledCheckIn' => $earlyRecords[$record->id]->scheduled_check_in,
+                    'actualCheckInDate' => $earlyRecords[$record->id]->actual_check_in_date,
+                    'actualCheckedInAt' => $earlyRecords[$record->id]->actual_checked_in_at,
+                    'approvalRequestId' => (string) $earlyRecords[$record->id]->approval_request_id,
+                    'requestedBy' => (string) $earlyRecords[$record->id]->requested_by,
+                    'approvedBy' => (string) $earlyRecords[$record->id]->approved_by,
+                    'checkedInBy' => (string) $earlyRecords[$record->id]->checked_in_by,
+                    'reason' => $earlyRecords[$record->id]->reason,
+                    'managerNote' => $earlyRecords[$record->id]->manager_note,
+                ] : null,
             ])->values(),
             'meta' => [
                 'page' => $records->currentPage(),
