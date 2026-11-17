@@ -106,8 +106,15 @@ final class ReservationStayLifecycleService
                 }
             }
 
+            // The actual occupied night must be reflected in operational
+            // inventory, otherwise the previous night could be sold again.
+            // Original booked dates remain immutable in the early-arrival audit.
+            $changes = ['lifecycle_state' => $next, 'updated_at' => now()];
+            if ($early) {
+                $changes['check_in'] = $hotelDate;
+            }
             DB::table('reservation_records')->where('hotel_id', $hotel->id)
-                ->where('id', $record->id)->update(['lifecycle_state' => $next, 'updated_at' => now()]);
+                ->where('id', $record->id)->update($changes);
             if ($operation === 'check_out') {
                 // Retire all mock keycard authorizations within this same
                 // locked checkout transaction. No physical credential changes.
