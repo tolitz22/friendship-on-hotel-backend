@@ -85,6 +85,44 @@ final class ReservationStayLifecycleService
 
             DB::table('reservation_records')->where('hotel_id', $hotel->id)
                 ->where('id', $record->id)->update(['lifecycle_state' => $next, 'updated_at' => now()]);
+            if ($operation === 'check_out') {
+                // Exactly one checkout turnover task per booking, written in the
+                // same transaction as the state transition and its audit event.
+                $taskId = DB::table('housekeeping_tasks')->insertGetId([
+                    'hotel_id' => $hotel->id,
+                    'room_id' => $record->assigned_room_id,
+                    'type' => 'checkout_clean',
+                    'status' => 'todo',
+                    'assigned_to' => null,
+                    'assigned_user_id' => null,
+                    'due_at' => null,
+                    'revision' => 1,
+                    'created_by' => $actor,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                DB::table('reservation_turnover_links')->insert([
+                    'hotel_id' => $hotel->id,
+                    'reservation_record_id' => $record->id,
+                    'housekeeping_task_id' => $taskId,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+                DB::table('housekeeping_task_events')->insert([
+                    'hotel_id' => $hotel->id,
+                    'task_id' => $taskId,
+                    'actor_id' => $actor,
+                    'action' => 'created',
+                    'before_state' => null,
+                    'after_state' => json_encode([
+                        'status' => 'todo', 'assignedTo' => null,
+                        'assignedUserId' => null, 'dueAt' => null,
+                    ], JSON_THROW_ON_ERROR),
+                    'note' => 'Checkout turnover for reservation '.$record->reference,
+                    'created_at' => now(),
+                ]);
+            }
+
             DB::table('reservation_booking_events')->insert([
                 'hotel_id' => $hotel->id,
                 'reservation_record_id' => $record->id,
