@@ -139,5 +139,8 @@ it('logs out a first-party cookie session without touching API token authenticat
 
     expect(Auth::guard('web')->check())->toBeFalse();
     expect(PersonalAccessToken::count())->toBe(0);
+    // Sanctum's RequestGuard may cache the previous test request's user.
+    // Force the next request to authenticate again against the invalidated session.
+    Auth::forgetGuards();
     $this->getJson('/api/v1/auth/me')->assertUnauthorized();
 });
