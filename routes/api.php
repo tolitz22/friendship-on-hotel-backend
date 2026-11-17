@@ -40,6 +40,7 @@ use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
 use App\Http\Controllers\Api\OccupancyVerificationController;
+use App\Http\Controllers\Api\KeycardAuthorizationController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -147,7 +148,18 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('verification')->middleware('hotel.permission:occupancy.observe')
                 ->middleware('throttle:20,1');
 
+            Route::get('/keycard-authorizations', [KeycardAuthorizationController::class, 'index'])
+                ->middleware('hotel.permission:keycard.read');
+            Route::get('/keycard-authorizations/{authorization}/history', [KeycardAuthorizationController::class, 'history'])
+                ->whereNumber('authorization')->middleware('hotel.permission:keycard.read');
+            Route::post('/keycard-authorizations', [KeycardAuthorizationController::class, 'store'])
+                ->middleware('hotel.permission:keycard.request')->middleware('throttle:20,1');
+
             Route::middleware('hotel.admin')->group(function (): void {
+                Route::post('/keycard-authorizations/{authorization}/review', [KeycardAuthorizationController::class, 'review'])
+                    ->whereNumber('authorization')->middleware('throttle:20,1');
+                Route::post('/keycard-authorizations/{authorization}/revoke', [KeycardAuthorizationController::class, 'revoke'])
+                    ->whereNumber('authorization')->middleware('throttle:20,1');
                 Route::post('/occupancy-verifications', [OccupancyVerificationController::class, 'assign'])
                     ->middleware('throttle:30,1');
                 Route::post('/occupancy-verifications/{verification}/review', [OccupancyVerificationController::class, 'review'])
