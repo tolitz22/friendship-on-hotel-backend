@@ -32,3 +32,7 @@ The `/reservation-policy-readiness` report identifies missing draft fields, pote
 ## Phase 12 — Simulation does not approve inventory
 
 `/reservation-simulation` only displays stored assigned-room overlaps and unassigned room-type demand for proposed dates. It includes every lifecycle state and cannot infer bookability. It is **not** a substitute for an approved transactional inventory allocator, status consumption policy or concurrency-safe booking writes. See `docs/PHASE_12_RESERVATION_SIMULATION.md`.
+
+## Phase 13 maintenance boundary
+
+Work orders and `affects_room` are now live maintenance records, **not** booking holds or room-night inventory blocks. Approve maintenance effective dates, manual vs automatic blocking, priority, overrides and release procedures before connecting work orders to reservation availability. See `docs/PHASE_13_LIVE_MAINTENANCE.md`.
