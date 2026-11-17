@@ -22,7 +22,7 @@ final class PayMongoSandboxWebhook
         $enabled = config('paymongo_sandbox.enabled', false);
         $secret = config('paymongo_sandbox.webhook_secret');
         $hotelId = filter_var(config('paymongo_sandbox.hotel_id'), FILTER_VALIDATE_INT);
-        if (! $enabled || ! is_string($secret) || strlen($secret) < 24
+        if (! $enabled || ! is_string($secret) || strlen($secret) < 32
             || ! $hotelId || $hotelId < 1) {
             throw new HttpException(503, 'PayMongo sandbox webhook is not configured.');
         }
