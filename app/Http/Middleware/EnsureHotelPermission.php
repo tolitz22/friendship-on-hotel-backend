@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class EnsureHotelPermission
 {
     private const ROLE_PERMISSIONS = [
-        'admin' => ['booking.create', 'booking.check_in', 'booking.check_out'],
+        'admin' => ['booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room'],
         'front_desk' => ['booking.create', 'booking.check_in', 'booking.check_out'],
         'housekeeping' => [],
         'maintenance' => [],
