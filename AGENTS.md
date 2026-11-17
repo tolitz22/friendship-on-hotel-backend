@@ -133,3 +133,8 @@ See frontend docs/PHASE_40_EXACT_RECORD_RELIABILITY.md. GET /bookings/{booking}/
 ## Phase 41 — PHP syntax CI gate
 
 The backend GitHub Actions workflow now runs php -l on all PHP files under app, routes, database and tests before route listing and the feature suite. This is a source syntax gate, not confirmation of passing Laravel feature tests, MySQL migration checks or true multi-process room-readiness locking tests. Preserve hotel-first locking and do not enable enforced check-in in a production property without those checks.
+
+
+## Phase 51 — Audited exception approvals
+
+Read `docs/PHASE_51_MANAGER_APPROVAL_WORKFLOWS.md`. Receptionists and administrators may request only `cancel_booking` or `amend_dates` for unpriced confirmed reservations; a different active hotel admin must approve/reject. An approval executes the existing cancellation/date-amendment domain service and both approval/event writes in one transaction, under the hotel-first readiness lock and original inventory/finance checks. A stale, expired, repriced, or already-reviewed request must never bypass domain validation. The manager's actor ID, requester's ID, and original booking snapshot remain separate and auditable. Housekeeping/maintenance have no access; frontend role display is not authorization. This does not permit repricing, refunds, payment changes, keycard issuance, or overriding readiness enforcement. MySQL/PostgreSQL concurrency and the full PHP/React suites remain launch gates until verified.
