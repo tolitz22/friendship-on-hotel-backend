@@ -132,13 +132,38 @@ it('records pending bank evidence and requires independent staff review', functi
 it('rejects payment evidence and excludes rejected amounts from provisional totals', function (): void {
     [$hotel, $type, $guest, $actor, $booking] = phase25Fixture();
     $base = phase25Base($hotel, $booking);
-    $id = $this->postJson($base.'/payment-records', [
-        'requestKey' => 'payment-reject-0001', 'method' => 'cash',
-        'reference' => 'CASH-COUNTER-2026-0001', 'amountMinor' => 200000,
+    // Phase 52 cash custody: a separate front-desk cashier first records
+    // the receipt in an open shift. The manager independently rejects it.
+    $cashier = User::create([
+        'name' => 'Phase 25 Cashier',
+        'email' => uniqid('p25cashier-').'@example.test',
+        'password' => 'Password123456!',
+    ]);
+    HotelMembership::create([
+        'hotel_id' => $hotel->id, 'user_id' => $cashier->id,
+        'role' => 'front_desk', 'is_active' => true,
+    ]);
+    Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $shift = $this->postJson('/api/v1/hotels/'.$hotel->id.'/cashier-shifts', [
+        'openingFloatMinor' => 0,
     ])->assertCreated()->json('data.id');
+    $id = $this->postJson('/api/v1/hotels/'.$hotel->id.'/cashier-shifts/'.$shift
+        .'/bookings/'.$booking.'/cash-receipts', [
+        'requestKey' => 'payment-reject-0001',
+        'reference' => 'CASH-COUNTER-2026-0001', 'amountMinor' => 200000,
+    ])->assertCreated()->assertJsonPath('data.status', 'pending_review')
+        ->json('data.paymentId');
+
+    Sanctum::actingAs($actor, ['hotel:read', 'hotel:write']);
     $this->postJson($base.'/payment-records/'.$id.'/review', [
         'decision' => 'reject', 'note' => 'Duplicate cash log entry',
     ])->assertOk()->assertJsonPath('data.status', 'rejected');
+    // Rejected accounting evidence does not imply physical cash was returned.
+    $this->assertDatabaseHas('cashier_shift_receipts', [
+        'hotel_id' => $hotel->id,
+        'shift_id' => $shift, 'payment_id' => $id,
+        'amount_minor' => 200000,
+    ]);
     $this->getJson($base.'/folio-ledger')->assertOk()
         ->assertJsonPath('data.summary.staffConfirmedPaymentsMinor', 0)
         ->assertJsonPath('data.summary.pendingReviewPaymentsMinor', 0)
