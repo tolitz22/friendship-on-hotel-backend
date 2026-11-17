@@ -96,3 +96,8 @@ Read `docs/PHASE_27_SIGNED_FINANCE_EVENTS.md`. A disabled-by-default **custom ge
 ## Phase 28 — PayMongo test-mode webhook boundary
 
 Read `docs/PHASE_28_PAYMONGO_SANDBOX.md`. The PayMongo sandbox adapter is separate from the generic Phase 27 HMAC example, disabled by default, and validates the documented `t`/`te` signature over the raw request body. Require a server-configured sandbox merchant-to-hotel binding, reject `livemode:true`, accept only short allowlisted event metadata, and never automatically post to folios, refunds or reservation states. No outbound payment checkout is enabled: the current PMS cannot issue a tax-complete final total. Do not present received test events as settled money or activate live credentials without provider verification and finance-policy completion.
+
+
+## Phase 32 frontend operational integration support
+
+`ReservationHistoryController` and the read-only `GET /hotels/{hotel}/bookings/{booking}/history` route expose a paginated, hotel-scoped reservation event log (actor ID, event type, old/new state and time) for the React Phase 32 operational panel. Read is allowed to active hotel members; assignment and lifecycle changes remain admin-only. Do not claim this history is a full financial ledger or verification of room readiness or guest identity. Frontend staff UI acknowledgement is not persisted in backend. Keep transaction lock ordering and current status/dated block validation in room assignment and check-in/out.
