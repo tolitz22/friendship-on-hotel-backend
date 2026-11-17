@@ -154,3 +154,7 @@ Added `reservation_policy_drafts` and `reservation_policy_draft_revisions` migra
 ## Phase 11 — Reservation Policy Readiness
 
 A new read-only `/api/v1/hotels/{hotel}/reservation-policy-readiness` endpoint reports missing policy choices, potentially conflicting options, and specifications required before safe booking implementation. Results are always advisory (`readyForBookings: false`, `approved: false`). No reservation writes or new tables are introduced. See [Phase 11](docs/PHASE_11_POLICY_READINESS.md).
+
+## Phase 12 — Read-only Stay Simulation
+
+New protected `GET /api/v1/hotels/{hotel}/reservation-simulation?roomId=&from=&to=` explains direct physical-room overlaps, unassigned room-type demand and other assigned same-type record counts for a proposed stay. All stored lifecycle states are included; reports **never** assert availability or bookability. No booking write route or new migration exists. See [Phase 12](docs/PHASE_12_RESERVATION_SIMULATION.md).
