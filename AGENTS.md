@@ -37,3 +37,7 @@ MySQL 8.4 and PostgreSQL 16+ are both supported targets. Read `docs/DATABASE_COM
 ## Backend Phase 3
 
 Read `docs/PHASE_3.md`. The room-conflict diagnostic is scoped to one physical room and supplied date window. It is read-only and explicitly not an availability function. Do not let the absence of collision pairs trigger a booking, room release, price quote, or check-in eligibility decision. Preserve both MySQL and PostgreSQL regression coverage.
+
+## Guest Management Phase 4
+
+Read `docs/PHASE_4_GUESTS.md` before expanding guest profiles. Guests are property-scoped personal data, not globally shared contacts. Current authorization: active hotel members can read; active hotel admins with `hotel:write` can create/update. No guest delete, merging or reservation-link workflow without explicit policy, audit and retention requirements. Keep both MySQL and PostgreSQL tests and protect personal information.
