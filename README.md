@@ -109,3 +109,16 @@ Both **MySQL 8.4 LTS/InnoDB** and **PostgreSQL 16+** are supported targets. Set 
 ## Backend Phase 3 — assigned-room conflict diagnostics
 
 Added a protected read-only endpoint: `GET /api/v1/hotels/{hotel}/rooms/{room}/reservation-overlaps?from=YYYY-MM-DD&to=YYYY-MM-DD`. It reports known assigned reservation records and intersecting date pairs for a selected physical room. Results are **not availability or overbooking determinations**; unassigned stays, holds and operational rules are not evaluated. Both MySQL and PostgreSQL CI jobs now run the full PHP suite. See [Phase 3](docs/PHASE_3.md).
+
+## Troubleshooting: `Class "Mockery" not found`
+
+Laravel's feature test harness uses Mockery. If all feature tests stop with that same error and zero assertions, install project **development** dependencies; do not change individual tests or your MySQL data.
+
+```powershell
+git pull origin main
+composer update mockery/mockery --with-all-dependencies
+composer dump-autoload
+php artisan test
+```
+
+Do not run `composer install --no-dev` in local testing or CI. If you already have a `composer.lock`, commit its intentional dependency changes once the test suite passes; do not commit `vendor/`. If additional failures appear after Mockery is available, inspect their first full stack trace separately.
