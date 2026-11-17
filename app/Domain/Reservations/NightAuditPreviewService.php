@@ -75,7 +75,7 @@ final class NightAuditPreviewService
         $pendingPayments = DB::table('folio_payment_records')->where('hotel_id',$hotel->id)
             ->where('status','pending_review')->count();
         $unreconciledShifts = DB::table('cashier_shifts')->where('hotel_id',$hotel->id)
-            ->where('status','closed')->count();
+            ->whereIn('status',['submitted','flagged'])->count();
 
         $problems = [];
         if ($missing !== []) $problems[] = 'Some priced reservations lack a recorded room-night entry.';
@@ -93,7 +93,7 @@ final class NightAuditPreviewService
                 'currency' => $currency,
                 'roomCount' => (int) $roomCount,
                 'scheduledRoomNights' => $eligible->count(),
-                'registeredInHouseNow' => $eligible->where('lifecycle_state', 'checked_in')->count(),
+                'currentCheckedInOnScheduledDate' => $eligible->where('lifecycle_state', 'checked_in')->count(),
                 'pricedRoomNights' => $folioRows->count(),
                 'postedRoomChargesMinor' => $postedMinor,
                 'missingNightEntries' => $missing,
