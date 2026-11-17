@@ -72,3 +72,7 @@ Set `VITE_DATA_SOURCE=api` and `VITE_API_URL=http://localhost:8000/api/v1` in fr
 Added backend `tests/Feature/HousekeepingTasksTest.php` for tenant isolation, role checks, status transitions, 409 conflicts, auditing and inventory separation. Frontend `src/api/liveHousekeeping.test.ts` checks endpoints, credentials, payloads, history and conflicts.
 
 The implementation has been published to GitHub; it still needs local/CI build and runtime verification.
+
+## Phase 15 permission supersession
+
+Phase 15 changes the earlier admin-only PATCH behavior: assigned active housekeeping members may now update the status/note of their **own linked `assigned_user_id` tasks**, with existing revision, audit and transition checks. Admins still control creation and assignments; arbitrary free-text `assigned_to` names confer no permission. See `docs/PHASE_15_STAFF_PERMISSIONS.md`.
