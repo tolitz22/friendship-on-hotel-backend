@@ -43,6 +43,9 @@ it('lets administrators attach existing staff without creating a user or exposin
     $this->postJson($url,['email'=>$worker->email,'role'=>'maintenance'])
         ->assertUnprocessable()->assertJsonValidationErrors(['email']);
     expect(User::count())->toBe(2);
+    $this->getJson($url.'/history')->assertOk()->assertJsonCount(1,'data')
+        ->assertJsonPath('data.0.action','attached')
+        ->assertJsonPath('data.0.after.role','housekeeping');
 });
 
 it('guards staff role updates, admin self lockout, and property isolation', function (): void {
@@ -61,6 +64,9 @@ it('guards staff role updates, admin self lockout, and property isolation', func
     $this->getJson('/api/v1/hotels/'.$b->id.'/staff')->assertNotFound();
     $this->patchJson('/api/v1/hotels/'.$b->id.'/staff/'.$worker->id,['role'=>'admin'])->assertNotFound();
     expect(HotelMembership::where('hotel_id',$a->id)->where('role','admin')->where('is_active',true)->count())->toBe(1);
+    $this->getJson($url.'/history')->assertOk()->assertJsonCount(1,'data')
+        ->assertJsonPath('data.0.before.role','maintenance')
+        ->assertJsonPath('data.0.after.role','housekeeping');
 });
 
 it('does not let non-admins manage staff memberships', function (): void {
@@ -143,4 +149,32 @@ it('revokes assigned task writes immediately after deactivating the hotel member
     Sanctum::actingAs($worker,['hotel:read']);
     $this->patchJson($base.'/housekeeping-tasks/'.$id,['expectedRevision'=>1,'status'=>'done'])->assertNotFound();
     expect(DB::table('housekeeping_tasks')->where('id',$id)->first()->status)->toBe('todo');
+});
+
+it('rejects assignees who belong only to a different hotel or the wrong operational role', function (): void {
+    $a=Hotel::create(['name'=>'Assignment Scope A']);
+    $b=Hotel::create(['name'=>'Assignment Scope B']);
+    $room=phase15Room($a);
+    $admin=phase15User('Assignment Admin');
+    $foreign=phase15User('Foreign Worker');
+    $wrongRole=phase15User('Front Desk Worker');
+    phase15Member($a,$admin,'admin');
+    phase15Member($b,$foreign,'housekeeping');
+    phase15Member($a,$wrongRole,'front_desk');
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $base='/api/v1/hotels/'.$a->id;
+    $this->postJson($base.'/housekeeping-tasks',[
+        'roomId'=>(string)$room->id,'type'=>'checkout_clean',
+        'assignedUserId'=>(string)$foreign->id,
+    ])->assertUnprocessable()->assertJsonValidationErrors(['assignedUserId']);
+    $this->postJson($base.'/housekeeping-tasks',[
+        'roomId'=>(string)$room->id,'type'=>'checkout_clean',
+        'assignedUserId'=>(string)$wrongRole->id,
+    ])->assertUnprocessable()->assertJsonValidationErrors(['assignedUserId']);
+    $this->postJson($base.'/maintenance-work-orders',[
+        'roomId'=>(string)$room->id,'title'=>'Repair','description'=>'Check wiring',
+        'priority'=>'medium','assignedUserId'=>(string)$foreign->id,
+    ])->assertUnprocessable()->assertJsonValidationErrors(['assignedUserId']);
+    expect(DB::table('housekeeping_tasks')->count())->toBe(0);
+    expect(DB::table('maintenance_work_orders')->count())->toBe(0);
 });
