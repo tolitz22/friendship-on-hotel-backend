@@ -129,9 +129,10 @@ final class ManagerApprovalService
                 ->where('hotel_memberships.hotel_id', $hotel->id)
                 ->where('hotel_memberships.user_id', $request->requested_by)
                 ->where('hotel_memberships.is_active', true)
+                ->whereIn('hotel_memberships.role', ['admin', 'front_desk'])
                 ->where('users.is_active', true)->exists();
             if (! $requesterActive) {
-                throw new HttpException(409, 'Requester is no longer an active hotel staff member.');
+                throw new HttpException(409, 'Requester no longer has an active authorized hotel role.');
             }
 
             $note = $note === null ? null : trim($note);
