@@ -125,3 +125,8 @@ Backend `main` now has admin-only `POST /bookings/{booking}/check-in`, `POST /bo
 ## Phase 23 — Front-desk manifest, date amendments and housekeeping turnover
 
 Backend `main` adds read-only `GET /api/v1/hotels/{hotel}/front-desk/manifest?date=YYYY-MM-DD&kind=arrivals|departures|in_house` and admin-only `PATCH /api/v1/hotels/{hotel}/bookings/{booking}/dates`. Date amendments are pre-arrival, preserve room type and assigned room, and perform nightly inventory checks; no repricing or payments are performed. A successful checkout creates a linked `checkout_clean` housekeeping task transactionally, but its existence or completion is not a room-readiness guarantee. Frontend mock booking and billing flows remain separate. See `docs/PHASE_23_RESERVATION_AMENDMENTS.md`.
+
+
+## Phase 24 — Backend nightly rates and immutable folio snapshots
+
+Backend `main` adds selected-property `GET/POST /rate-plans`, read-only `GET /room-quotes`, and `GET /bookings/{booking}/folio`. Admin bookings may optionally include `ratePlanId` to snapshot room-night charges in minor units and hotel currency. Quote and folio provide room subtotal only: taxes, fees, deposits, payments and final balance are NOT calculated. Priced bookings currently cannot be cancelled or amended because no reversal/repricing workflow exists. Do not wire up the mock billing UI as a functioning invoice/payment screen. See `docs/PHASE_24_FINANCE_FOUNDATION.md`.
