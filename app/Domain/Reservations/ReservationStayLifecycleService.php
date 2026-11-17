@@ -91,6 +91,10 @@ final class ReservationStayLifecycleService
             DB::table('reservation_records')->where('hotel_id', $hotel->id)
                 ->where('id', $record->id)->update(['lifecycle_state' => $next, 'updated_at' => now()]);
             if ($operation === 'check_out') {
+                // Retire all mock keycard authorizations within this same
+                // locked checkout transaction. No physical credential changes.
+                app(\App\Domain\Keycards\KeycardAuthorizationService::class)
+                    ->revokeForCompletedStay($hotel, (int) $bookingId, $actor);
                 // Exactly one checkout turnover task per booking, written in the
                 // same transaction as the state transition and its audit event.
                 $taskId = DB::table('housekeeping_tasks')->insertGetId([
