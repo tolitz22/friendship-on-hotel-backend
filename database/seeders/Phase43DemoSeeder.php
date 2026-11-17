@@ -35,6 +35,20 @@ final class Phase43DemoSeeder extends Seeder
         }
 
         $hotel = Hotel::findOrFail($hotelId);
+
+        // A disposable fixture must not be inserted into a property already
+        // containing real inventory, guest profiles, or unrelated bookings.
+        $unrelatedInventory = DB::table('room_types')->where('hotel_id', $hotel->id)
+            ->whereNotIn('name', ['Phase43 Standard Demo', 'Phase43 Family Demo'])->exists()
+            || DB::table('rooms')->where('hotel_id', $hotel->id)
+                ->whereNotIn('number', ['P43-101', 'P43-199', 'P43-201'])->exists();
+        $unrelatedGuests = DB::table('guests')->where('hotel_id', $hotel->id)
+            ->where('email', '!=', 'phase43-checkout@example.test')->exists();
+        $unrelatedBookings = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+            ->where('reference', 'not like', 'PHASE43-CHECKOUT-%')->exists();
+        if ($unrelatedInventory || $unrelatedGuests || $unrelatedBookings) {
+            throw new RuntimeException('This hotel contains non-fixture inventory, guests, or bookings. Use a dedicated empty synthetic hotel instead.');
+        }
         $actorId = DB::table('hotel_memberships as hm')
             ->join('users as u', 'u.id', '=', 'hm.user_id')
             ->where('hm.hotel_id', $hotel->id)
