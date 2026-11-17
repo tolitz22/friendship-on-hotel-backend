@@ -26,6 +26,7 @@ final class ReservationBookingService
         $fingerprint = hash('sha256', json_encode([
             'guestId' => (int) $data['guestId'],
             'roomTypeId' => (int) $data['roomTypeId'],
+            'ratePlanId' => isset($data['ratePlanId']) ? (int) $data['ratePlanId'] : null,
             'checkIn' => $period->arrival,
             'checkOut' => $period->departure,
         ], JSON_THROW_ON_ERROR));
@@ -59,6 +60,14 @@ final class ReservationBookingService
                 throw new HttpException(409, 'No inventory remains for every requested night.');
             }
 
+            // Optional price snapshot: existing legacy/unpriced bookings stay
+            // supported and are never assigned an invented nightly rate.
+            $quote = isset($data['ratePlanId'])
+                ? app(RoomRateQuoteService::class)->quote(
+                    $hotel, (int) $type->id, (int) $data['ratePlanId'], $period
+                )
+                : null;
+
             $id = DB::table('reservation_records')->insertGetId([
                 'hotel_id' => $hotel->id,
                 'room_type_id' => $type->id,
@@ -80,6 +89,28 @@ final class ReservationBookingService
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
+
+            if ($quote !== null) {
+                $folioId = DB::table('reservation_folios')->insertGetId([
+                    'hotel_id' => $hotel->id,
+                    'reservation_record_id' => $id,
+                    'currency' => $quote['currency'],
+                    'created_by' => $actorId,
+                    'created_at' => now(), 'updated_at' => now(),
+                ]);
+                foreach ($quote['nights'] as $night) {
+                    DB::table('folio_entries')->insert([
+                        'folio_id' => $folioId, 'hotel_id' => $hotel->id,
+                        'entry_type' => 'room_night',
+                        'description' => 'Room night '.$night,
+                        'amount_minor' => $quote['nightlyMinor'],
+                        'rate_plan_id' => $data['ratePlanId'],
+                        'stay_date' => $night,
+                        'actor_id' => $actorId,
+                        'created_at' => now(), 'updated_at' => now(),
+                    ]);
+                }
+            }
 
             $this->audit($hotel->id, $id, $actorId, 'created', null, 'confirmed');
 
