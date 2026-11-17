@@ -154,7 +154,6 @@ final class OccupancyVerificationService
                 ->where('hotel_id', $hotel->id)->where('assigned_room_id', $row->room_id)
                 ->where('lifecycle_state', 'checked_in')
                 ->where('check_in', '<=', $row->inspection_date)
-                ->where('check_out', '>', $row->inspection_date)
                 ->orderBy('id')->pluck('id')->map(fn ($id): string => (string) $id)->all();
             $expected = count($bookings) ? 'occupied' : 'vacant';
             $observed = $input['observedOccupancy'];
