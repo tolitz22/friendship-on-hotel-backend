@@ -14,9 +14,12 @@ final class RoomInventoryStatusController
     public function __invoke(Request $request, Hotel $hotel, RoomInventoryStatusService $service): JsonResponse
     {
         $input = $request->validate([
-            'room_ids' => ['required', 'array', 'min:1', 'max:100'],
-            'room_ids.*' => ['required', 'integer', 'min:1', 'distinct'],
+            'room_ids' => ['required', 'string', 'max:1200', 'regex:/^[1-9][0-9]*(,[1-9][0-9]*)*$/'],
         ]);
-        return response()->json($service->forRooms($hotel, $input['room_ids']));
+        $ids = explode(',', $input['room_ids']);
+        if (count($ids) > 100 || count($ids) !== count(array_unique($ids))) {
+            return response()->json(['message' => 'Provide up to 100 distinct room IDs.'], 422);
+        }
+        return response()->json($service->forRooms($hotel, array_map('intval', $ids)));
     }
 }
