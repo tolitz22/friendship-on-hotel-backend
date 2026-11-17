@@ -71,3 +71,8 @@ Read `docs/PHASE_22_RESERVATION_OPERATIONS.md`. New admin-only check-in/check-ou
 ## Phase 23 — Reservation date amendments and turnover
 
 Read `docs/PHASE_23_RESERVATION_AMENDMENTS.md`. Date amendments are admin-only, confirmed and pre-arrival, share room-type locks, check all amended nights, preserve physical room assignment and write immutable date audit records. Front-desk manifests are read-only and hotel-scoped. Successful checkout creates exactly one `checkout_clean` housekeeping task in the checkout transaction. No automatic room readiness, rate repricing or early-departure financial adjustment is implied. The frontend booking wizard remains disconnected pending API contract and concurrency validation.
+
+
+## Phase 24 — Room rate snapshots and unpriced legacy compatibility
+
+Read `docs/PHASE_24_FINANCE_FOUNDATION.md`. Hotel administrators may create fixed nightly `room_rate_plans`; optionally priced bookings snapshot one room-night folio entry per night atomically within booking creation. Amounts are integer minor units and quote only room subtotal; never imply tax, invoice, payment, fee or deposit calculation. Unpriced legacy booking creation still works. Priced bookings cannot be amended or cancelled with the old unfunded/no-reversal routes. Before live financial use, implement approved refund/reversal, tax and payment settlement policies plus MySQL/PostgreSQL integration tests.
