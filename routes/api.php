@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\GuestController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\RoomCatalogController;
@@ -25,12 +26,16 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
             Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
+            Route::get('/guests', [GuestController::class, 'index']);
+            Route::get('/guests/{guest}', [GuestController::class, 'show'])->whereNumber('guest');
             Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
                 Route::post('/rooms', [RoomCatalogController::class, 'createRoom']);
+                Route::post('/guests', [GuestController::class, 'store']);
+                Route::patch('/guests/{guest}', [GuestController::class, 'update'])->whereNumber('guest');
             });
         });
     });
