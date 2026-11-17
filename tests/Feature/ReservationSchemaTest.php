@@ -132,8 +132,10 @@ it('rejects a reservation update that makes checkout equal to checkin', function
         'reference'=>'DATE-UPDATE','check_in'=>'2026-11-17','check_out'=>'2026-11-20',
     ]);
 
-    expect(fn () => DB::table('reservation_records')->where('id',$id)
-        ->update(['check_out'=>'2026-11-17']))
+    // PostgreSQL leaves its transaction aborted after a constraint error.
+    // Roll back the failed update to a nested savepoint before reading the row.
+    expect(fn () => DB::transaction(fn () => DB::table('reservation_records')
+        ->where('id',$id)->update(['check_out'=>'2026-11-17'])))
         ->toThrow(\Illuminate\Database\QueryException::class);
 
     expect(DB::table('reservation_records')->find($id)->check_out)
