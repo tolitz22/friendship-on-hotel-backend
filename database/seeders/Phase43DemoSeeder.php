@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
-use App\Models\Guest;
 use App\Models\Hotel;
 use App\Models\Room;
 use App\Models\RoomType;
@@ -132,8 +131,8 @@ final class Phase43DemoSeeder extends Seeder
 
             // No real person, email or phone. This named fixture is stable
             // across re-runs; Playwright creates a separate synthetic guest.
-            $guest = Guest::firstOrCreate(
-                ['hotel_id' => $hotel->id, 'email' => 'phase43-checkout@example.test'],
+            $guest = $hotel->guests()->firstOrCreate(
+                ['email' => 'phase43-checkout@example.test'],
                 ['first_name' => 'Synthetic', 'last_name' => 'Checkout', 'nationality' => null]
             );
 
