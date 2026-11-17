@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\FinanceWebhookController;
 use App\Http\Controllers\Api\PayMongoSandboxController;
 use App\Http\Controllers\Api\FinanceEventReviewController;
 use App\Http\Controllers\Api\RoomInventoryController;
+use App\Http\Controllers\Api\RoomReadinessController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
@@ -83,6 +84,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/guests', [GuestController::class, 'index']);
             Route::get('/guests/{guest}', [GuestController::class, 'show'])->whereNumber('guest');
             Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
+            Route::get('/rooms/{room}/readiness', [RoomReadinessController::class, 'show'])->whereNumber('room');
+            Route::get('/rooms/{room}/readiness/history', [RoomReadinessController::class, 'history'])->whereNumber('room');
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
@@ -121,6 +124,8 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/room-types/{type}', [CatalogEditController::class, 'updateType'])->whereNumber('type');
                 Route::patch('/rooms/{room}', [CatalogEditController::class, 'updateRoom'])->whereNumber('room');
                 Route::get('/catalog-audit', [CatalogEditController::class, 'audit']);
+                Route::post('/rooms/{room}/readiness/inspections', [RoomReadinessController::class, 'inspect'])->whereNumber('room');
+                Route::post('/rooms/{room}/readiness/inspections/{inspection}/review', [RoomReadinessController::class, 'review'])->whereNumber('room')->whereNumber('inspection');
                 Route::post('/housekeeping-tasks', [HousekeepingTaskController::class, 'store']);
                 Route::post('/maintenance-work-orders', [MaintenanceWorkOrderController::class, 'store']);
                 Route::post('/guests', [GuestController::class, 'store']);
