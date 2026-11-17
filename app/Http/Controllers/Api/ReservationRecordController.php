@@ -11,6 +11,26 @@ use Illuminate\Http\Request;
 final class ReservationRecordController
 {
     /**
+     * Read a specific saved record for Front Desk deep links. The hotel scope
+     * is mandatory: never reveal a booking by its global ID alone.
+     */
+    public function show(Hotel $hotel, string $booking): JsonResponse
+    {
+        $record = $hotel->reservationRecords()->whereKey($booking)->firstOrFail();
+
+        return response()->json(['data' => [
+            'id' => (string) $record->id,
+            'hotelId' => (string) $record->hotel_id,
+            'reference' => $record->reference,
+            'roomTypeId' => (string) $record->room_type_id,
+            'assignedRoomId' => $record->assigned_room_id === null ? null : (string) $record->assigned_room_id,
+            'checkIn' => $record->check_in->format('Y-m-d'),
+            'checkOut' => $record->check_out->format('Y-m-d'),
+            'lifecycleState' => $record->lifecycle_state,
+        ]]);
+    }
+
+    /**
      * Structural reservation records only; this is not a booking or availability API.
      */
     public function index(Request $request, Hotel $hotel): JsonResponse
