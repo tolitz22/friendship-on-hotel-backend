@@ -56,3 +56,8 @@ Read `docs/PHASE_8_CATALOG_EDITS.md`. Room/type edit PATCH calls must use the se
 Read `docs/PHASE_20_LIVE_RESERVATIONS.md` before changing bookings. The Phase 1–19 prohibition on booking writes was superseded **only for the narrow, admin-only Phase 20 endpoints** `POST /bookings` and `POST /bookings/{booking}/cancel`. The initial policy is room-type selling, optional deferred assignment, confirmed-at-creation, no overbooking, no pricing or holds; all mutations must use `ReservationBookingService` and stable room-type locks. An unknown/nullable legacy lifecycle consumes capacity until reconciled. Do not enable front desk/public booking, availability claims, automatic room assignment, maintenance blocks, payment collection or frontend live-booking mode without implementing their full policies and tests.
 
 Production use is gated on a green Laravel suite and parallel last-room tests on **both MySQL/InnoDB and PostgreSQL**, plus maintenance/capacity review. SQLite tests alone do not verify inventory concurrency. Client-specific policy changes require versioning and relevant code/schema changes, not silent config toggles.
+
+
+## Phase 21 — Live room-type inventory and explicit dated blocks
+
+Read `docs/PHASE_21_ROOM_INVENTORY.md` before editing inventory behavior. `RoomInventoryService` owns nightly availability, dated physical-room inventory blocks, and confirmed reservation room assignment. Booking creation rechecks availability while holding the same room-type lock. Do not treat work-order `affects_room` or housekeeping completion as automatic inventory status; those records currently have no approved effective-night rules. Admin only for blocks, release, and room assignment. Production concurrency and catalogue shrink safeguards remain unverified.
