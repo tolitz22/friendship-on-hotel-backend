@@ -76,4 +76,4 @@ jobs:
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
       - name: PostgreSQL reservation integrity tests
-        run: php artisan test --filter=ReservationSchemaTest
+        run: php artisan test tests/Feature/ReservationSchemaTest.php
