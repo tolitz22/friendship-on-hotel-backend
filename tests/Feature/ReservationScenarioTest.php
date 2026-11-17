@@ -48,7 +48,7 @@ it('protects room ownership and reports real structural records without claiming
         ['hotel_id'=>$a->id,'room_type_id'=>$type->id,'assigned_room_id'=>$room->id,
          'reference'=>'CANCELLED','check_in'=>'2026-11-18','check_out'=>'2026-11-21','lifecycle_state'=>'cancelled'],
         ['hotel_id'=>$a->id,'room_type_id'=>$type->id,'assigned_room_id'=>null,
-         'reference'=>'TYPE DEMAND','check_in'=>'2026-11-19','check_out'=>'2026-11-21'],
+         'reference'=>'TYPE DEMAND','check_in'=>'2026-11-19','check_out'=>'2026-11-21','lifecycle_state'=>null],
         ['hotel_id'=>$b->id,'room_type_id'=>$otherType->id,'assigned_room_id'=>$otherRoom->id,
          'reference'=>'PRIVATE','check_in'=>'2026-11-19','check_out'=>'2026-11-21'],
     ]);
