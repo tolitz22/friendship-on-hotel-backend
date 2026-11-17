@@ -50,7 +50,7 @@ it('protects room ownership and reports real structural records without claiming
         ['hotel_id'=>$a->id,'room_type_id'=>$type->id,'assigned_room_id'=>null,
          'reference'=>'TYPE DEMAND','check_in'=>'2026-11-19','check_out'=>'2026-11-21','lifecycle_state'=>null],
         ['hotel_id'=>$b->id,'room_type_id'=>$otherType->id,'assigned_room_id'=>$otherRoom->id,
-         'reference'=>'PRIVATE','check_in'=>'2026-11-19','check_out'=>'2026-11-21'],
+         'reference'=>'PRIVATE','check_in'=>'2026-11-19','check_out'=>'2026-11-21','lifecycle_state'=>null],
     ]);
     $base='/api/v1/hotels/'.$a->id.'/reservation-simulation';
     $query='?roomId='.$room->id.'&from=2026-11-19&to=2026-11-22';
