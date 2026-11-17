@@ -42,7 +42,7 @@ final class HotelStaffController
             'email'=>['required','email','max:255'],
             'role'=>['required',Rule::in(self::ROLES)],
         ]);
-        $user=User::where('email',trim($data['email']))->first();
+        $user=User::whereRaw('LOWER(email) = ?', [strtolower(trim($data['email']))])->first();
         if (!$user || !$user->is_active) {
             throw ValidationException::withMessages(['email'=>['An existing active account with this email is required.']]);
         }
