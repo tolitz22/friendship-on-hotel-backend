@@ -39,10 +39,10 @@ function phase27Fixture(): array
     return [$hotel, $booking, $admin];
 }
 
-function phase27EventPayload(string $reference = 'BANK-P27-TEST', int $amount = 10000, string $id = 'p27-event-0001'): array
+function phase27EventPayload(string $reference = 'BANK-P27-TEST', int $amount = 10000, string $id = 'p27-event-0001', int $hotelId = 1): array
 {
     return [
-        'eventId' => $id, 'eventType' => 'payment.observed',
+        'eventId' => $id, 'hotelId' => $hotelId, 'eventType' => 'payment.observed',
         'reference' => $reference, 'amountMinor' => $amount,
         'currency' => 'PHP', 'occurredAt' => '2026-11-17T15:00:00+08:00',
     ];
@@ -78,11 +78,12 @@ it('rejects forged and stale signatures and never records financial settlement',
     phase27Webhook($this, phase27EventPayload(), null, (string) (now()->timestamp - 500))->assertUnauthorized();
     expect(DB::table('finance_gateway_events')->count())->toBe(0);
 
-    $id = phase27Webhook($this, phase27EventPayload())->assertStatus(202)
+    $hotel = Hotel::create(['name' => 'Signed Inbox Test Property', 'currency' => 'PHP']);
+    $id = phase27Webhook($this, phase27EventPayload(hotelId: (int) $hotel->id))->assertStatus(202)
         ->assertJsonPath('data.status', 'unmapped')->json('data.id');
-    phase27Webhook($this, phase27EventPayload())->assertOk()
+    phase27Webhook($this, phase27EventPayload(hotelId: (int) $hotel->id))->assertOk()
         ->assertJsonPath('data.id', $id)->assertJsonPath('data.replayed', true);
-    phase27Webhook($this, phase27EventPayload('BANK-P27-DIFFERENT'))->assertStatus(409);
+    phase27Webhook($this, phase27EventPayload('BANK-P27-DIFFERENT', hotelId: (int) $hotel->id))->assertStatus(409);
     expect(DB::table('finance_gateway_events')->count())->toBe(1);
     expect(DB::table('folio_payment_records')->count())->toBe(0);
     expect(DB::table('folio_refund_requests')->count())->toBe(0);
@@ -99,7 +100,7 @@ it('matches signed event references to a property payment without marking it set
         'requestKey' => 'p27-payment-0001', 'method' => 'bank_transfer',
         'reference' => 'BANK-P27-TEST', 'amountMinor' => 10000,
     ])->assertCreated()->json('data.id');
-    $eventId = phase27Webhook($this, phase27EventPayload())->assertStatus(202)->json('data.id');
+    $eventId = phase27Webhook($this, phase27EventPayload(hotelId: (int) $hotel->id))->assertStatus(202)->json('data.id');
 
     $this->postJson($base.'/finance-event-reviews', [
         'eventId' => $eventId, 'paymentRecordId' => $payment,
@@ -113,6 +114,9 @@ it('matches signed event references to a property payment without marking it set
     ])->assertStatus(409);
     $this->getJson($base.'/finance-event-reviews')
         ->assertOk()->assertJsonCount(1, 'data');
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/finance/events')
+        ->assertOk()->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.status', 'reference_matched');
     $this->getJson($base.'/folio-ledger')->assertOk()
         ->assertJsonPath('data.summary.isSettled', false)
         ->assertJsonPath('data.summary.bankOrGatewayVerified', false);
@@ -136,8 +140,33 @@ it('rejects mismatched amounts and forbids cross-property event reviews', functi
         'note' => 'Mismatch rejection test',
     ])->assertStatus(409);
     $outside = Hotel::create(['name' => 'Other Phase27 Hotel', 'currency' => 'PHP']);
+    $this->getJson('/api/v1/hotels/'.$outside->id.'/finance/events')->assertNotFound();
     $this->getJson('/api/v1/hotels/'.$outside->id.'/bookings/'.$booking.'/finance-event-reviews')
         ->assertNotFound();
+    expect(DB::table('finance_gateway_event_reviews')->count())->toBe(0);
+});
+
+it('prevents a hotel from matching a signed event bound to another hotel', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-11-17T15:00:00+08:00'));
+    config()->set('finance_gateway.custom_hmac_v1.enabled', true);
+    config()->set('finance_gateway.custom_hmac_v1.secret', 'phase27-test-secret-should-have-32-bytes-minimum');
+    [$hotel, $booking] = phase27Fixture();
+    $other = Hotel::create(['name' => 'Event Recipient Hotel', 'currency' => 'PHP']);
+    $base = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking;
+    $payment = $this->postJson($base.'/payment-records', [
+        'requestKey' => 'p27-payment-cross-001', 'method' => 'bank_transfer',
+        'reference' => 'BANK-P27-TEST', 'amountMinor' => 10000,
+    ])->assertCreated()->json('data.id');
+    $eventId = phase27Webhook($this, phase27EventPayload(
+        id: 'p27-event-cross-0001', hotelId: (int) $other->id
+    ))->assertStatus(202)->json('data.id');
+
+    $this->postJson($base.'/finance-event-reviews', [
+        'eventId' => $eventId, 'paymentRecordId' => $payment,
+        'note' => 'Must not cross hotel boundary',
+    ])->assertNotFound();
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/finance/events')
+        ->assertOk()->assertJsonCount(0, 'data');
     expect(DB::table('finance_gateway_event_reviews')->count())->toBe(0);
 });
 
