@@ -256,6 +256,34 @@ final class KeycardAuthorizationService
         }, 3);
     }
 
+    /**
+     * Called from the reservation checkout transaction after the hotel lock is held.
+     * This retires only mock records; no physical card is ever invalidated.
+     */
+    public function revokeForCompletedStay(Hotel $hotel, int $bookingId, int $actor): int
+    {
+        $records = DB::table('keycard_authorizations')->where('hotel_id', $hotel->id)
+            ->where('reservation_record_id', $bookingId)
+            ->where('status', 'authorized_mock')->orderBy('id')->lockForUpdate()->get();
+        foreach ($records as $record) {
+            $response = app(KeycardProvider::class)->revoke((int) $hotel->id, (int) $record->id);
+            if ($response['provider'] !== 'mock' || $response['physicalCardRevoked'] !== false) {
+                throw new HttpException(503, 'Physical keycard revocation is not configured.');
+            }
+            DB::table('keycard_authorizations')->where('id', $record->id)->update([
+                'status' => 'revoked', 'revoked_by' => $actor,
+                'revocation_note' => 'Mock authorization retired automatically at reservation checkout.',
+                'revoked_at' => now(), 'updated_at' => now(),
+            ]);
+            $this->event($hotel, (int) $record->id, $actor, 'revoked', [
+                'reason' => 'reservation_checkout',
+                'bookingId' => (string) $bookingId,
+                'physicalCardRevoked' => false,
+            ]);
+        }
+        return $records->count();
+    }
+
     public function revoke(Hotel $hotel, int $actor, int $id, string $note): array
     {
         return DB::transaction(function () use ($hotel, $actor, $id, $note): array {
