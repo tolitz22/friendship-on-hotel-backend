@@ -134,3 +134,7 @@ The React frontend now supports developer-only in-memory Sanctum bearer sign-in,
 ## Phase 6 — Live Catalogue APIs
 
 New `GET /api/v1/hotels/{hotel}/catalog-summary` returns registered room totals, type counts and floor groups, **not occupancy or availability**. Property-scoped `GET /rooms` now validates optional `floor` and `search` filters. Both MySQL and PostgreSQL remain supported and `tests/Feature/LiveCatalogTest.php` covers isolation and boundary cases. See [Phase 6 backend contract](docs/PHASE_6_LIVE_CATALOG.md).
+
+## Phase 7 — Admin room setup through React
+
+The React Settings and Room Inventory screens now use the existing admin-only room type/room creation endpoints. No new migration is needed. Added `tests/Feature/CatalogAdministrationTest.php` covering input validation, hotel isolation and permission boundaries. See [Phase 7](docs/PHASE_7_CATALOG_ADMIN.md). This creates room catalogue records, not availability or bookings.
