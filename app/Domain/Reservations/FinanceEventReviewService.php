@@ -20,6 +20,7 @@ final class FinanceEventReviewService
         return DB::table('finance_gateway_event_reviews as reviews')
             ->join('folio_payment_records as payments', 'payments.id', '=', 'reviews.payment_record_id')
             ->join('finance_gateway_events as events', 'events.id', '=', 'reviews.event_id')
+            ->where('events.hotel_id', $hotel->id)
             ->where('reviews.hotel_id', $hotel->id)
             ->where('payments.hotel_id', $hotel->id)
             ->where('payments.folio_id', $folio->id)
@@ -47,6 +48,9 @@ final class FinanceEventReviewService
             $event = DB::table('finance_gateway_events')->where('id', $input['eventId'])
                 ->lockForUpdate()->first();
             abort_unless($event !== null, 404);
+            if ((int) $event->hotel_id !== (int) $hotel->id) {
+                throw new HttpException(404, 'Finance event does not belong to this hotel.');
+            }
             if ($event->provider !== 'custom_hmac_v1' || $event->event_type !== 'payment.observed') {
                 throw new HttpException(409, 'Event does not represent an observed payment.');
             }
