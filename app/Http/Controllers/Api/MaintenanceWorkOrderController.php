@@ -103,6 +103,7 @@ final class MaintenanceWorkOrderController
 
         TaskStaffAccess::verifyAssignee($hotel,isset($data['assignedUserId'])?(int)$data['assignedUserId']:null,'maintenance');
         $id = DB::transaction(function () use ($hotel,$request,$data): int {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $id = DB::table('maintenance_work_orders')->insertGetId([
                 'hotel_id'=>$hotel->id,'room_id'=>$data['roomId'],
                 'title'=>$data['title'],'description'=>$data['description'],
@@ -133,6 +134,7 @@ final class MaintenanceWorkOrderController
             'note'=>['sometimes','nullable','string','max:2000'],
         ]);
         $response = DB::transaction(function () use ($request,$hotel,$order,$data): array {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $row = DB::table('maintenance_work_orders')
                 ->where('hotel_id',$hotel->id)->where('id',$order)->lockForUpdate()->first();
             abort_if($row===null,404);
