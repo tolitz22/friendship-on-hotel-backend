@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
 use Illuminate\Support\Str;
@@ -103,6 +104,15 @@ final class StaffPasswordController
         ])->save();
 
         $user->tokens()->delete();
+
+        // For an authenticated first-party SPA, invalidate the current
+        // Laravel session as well as all API tokens. Other sessions are
+        // checked against the changed password hash by AuthenticateSession.
+        if ($request->hasSession() && Auth::guard('web')->check()) {
+            Auth::guard('web')->logout();
+            $request->session()->invalidate();
+            $request->session()->regenerateToken();
+        }
 
         return response()->json([
             'message' => 'Password changed. Sign in again using the new password.',
