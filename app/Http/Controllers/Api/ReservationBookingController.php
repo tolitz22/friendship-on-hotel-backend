@@ -19,6 +19,7 @@ final class ReservationBookingController
             'idempotencyKey' => ['required', 'string', 'min:8', 'max:100'],
             'guestId' => ['required', 'integer', 'min:1'],
             'roomTypeId' => ['required', 'integer', 'min:1'],
+            'ratePlanId' => ['sometimes', 'integer', 'min:1'],
             'checkIn' => ['required', 'date_format:Y-m-d'],
             'checkOut' => ['required', 'date_format:Y-m-d', 'after:checkIn'],
         ])->validate();
