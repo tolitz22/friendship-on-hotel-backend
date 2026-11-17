@@ -43,3 +43,7 @@ Added backend reservation-record schema, overlap helper, date-only tests, and a 
 ## Backend Phase 3 continuity
 
 A new property-scoped diagnostic endpoint reports structural reservation overlaps for an assigned physical room. This endpoint **is not** a room-availability API and does not match the frontend Room Timeline or booking wizard contracts. No frontend UI changes were made; keep the React/Vite frontend at the completed Hotel Settings milestone and preserve mock mode until approved inventory business rules and authentication DTOs are available. See `docs/PHASE_3.md`.
+
+## Backend Phase 4 — Guest Management
+
+Backend has a property-scoped guest-directory API: `GET /api/v1/hotels/{hotel}/guests`, `GET /guests/{guest}`, plus admin-only `POST` and `PATCH`. The DTO fields match the frontend's typed `Guest` shape, but the frontend's HTTP adapter still uses unscoped `GET /guests`. **No frontend screen or mock adapter has been changed**, and the last completed frontend milestone remains **Hotel Settings & Configuration**. Do not turn on API mode until selected-hotel identity and secure browser authentication are implemented. See `docs/PHASE_4_GUESTS.md`.
