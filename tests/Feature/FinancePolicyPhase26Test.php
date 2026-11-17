@@ -41,16 +41,49 @@ function phase26Reviewer(Hotel $hotel): void
     Sanctum::actingAs($reviewer, ['hotel:read', 'hotel:write']);
 }
 
+/**
+ * Cash under Phase 52 must be recorded by the owning cashier during an
+ * active shift, then independently reviewed by a hotel manager.
+ */
+function phase26CashReceipt(Hotel $hotel, string $booking, int $amount, string $suffix): string
+{
+    $cashier = User::create([
+        'name' => 'Phase 26 Cashier',
+        'email' => uniqid('p26cashier-').'@example.test',
+        'password' => 'Password123456!',
+    ]);
+    HotelMembership::create([
+        'hotel_id' => $hotel->id, 'user_id' => $cashier->id,
+        'role' => 'front_desk', 'is_active' => true,
+    ]);
+    Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $shift = test()->postJson($base.'/cashier-shifts', [
+        'openingFloatMinor' => 0,
+    ])->assertCreated()->json('data.id');
+    return test()->postJson($base.'/cashier-shifts/'.$shift.'/bookings/'.$booking.'/cash-receipts', [
+        'requestKey' => 'phase26-payment-'.$suffix.'-'.uniqid(),
+        'reference' => 'CASH-'.$suffix.'-'.uniqid(),
+        'amountMinor' => $amount,
+    ])->assertCreated()->assertJsonPath('data.status', 'pending_review')->json('data.paymentId');
+}
+
 function phase26Payment(Hotel $hotel, string $booking): string
 {
-    $base = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking;
-    $id = test()->postJson($base.'/payment-records', [
-        'requestKey' => 'phase26-payment-'.uniqid(), 'method' => 'cash',
-        'reference' => 'CASH-'.uniqid(), 'amountMinor' => 18000,
-    ])->assertCreated()->json('data.id');
-    test()->postJson($base.'/payment-records/'.$id.'/review', [
-        'decision' => 'confirm', 'note' => 'Counter cash evidence reviewed',
-    ])->assertOk();
+    $id = phase26CashReceipt($hotel, $booking, 18000, 'confirmed');
+    $manager = User::create([
+        'name' => 'Phase 26 Independent Payment Manager',
+        'email' => uniqid('p26paymanager-').'@example.test',
+        'password' => 'Password123456!',
+    ]);
+    HotelMembership::create([
+        'hotel_id' => $hotel->id, 'user_id' => $manager->id,
+        'role' => 'admin', 'is_active' => true,
+    ]);
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    test()->postJson('/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking.'/payment-records/'.$id.'/review', [
+        'decision' => 'confirm', 'note' => 'Counter cash evidence independently reviewed',
+    ])->assertOk()->assertJsonPath('data.status', 'staff_confirmed');
     return $id;
 }
 
@@ -80,6 +113,12 @@ it('versions inactive tax and service previews with exact integer rounding', fun
 it('records refund requests against reviewed payments but never marks funds disbursed', function (): void {
     [$hotel, $booking] = phase26Fixture();
     $paymentId = phase26Payment($hotel, $booking);
+    // The original administrator initiates the refund; payment confirmation
+    // happened under an independent manager identity.
+    $originalManager = User::query()->where('id', DB::table('hotel_memberships')
+        ->where('hotel_id', $hotel->id)->where('role', 'admin')
+        ->orderBy('id')->value('user_id'))->firstOrFail();
+    Sanctum::actingAs($originalManager, ['hotel:read', 'hotel:write']);
     $base = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking;
     $input = [
         'requestKey' => 'phase26-refund-001', 'paymentRecordId' => $paymentId,
@@ -112,10 +151,13 @@ it('records refund requests against reviewed payments but never marks funds disb
 it('rejects unconfirmed payments for refund requests and isolates properties', function (): void {
     [$hotel, $booking] = phase26Fixture();
     $base = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking;
-    $id = $this->postJson($base.'/payment-records', [
-        'requestKey' => 'phase26-pending-001', 'method' => 'cash',
-        'reference' => 'CASH-PENDING-26', 'amountMinor' => 4000,
-    ])->assertCreated()->json('data.id');
+    $id = phase26CashReceipt($hotel, $booking, 4000, 'pending');
+    // Resume the hotel admin to test the refund policy, not the cashier's
+    // distinct inability to create refund requests.
+    $manager = User::query()->where('id', DB::table('hotel_memberships')
+        ->where('hotel_id', $hotel->id)->where('role', 'admin')
+        ->orderBy('id')->value('user_id'))->firstOrFail();
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
     $this->postJson($base.'/refund-requests', [
         'requestKey' => 'phase26-refund-pend', 'paymentRecordId' => $id,
         'amountMinor' => 1000, 'reason' => 'Attempt on pending evidence',
