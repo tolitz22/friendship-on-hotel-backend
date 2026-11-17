@@ -166,3 +166,7 @@ Added maintenance work-order and audit-event tables with authenticated, hotel-sc
 ## Phase 14 — Live Housekeeping
 
 Added hotel-scoped housekeeping task and event tables with active-member reads, administrator-only create/update, revision checks and audit history. **Run `php artisan migrate`**. Task completion deliberately does not alter room availability, occupancy or readiness. See [Phase 14](docs/PHASE_14_LIVE_HOUSEKEEPING.md).
+
+## Phase 15 — Hotel Staff and Least-Privilege Task Assignments
+
+Added admin-managed hotel membership roles (`admin`, `front_desk`, `housekeeping`, `maintenance`), immutable staff-event audit history, and linked user assignments on housekeeping/maintenance tasks. Assigned workers can update only their own task status and notes, **without admin rights**. A new migration is required (`php artisan migrate`); controlled developer provisioning is available via `php artisan hotel:staff-user email@example.com "Staff Name"`. See [Phase 15](docs/PHASE_15_STAFF_PERMISSIONS.md). Secure production invitations/password-reset and SPA session authentication are still pending.
