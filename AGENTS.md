@@ -45,3 +45,7 @@ Read `docs/PHASE_4_GUESTS.md` before expanding guest profiles. Guests are proper
 ## Phase 5 authentication and browser integration
 
 Preserve property-bound Sanctum authorization. Frontend Phase 5 uses a temporary in-memory bearer token only; production SPA auth design is still pending. The real Guests API must never silently use mock data on network/authorization failures. Do not grant write permissions based on frontend role labels. See `docs/PHASE_5_FRONTEND_INTEGRATION.md`.
+
+## Phase 8 catalogue editing
+
+Read `docs/PHASE_8_CATALOG_EDITS.md`. Room/type edit PATCH calls must use the selected hotel's relationships, admin role and write token, transactionally audit actual changes, and block structural changes touching referenced reservation inventory. Never add a room type reassignment or max-occupancy override without explicit booking policy approval. Keep MySQL and PostgreSQL parity. No delete endpoint.
