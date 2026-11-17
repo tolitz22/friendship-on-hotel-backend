@@ -147,6 +147,8 @@ final class FolioAccountingService
     public function review(Hotel $hotel, int $bookingId, int $paymentId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $bookingId, $paymentId, $actor, $input): array {
+            // Serialize cash evidence confirmation with drawer closure and reconciliation.
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = $this->findFolio($hotel, $bookingId, true);
             $payment = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->where('id', $paymentId)->lockForUpdate()->first();
