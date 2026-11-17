@@ -47,6 +47,9 @@ final class FolioAccountingController
             'reference' => ['required', 'string', 'min:3', 'max:120'],
             'amountMinor' => ['required', 'integer', 'min:1', 'max:100000000000'],
         ]);
+        if ($data['method'] === 'cash') {
+            return response()->json(['message' => 'Cash must be recorded within an open cashier shift using the cash-receipts endpoint.'], 409);
+        }
         if (trim($data['reference']) === '') {
             throw ValidationException::withMessages(['reference' => ['A nonempty payment reference is required.']]);
         }
