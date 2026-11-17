@@ -86,6 +86,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/inventory-blocks/{block}/release', [RoomInventoryController::class, 'release'])->whereNumber('block');
                 Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])->whereNumber('booking');
                 Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
+                Route::post('/bookings/{booking}/cancel-priced-unpaid', [FolioAccountingController::class, 'cancelUnpaid'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/folio-adjustments', [FolioAccountingController::class, 'adjust'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/payment-records', [FolioAccountingController::class, 'recordPayment'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/payment-records/{payment}/review', [FolioAccountingController::class, 'reviewPayment'])->whereNumber('booking')->whereNumber('payment');
