@@ -113,3 +113,7 @@ With `VITE_DATA_SOURCE=api` and `VITE_API_URL=http://localhost:8000/api/v1`, sig
 Added `tests/Feature/HotelStaffPermissionsTest.php` and `src/api/liveStaff.test.ts` covering role isolation, tenant boundaries, audit, 403/404/409 behavior, deactivation and linked-assignee validation. Run these along with the existing Phase 13/14 suites on MySQL and PostgreSQL before production use.
 
 Source changes are published; successful local migrations, CI and browser end-to-end functionality have **not** been independently confirmed.
+
+## Phase 16 account recovery supersession
+
+Phase 16 adds real password reset emails and password-change APIs, addressing part of the previous staff-account provisioning gap. It does not yet provide secure invitation links, first-login password rotation, or production-ready HttpOnly SPA cookie authentication. See `docs/PHASE_16_STAFF_PASSWORD_SECURITY.md`.
