@@ -96,3 +96,27 @@ it('returns scoped structural records without implying room availability', funct
     $this->getJson('/api/v1/hotels/'.$other->id.'/reservation-records')
         ->assertNotFound();
 });
+
+it('requires authentication for structural reservation records', function (): void {
+    $hotel = Hotel::create(['name'=>'Protected Hotel']);
+
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/reservation-records')
+        ->assertUnauthorized();
+});
+
+it('has no public or authenticated reservation creation endpoint', function (): void {
+    $hotel = Hotel::create(['name'=>'Read Only Hotel']);
+    $admin = \App\Models\User::create([
+        'name'=>'Admin','email'=>'admin-reservation@example.test','password'=>'example-password',
+    ]);
+    \App\Models\HotelMembership::create([
+        'hotel_id'=>$hotel->id,'user_id'=>$admin->id,'role'=>'admin',
+    ]);
+    \Laravel\Sanctum\Sanctum::actingAs($admin, ['hotel:read','hotel:write']);
+
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/reservation-records', [
+        'reference'=>'NOT-BOOKED',
+    ])->assertStatus(405);
+
+    expect(DB::table('reservation_records')->count())->toBe(0);
+});
