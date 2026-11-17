@@ -21,6 +21,8 @@ use App\Http\Controllers\Api\FrontDeskReservationController;
 use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
 use App\Http\Controllers\Api\FinancePolicyController;
+use App\Http\Controllers\Api\FinanceWebhookController;
+use App\Http\Controllers\Api\FinanceEventReviewController;
 use App\Http\Controllers\Api\RoomInventoryController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
@@ -31,6 +33,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
     Route::get('/health', HealthController::class);
+    Route::post('/integrations/finance/custom-hmac-v1/events', FinanceWebhookController::class)->middleware('throttle:30,1');
 
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
     Route::post('/auth/spa-login', [SpaSessionController::class, 'login'])->middleware('throttle:5,1');
@@ -59,6 +62,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking');
             Route::get('/finance/charge-policy-drafts', [FinancePolicyController::class, 'policies']);
+            Route::get('/bookings/{booking}/finance-event-reviews', [FinanceEventReviewController::class, 'index'])->whereNumber('booking');
             Route::get('/bookings/{booking}/charge-preview', [FinancePolicyController::class, 'preview'])->whereNumber('booking');
             Route::get('/bookings/{booking}/refund-requests', [FinancePolicyController::class, 'refunds'])->whereNumber('booking');
             Route::get('/reservation-simulation', ReservationScenarioController::class);
@@ -91,6 +95,8 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])->whereNumber('booking');
                 Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
                 Route::post('/finance/charge-policy-drafts', [FinancePolicyController::class, 'draft']);
+                Route::post('/finance/charge-policy-drafts/{policy}/review', [FinancePolicyController::class, 'reviewDraft'])->whereNumber('policy');
+                Route::post('/bookings/{booking}/finance-event-reviews', [FinanceEventReviewController::class, 'match'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/refund-requests', [FinancePolicyController::class, 'requestRefund'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/refund-requests/{refund}/review', [FinancePolicyController::class, 'reviewRefund'])->whereNumber('booking')->whereNumber('refund');
                 Route::post('/bookings/{booking}/cancel-priced-unpaid', [FolioAccountingController::class, 'cancelUnpaid'])->whereNumber('booking');
