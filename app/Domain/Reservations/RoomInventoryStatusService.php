@@ -92,6 +92,22 @@ final class RoomInventoryStatusService
                 ->orderByDesc('id')->get(['task_id','actor_id','after_state'])
                 ->groupBy('task_id');
 
+        // Names are displayed only to users who can read hotel reservations.
+        // Return minimal staff identity fields, never emails or guest details.
+        $staffIds = [];
+        foreach ($turnovers as $task) {
+            if ($task->assigned_user_id !== null) $staffIds[] = (int) $task->assigned_user_id;
+        }
+        foreach ($inspections as $inspection) {
+            $staffIds[] = (int) $inspection->inspected_by;
+            if ($inspection->reviewed_by !== null) $staffIds[] = (int) $inspection->reviewed_by;
+        }
+        foreach ($doneEvents as $events) {
+            foreach ($events as $event) $staffIds[] = (int) $event->actor_id;
+        }
+        $staffNames = $staffIds === [] ? collect() :
+            DB::table('users')->whereIn('id', array_unique($staffIds))->pluck('name', 'id');
+
         $results = [];
         foreach ($ids as $id) {
             $stay = $stays->get($id)?->first();
@@ -135,14 +151,21 @@ final class RoomInventoryStatusService
                 'turnoverStatus' => $turnover?->status,
                 'assignedHousekeeperId' => $turnover?->assigned_user_id === null
                     ? null : (string) $turnover->assigned_user_id,
+                'assignedHousekeeperName' => $turnover?->assigned_user_id === null
+                    ? null : $staffNames->get((int) $turnover->assigned_user_id),
                 'cleanedById' => $completedBy,
+                'cleanedByName' => $completedBy === null ? null : $staffNames->get((int) $completedBy),
                 'cleanedAt' => $turnover?->completed_at,
                 'inspectionId' => $inspection === null ? null : (string) $inspection->id,
                 'inspectionStatus' => $inspection?->status,
                 'inspectedById' => $inspection === null ? null : (string) $inspection->inspected_by,
+                'inspectedByName' => $inspection === null
+                    ? null : $staffNames->get((int) $inspection->inspected_by),
                 'inspectedAt' => $inspection?->created_at,
                 'reviewedById' => $inspection?->reviewed_by === null
                     ? null : (string) $inspection->reviewed_by,
+                'reviewedByName' => $inspection?->reviewed_by === null
+                    ? null : $staffNames->get((int) $inspection->reviewed_by),
                 'reviewedAt' => $inspection?->reviewed_at,
                 'advisoryReady' => $approved,
                 'maintenanceBlocked' => $maintenance->has($id),
