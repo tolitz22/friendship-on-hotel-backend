@@ -146,3 +146,36 @@ it('refuses stale-day observations and revoked housekeeping membership', functio
     $this->getJson($fx['base'])->assertNotFound();
     expect(DB::table('occupancy_verifications')->where('id',$id)->value('status'))->toBe('assigned');
 });
+
+it('matches a genuinely registered checked-in room without altering its booking record', function (): void {
+    $fx = phase53Fixture();
+    $guest = $fx['hotel']->guests()->create([
+        'first_name' => 'Registered', 'last_name' => 'Occupant',
+    ]);
+    $checkIn = now('Asia/Manila')->subDay()->toDateString();
+    $checkOut = now('Asia/Manila')->addDay()->toDateString();
+    $id = DB::table('reservation_records')->insertGetId([
+        'hotel_id' => $fx['hotel']->id,
+        'room_type_id' => $fx['type']->id,
+        'assigned_room_id' => $fx['room']->id,
+        'guest_id' => $guest->id,
+        'reference' => 'P53-OCCUPIED-'.uniqid(),
+        'check_in' => $checkIn, 'check_out' => $checkOut,
+        'lifecycle_state' => 'checked_in',
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
+    $observation = $this->postJson($fx['base'], [
+        'roomId' => $fx['room']->id, 'assignedUserId' => $fx['worker']->id,
+        'inspectionDate' => $fx['date'],
+    ])->assertCreated()->json('data.id');
+    Sanctum::actingAs($fx['worker'], ['hotel:read']);
+    $this->postJson($fx['base'].'/'.$observation.'/observe', [
+        'observedOccupancy' => 'occupied',
+        'note' => 'Room appears occupied during authorized occupancy round.',
+    ])->assertOk()->assertJsonPath('data.expectedOccupancy','occupied')
+      ->assertJsonPath('data.discrepancy','match')
+      ->assertJsonPath('data.expectedBookingIds.0',(string)$id);
+    expect(DB::table('reservation_records')->where('id',$id)->value('lifecycle_state'))
+        ->toBe('checked_in');
+});
