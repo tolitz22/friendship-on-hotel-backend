@@ -71,3 +71,7 @@ React API mode now offers a read-only Demand diagnostic screen, backed by `/api/
 ## Phase 10 — Booking policy draft planning
 
 React API mode now exposes the hotel policy draft editor and revision history via `/reservation-policy-draft` endpoints. Drafts store explicit preliminary choices only, with no approval or activation. The backend still has no reservation create/update API. See `docs/PHASE_10_POLICY_DRAFTS.md`.
+
+## Phase 11 — Advisory readiness
+
+The live Booking policies page now consumes the backend's scoped GET `/reservation-policy-readiness`, which returns missing/conditional issues and explicitly denies booking readiness even for complete drafts. No real Reservations wizard integration or booking mutations are active. See `docs/PHASE_11_POLICY_READINESS.md`.
