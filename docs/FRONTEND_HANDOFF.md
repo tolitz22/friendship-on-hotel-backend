@@ -191,3 +191,9 @@ GET /api/v1/hotels/{hotel}/reservation-records/{booking}
 The member-readable controller method returns a single saved structural reservation with the same shape as the /reservation-records list rows: id, hotelId, reference, roomTypeId, assignedRoomId, checkIn, checkOut, lifecycleState. The hotel->reservationRecords() relation scopes the lookup; no cross-tenant booking should be exposed. Backend booking mutations and authorization are unchanged.
 
 The React Front Desk uses this URL for direct per-arrival booking links; newly created bookings also open exact reservation operations without relying on list pagination. Inspect docs/PHASE_39_CONNECTED_STAFF_JOURNEY.md in frontend. Targeted backend test: DirectReservationWorkflowPhase39Test (written; not yet executed).
+
+## Phase 40 — Exact checkout housekeeping task lookup
+
+New member-readable API: GET /api/v1/hotels/{hotel}/bookings/{booking}/turnover
+
+Returns data.hotelId, data.bookingId, data.task (nullable: id, roomId, type checkout_clean, status, revision), and determinesRoomReadiness:false. The controller verifies the reservation through the selected hotel's relation, then selects its recorded reservation_turnover_links row joined to the scoped housekeeping task. This endpoint is read-only and does not prove room readiness, occupancy or payment settlement. The frontend uses it to hand off a checked-out booking to the exact real task via /housekeeping?task=<id>, rather than relying on the first page of the task list. Targeted test: CheckoutTurnoverHandoffPhase40Test.php (written, not executed).
