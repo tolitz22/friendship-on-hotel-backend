@@ -55,7 +55,7 @@ it('searches reservation records by guest, reference, and physical room across s
     $this->getJson($url.'?per_page=1&page=2')->assertOk()
         ->assertJsonPath('meta.total', 2)
         ->assertJsonPath('meta.totalPages', 2)
-        ->assertJsonPath('data.0.guestName', 'Maria Santos');
+        ->assertJsonPath('data.0.guestName', 'Diego Reyes');
     $this->getJson($url.'?search=Maria%20Santos&per_page=1')->assertOk()
         ->assertJsonPath('meta.total', 1)
         ->assertJsonPath('data.0.reference', 'DESK-MARIA')
@@ -75,12 +75,14 @@ it('filters bookings by next operational action and validates user inputs', func
     $hotel = Hotel::create(['name' => 'Desk Filter Hotel']);
     $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2]);
     $room = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '201']);
+    $inHouseRoom = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '202']);
+    $completedRoom = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '203']);
     $guest = $hotel->guests()->create(['first_name' => 'Guest', 'last_name' => 'Filter']);
     foreach ([
         ['NEEDS-ROOM', null, 'confirmed'],
         ['ASSIGNED', $room->id, 'confirmed'],
-        ['IN-HOUSE', $room->id, 'checked_in'],
-        ['COMPLETED', $room->id, 'checked_out'],
+        ['IN-HOUSE', $inHouseRoom->id, 'checked_in'],
+        ['COMPLETED', $completedRoom->id, 'checked_out'],
     ] as [$reference, $roomId, $state]) {
         DB::table('reservation_records')->insert([
             'hotel_id' => $hotel->id, 'room_type_id' => $type->id,
