@@ -139,3 +139,67 @@ it('requires a different manager to reconcile even when the cashier has admin ro
     ])->assertOk()->assertJsonPath('data.status', 'reconciled')
         ->assertJsonPath('data.reviewedBy', (string) $manager2->id);
 });
+
+it('links an actual priced folio cash payment once and requires review before balanced reconciliation', function (): void {
+    $fx = cashier52Hotel();
+    $hotel = $fx['hotel'];
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $manager = $fx['manager'];
+    $cashier = $fx['cashier'];
+    Sanctum::actingAs($manager, ['hotel:read','hotel:write']);
+    $rateId = $this->postJson($base.'/rate-plans', [
+        'roomTypeId' => $fx['type']->id,
+        'name' => 'Phase 52 Nightly',
+        'nightlyMinor' => 100000,
+    ])->assertCreated()->json('data.id');
+    $booking = $this->postJson($base.'/bookings', [
+        'idempotencyKey' => 'phase52-priced-'.uniqid(),
+        'guestId' => $fx['guest']->id,
+        'roomTypeId' => $fx['type']->id,
+        'ratePlanId' => $rateId,
+        'checkIn' => now()->addDays(10)->toDateString(),
+        'checkOut' => now()->addDays(11)->toDateString(),
+    ])->assertCreated()->json('data.id');
+
+    Sanctum::actingAs($cashier, ['hotel:read','booking:write']);
+    $shift = $this->postJson($base.'/cashier-shifts', ['openingFloatMinor' => 5000])
+        ->assertCreated()->json('data.id');
+    $endpoint = $base.'/cashier-shifts/'.$shift.'/bookings/'.$booking.'/cash-receipts';
+    $body = [
+        'requestKey' => 'phase52-actual-'.uniqid(),
+        'reference' => 'CASH-P52-'.uniqid(),
+        'amountMinor' => 10000,
+    ];
+    $payment = $this->postJson($endpoint, $body)->assertCreated()
+        ->assertJsonPath('data.status', 'pending_review')->json('data.paymentId');
+    $this->postJson($endpoint, $body)->assertOk()
+        ->assertJsonPath('data.replayed', true);
+    $this->postJson($endpoint, array_merge($body, ['amountMinor' => 20000]))
+        ->assertStatus(409);
+    expect(DB::table('cashier_shift_receipts')->where('shift_id', $shift)->count())->toBe(1);
+    $this->getJson($base.'/cashier-shifts/'.$shift)->assertOk()
+        ->assertJsonPath('data.receiptCount', 1)
+        ->assertJsonPath('data.expectedCashMinor', null);
+
+    $this->postJson($base.'/cashier-shifts/'.$shift.'/close', [
+        'countedCashMinor' => 15000,
+    ])->assertOk()->assertJsonPath('data.varianceMinor', 0);
+
+    Sanctum::actingAs($manager, ['hotel:read','hotel:write']);
+    $this->postJson($base.'/cashier-shifts/'.$shift.'/reconcile', [
+        'decision' => 'reconcile', 'note' => 'Cash physically counted.',
+    ])->assertStatus(409);
+    $this->postJson($base.'/bookings/'.$booking.'/payment-records/'.$payment.'/review', [
+        'decision' => 'confirm', 'note' => 'Verified counted cash evidence.',
+    ])->assertOk();
+    $this->postJson($base.'/cashier-shifts/'.$shift.'/reconcile', [
+        'decision' => 'reconcile', 'note' => 'Balanced drawer verified independently.',
+    ])->assertOk()->assertJsonPath('data.status', 'reconciled')
+        ->assertJsonPath('data.expectedCashMinor', 15000);
+
+    expect(DB::table('folio_payment_records')->where('id', $payment)->value('method'))
+        ->toBe('cash');
+    expect(DB::table('cashier_shift_events')->where('shift_id', $shift)
+        ->orderBy('id')->pluck('event')->all())
+        ->toBe(['opened','cash_received','submitted','reconciled']);
+});
