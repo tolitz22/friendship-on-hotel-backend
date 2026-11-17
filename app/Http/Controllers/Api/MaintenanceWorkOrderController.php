@@ -128,6 +128,7 @@ final class MaintenanceWorkOrderController
             'status'=>['sometimes',Rule::in(self::STATUSES)],
             'priority'=>['sometimes',Rule::in(self::PRIORITIES)],
             'assignedTo'=>['sometimes','nullable','string','max:120'],
+            'assignedUserId'=>['sometimes','nullable','integer','min:1'],
             'affectsRoom'=>['sometimes','boolean'],
             'note'=>['sometimes','nullable','string','max:2000'],
         ]);
