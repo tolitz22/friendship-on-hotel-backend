@@ -106,6 +106,11 @@ it('requires independent manager approval for replacement and records revocation
         'idempotencyKey' => 'p54-replace-'.uniqid(), 'kind' => 'replacement',
         'bookingId' => (int) $booking, 'reason' => 'Guest reported their original card lost.',
     ])->assertCreated()->assertJsonPath('data.status', 'pending_manager')->json('data.id');
+    $this->postJson($endpoint, [
+        'idempotencyKey' => 'p54-pending-duplicate-'.uniqid(), 'kind' => 'replacement',
+        'bookingId' => (int) $booking,
+        'reason' => 'Duplicate replacement request should not be accepted.',
+    ])->assertStatus(409);
     $this->postJson($endpoint.'/'. $id.'/review', [
         'decision' => 'approve', 'note' => 'Self approval forbidden.',
     ])->assertForbidden();
@@ -182,4 +187,32 @@ it('hides other receptionists requests and blocks housekeeping and read-only tok
         'idempotencyKey' => 'p54-cleaner-'.uniqid(), 'kind' => 'emergency_access',
         'roomId' => $fx['room']->id, 'reason' => 'Housekeeping cannot authorize access.',
     ])->assertForbidden();
+});
+
+it('rejects a replacement after initial mock authorization is revoked and permits a manager to reject it', function (): void {
+    $fx = phase54Fixture();
+    $booking = phase54CheckedIn($fx, $this);
+    $base = $fx['base'].'/keycard-authorizations';
+    Sanctum::actingAs($fx['reception'], ['hotel:read', 'booking:write']);
+    $initial = $this->postJson($base, [
+        'idempotencyKey' => 'p54-revoke-first-'.uniqid(), 'kind' => 'initial',
+        'bookingId' => (int) $booking, 'reason' => 'Original guest authorization recorded.',
+    ])->assertCreated()->json('data.id');
+    $replacement = $this->postJson($base, [
+        'idempotencyKey' => 'p54-revoke-replace-'.uniqid(), 'kind' => 'replacement',
+        'bookingId' => (int) $booking, 'reason' => 'Guest lost the previously authorized card.',
+    ])->assertCreated()->json('data.id');
+
+    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
+    $this->postJson($base.'/'.$initial.'/revoke', [
+        'note' => 'Guest requested original mock authorization be withdrawn.',
+    ])->assertOk();
+    $this->postJson($base.'/'.$replacement.'/review', [
+        'decision' => 'approve', 'note' => 'Must revalidate original authorization on approval.',
+    ])->assertStatus(409);
+    $this->postJson($base.'/'.$replacement.'/review', [
+        'decision' => 'reject', 'note' => 'Original authorization revoked. Close stale request.',
+    ])->assertOk()->assertJsonPath('data.status', 'rejected');
+    expect(DB::table('keycard_authorizations')->where('id', $replacement)->value('status'))
+        ->toBe('rejected');
 });
