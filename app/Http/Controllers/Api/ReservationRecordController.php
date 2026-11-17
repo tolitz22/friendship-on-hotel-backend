@@ -86,7 +86,7 @@ final class ReservationRecordController
             });
         }
 
-        $records = $query->orderBy('check_in')->orderBy('id')->paginate($perPage);
+        $records = $query->orderByDesc('id')->paginate($perPage);
         $guestNames = DB::table('guests')
             ->where('hotel_id', $hotel->id)
             ->whereIn('id', $records->getCollection()->pluck('guest_id')->filter()->all())
