@@ -47,7 +47,7 @@ final class HotelStaffController
             throw ValidationException::withMessages(['email'=>['An existing active account with this email is required.']]);
         }
 
-        DB::transaction(function () use ($hotel,$user,$data): void {
+        DB::transaction(function () use ($hotel,$user,$data,$request): void {
             DB::table('hotels')->where('id',$hotel->id)->lockForUpdate()->first();
             if (HotelMembership::where('hotel_id',$hotel->id)->where('user_id',$user->id)->exists()) {
                 throw ValidationException::withMessages(['email'=>['This account already belongs to the hotel.']]);
@@ -56,8 +56,26 @@ final class HotelStaffController
                 'hotel_id'=>$hotel->id,'user_id'=>$user->id,
                 'role'=>$data['role'],'is_active'=>true,
             ]);
+            $this->audit($hotel,(int)$request->user()->id,(int)$user->id,'attached',null,['role'=>$data['role'],'isActive'=>true]);
         });
         return response()->json(['data'=>$this->staffList($hotel)],201);
+    }
+
+    public function history(Request $request, Hotel $hotel): JsonResponse
+    {
+        $input=$request->validate(['per_page'=>['sometimes','integer','min:1','max:50']]);
+        $page=DB::table('hotel_staff_events')->where('hotel_id',$hotel->id)->orderByDesc('id')
+            ->paginate((int)($input['per_page']??20));
+        return response()->json([
+            'data'=>$page->getCollection()->map(fn(object $row):array=>[
+                'id'=>(string)$row->id,'actorId'=>(string)$row->actor_id,
+                'targetUserId'=>(string)$row->target_user_id,'action'=>$row->action,
+                'before'=>$row->before_state?json_decode($row->before_state,true):null,
+                'after'=>json_decode($row->after_state,true),'createdAt'=>$row->created_at,
+            ])->values(),
+            'meta'=>['page'=>$page->currentPage(),'perPage'=>$page->perPage(),
+                'total'=>$page->total(),'totalPages'=>$page->lastPage()],
+        ]);
     }
 
     public function update(Request $request, Hotel $hotel, string $userId): JsonResponse
@@ -85,9 +103,23 @@ final class HotelStaffController
                     throw ValidationException::withMessages(['role'=>['The hotel must keep an active administrator.']]);
                 }
             }
-            $m->update(['role'=>$nextRole,'is_active'=>$nextActive]);
+            $before=['role'=>$m->role,'isActive'=>(bool)$m->is_active];
+            $after=['role'=>$nextRole,'isActive'=>(bool)$nextActive];
+            if ($before!==$after) {
+                $m->update(['role'=>$nextRole,'is_active'=>$nextActive]);
+                $this->audit($hotel,(int)$request->user()->id,(int)$m->user_id,'updated',$before,$after);
+            }
         });
 
         return response()->json(['data'=>$this->staffList($hotel)]);
+    }
+
+    private function audit(Hotel $hotel,int $actor,int $target,string $action,?array $before,array $after): void
+    {
+        DB::table('hotel_staff_events')->insert([
+            'hotel_id'=>$hotel->id,'actor_id'=>$actor,'target_user_id'=>$target,
+            'action'=>$action,'before_state'=>$before===null?null:json_encode($before,JSON_THROW_ON_ERROR),
+            'after_state'=>json_encode($after,JSON_THROW_ON_ERROR),'created_at'=>now(),
+        ]);
     }
 }
