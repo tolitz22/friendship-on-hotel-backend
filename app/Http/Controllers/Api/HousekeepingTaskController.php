@@ -115,6 +115,7 @@ final class HousekeepingTaskController
         }
         TaskStaffAccess::verifyAssignee($hotel,isset($data['assignedUserId'])?(int)$data['assignedUserId']:null,'housekeeping');
         $id=DB::transaction(function () use ($hotel,$request,$data): int {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $id=DB::table('housekeeping_tasks')->insertGetId([
                 'hotel_id'=>$hotel->id, 'room_id'=>$data['roomId'], 'type'=>$data['type'],
                 'status'=>'todo', 'assigned_to'=>$data['assignedTo']??null,
@@ -140,6 +141,7 @@ final class HousekeepingTaskController
             'note'=>['sometimes','nullable','string','max:2000'],
         ]);
         $result=DB::transaction(function () use ($request,$hotel,$task,$data): array {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $row=DB::table('housekeeping_tasks')
                 ->where('hotel_id',$hotel->id)->where('id',$task)->lockForUpdate()->first();
             abort_if($row===null,404);
