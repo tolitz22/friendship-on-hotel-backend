@@ -50,35 +50,13 @@ final class ReservationBookingService
             abort_unless(DB::table('guests')->where('hotel_id', $hotel->id)
                 ->where('id', $data['guestId'])->exists(), 404);
 
-            $capacity = DB::table('rooms')->where('hotel_id', $hotel->id)
-                ->where('room_type_id', $type->id)->count();
-            if ($capacity < 1) {
-                throw new HttpException(409, 'This room type has no configured rooms.');
-            }
-
-            $overlapping = DB::table('reservation_records')
-                ->where('hotel_id', $hotel->id)
-                ->where('room_type_id', $type->id)
-                ->where('check_in', '<', $period->departure)
-                ->where('check_out', '>', $period->arrival)
-                // Fail closed for provisional/unknown states: only explicitly
-                // released states stop consuming inventory.
-                ->where(function ($query): void {
-                    $query->whereNull('lifecycle_state')
-                        ->orWhereNotIn('lifecycle_state', config('booking.released_states', ['cancelled', 'checked_out', 'no_show']));
-                })
-                ->get(['check_in', 'check_out']);
-
-            // Check EACH night, not the count of overlapping stays across the whole period.
-            $arrival = new \DateTimeImmutable($period->arrival);
-            for ($offset = 0; $offset < $period->nights(); $offset++) {
-                $night = $arrival->modify('+'.$offset.' days')->format('Y-m-d');
-                $used = $overlapping->filter(
-                    fn (object $record): bool => $record->check_in <= $night && $record->check_out > $night
-                )->count();
-                if ($used >= $capacity) {
-                    throw new HttpException(409, 'No inventory remains for every requested night.');
-                }
+            // The same room-type row is locked above. Availability and room
+            // blocks are evaluated under this lock before making the sale.
+            $availability = app(RoomInventoryService::class)->availability(
+                $hotel, (int) $type->id, $period
+            );
+            if (! $availability['canBook']) {
+                throw new HttpException(409, 'No inventory remains for every requested night.');
             }
 
             $id = DB::table('reservation_records')->insertGetId([
