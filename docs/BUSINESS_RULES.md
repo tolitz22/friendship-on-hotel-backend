@@ -28,3 +28,7 @@ Hotel administrators can now record **draft** selections via `GET/PATCH /api/v1/
 ## Phase 11 readiness review
 
 The `/reservation-policy-readiness` report identifies missing draft fields, potentially incompatible settings, and unresolved operational requirements. Even with eight populated fields, `approved`, `readyForImplementation`, and `readyForBookings` remain false. The hotel must explicitly approve detailed allocation/hold/cancellation/pricing rules before booking writes are implemented. See `docs/PHASE_11_POLICY_READINESS.md`.
+
+## Phase 12 — Simulation does not approve inventory
+
+`/reservation-simulation` only displays stored assigned-room overlaps and unassigned room-type demand for proposed dates. It includes every lifecycle state and cannot infer bookability. It is **not** a substitute for an approved transactional inventory allocator, status consumption policy or concurrency-safe booking writes. See `docs/PHASE_12_RESERVATION_SIMULATION.md`.
