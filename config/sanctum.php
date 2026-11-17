@@ -1,7 +1,9 @@
 <?php
 
 return [
-    'stateful' => array_values(array_filter(array_map('trim', explode(',', (string) env('SANCTUM_STATEFUL_DOMAINS', ''))))),
+    'stateful' => (bool) env('SPA_SESSION_ENABLED', false)
+        ? array_values(array_filter(array_map('trim', explode(',', (string) env('SANCTUM_STATEFUL_DOMAINS', '')))))
+        : [],
     'guard' => ['web'],
     'expiration' => (int) env('SANCTUM_TOKEN_EXPIRATION', 480),
     'token_prefix' => env('SANCTUM_TOKEN_PREFIX', ''),
