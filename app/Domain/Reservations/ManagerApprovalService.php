@@ -14,7 +14,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
  */
 final class ManagerApprovalService
 {
-    public const ACTIONS = ['cancel_booking', 'amend_dates'];
+    public const ACTIONS = ['cancel_booking', 'amend_dates', 'early_check_in'];
 
     public function list(Hotel $hotel, int $actor, bool $manager, array $filters): array
     {
@@ -76,9 +76,24 @@ final class ManagerApprovalService
             if ($booking->lifecycle_state !== 'confirmed') {
                 throw new HttpException(409, 'Only confirmed bookings can be requested for these exceptions.');
             }
-            if (DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+            if ($action !== 'early_check_in' && DB::table('reservation_folios')->where('hotel_id', $hotel->id)
                 ->where('reservation_record_id', $bookingId)->exists()) {
                 throw new HttpException(409, 'Priced reservations require a separate finance-approved workflow.');
+            }
+            if ($action === 'early_check_in') {
+                $today = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
+                $arrival = \Carbon\CarbonImmutable::parse($booking->check_in, $hotel->timezone ?: 'Asia/Manila');
+                if ($arrival->subDay()->toDateString() !== $today) {
+                    throw new HttpException(409, 'Early check-in requests are allowed only the day before scheduled arrival.');
+                }
+                if ($booking->assigned_room_id === null) {
+                    throw new HttpException(409, 'Assign a physical room before requesting early check-in.');
+                }
+                if (DB::table('manager_approval_requests')->where('hotel_id', $hotel->id)
+                    ->where('reservation_record_id', $bookingId)->where('action', 'early_check_in')
+                    ->where('status', 'pending')->exists()) {
+                    throw new HttpException(409, 'An early check-in request is already awaiting manager review.');
+                }
             }
             if ($action === 'amend_dates'
                 && $payload['checkIn'] === $booking->check_in
@@ -171,8 +186,19 @@ final class ManagerApprovalService
                     'amend_dates' => app(ReservationAmendmentService::class)->amend(
                         $hotel, $actor, (int) $request->reservation_record_id, $payload
                     ),
+                    'early_check_in' => app(ReservationStayLifecycleService::class)->transition(
+                        $hotel, $actor, (int) $request->reservation_record_id, 'check_in', $id
+                    ),
                     default => throw new HttpException(409, 'Unsupported approval action.'),
                 };
+
+                if ($request->action === 'early_check_in') {
+                    DB::table('reservation_early_check_ins')->where('hotel_id', $hotel->id)
+                        ->where('approval_request_id', $id)->update([
+                            'manager_note' => $note ?: 'Approved by hotel manager.',
+                            'updated_at' => now(),
+                        ]);
+                }
 
                 DB::table('manager_approval_requests')->where('id', $id)->update([
                     'status' => 'executed', 'reviewed_by' => $actor,
