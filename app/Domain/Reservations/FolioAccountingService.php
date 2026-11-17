@@ -117,8 +117,9 @@ final class FolioAccountingService
     {
         return DB::transaction(function () use ($hotel, $bookingId, $actor, $input): array {
             $folio = $this->findFolio($hotel, $bookingId, true);
+            $reference = trim($input['reference']);
             $fingerprint = $this->fingerprint([
-                $bookingId, $input['method'], $input['reference'], (int) $input['amountMinor'],
+                $bookingId, $input['method'], $reference, (int) $input['amountMinor'],
             ]);
             $previous = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
                 ->where('request_key', $input['requestKey'])->first();
@@ -129,13 +130,13 @@ final class FolioAccountingService
                 return ['id' => (string) $previous->id, 'status' => $previous->status, 'replayed' => true];
             }
             if (DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
-                ->where('method', $input['method'])->where('reference', $input['reference'])->exists()) {
+                ->where('method', $input['method'])->where('reference', $reference)->exists()) {
                 throw new HttpException(409, 'Payment reference already recorded for this hotel and method.');
             }
             $id = DB::table('folio_payment_records')->insertGetId([
                 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
                 'request_key' => $input['requestKey'], 'payload_sha256' => $fingerprint,
-                'method' => $input['method'], 'reference' => trim($input['reference']),
+                'method' => $input['method'], 'reference' => $reference,
                 'amount_minor' => $input['amountMinor'], 'status' => 'pending_review',
                 'recorded_by' => $actor, 'created_at' => now(), 'updated_at' => now(),
             ]);
