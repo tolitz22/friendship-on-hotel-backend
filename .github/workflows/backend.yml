@@ -75,8 +75,8 @@ jobs:
           coverage: none
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
-      - name: PostgreSQL reservation integrity tests
-        run: php artisan test tests/Feature/ReservationSchemaTest.php
+      - name: PostgreSQL feature and domain tests
+        run: php artisan test
 
   mysql:
     runs-on: ubuntu-latest
