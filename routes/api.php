@@ -102,6 +102,8 @@ Route::prefix('v1')->group(function (): void {
             // sensitive mutations remain inside the administrator group.
             Route::post('/bookings', [ReservationBookingController::class, 'store'])
                 ->middleware('hotel.permission:booking.create');
+            Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])
+                ->whereNumber('booking')->middleware('hotel.permission:booking.assign_room');
             Route::post('/bookings/{booking}/check-in', [ReservationBookingController::class, 'checkIn'])
                 ->whereNumber('booking')->middleware('hotel.permission:booking.check_in');
             Route::post('/bookings/{booking}/check-out', [ReservationBookingController::class, 'checkOut'])
@@ -120,7 +122,6 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/inventory-blocks', [RoomInventoryController::class, 'blocks']);
                 Route::post('/inventory-blocks', [RoomInventoryController::class, 'block']);
                 Route::post('/inventory-blocks/{block}/release', [RoomInventoryController::class, 'release'])->whereNumber('block');
-                Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])->whereNumber('booking');
                 Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
                 Route::post('/finance/charge-policy-drafts', [FinancePolicyController::class, 'draft']);
                 Route::post('/finance/charge-policy-drafts/{policy}/review', [FinancePolicyController::class, 'reviewDraft'])->whereNumber('policy');
