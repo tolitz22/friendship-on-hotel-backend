@@ -19,9 +19,11 @@ it('returns only selected hotel room bookings and blocks for a week', function (
     $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2]);
     $otherType = RoomType::create(['hotel_id' => $other->id, 'name' => 'Standard', 'max_occupancy' => 2]);
     $room = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '101']);
+    $guest = $hotel->guests()->create(['first_name' => 'Synthetic', 'last_name' => 'Calendar']);
     $otherRoom = Room::create(['hotel_id' => $other->id, 'room_type_id' => $otherType->id, 'number' => '900']);
     DB::table('reservation_records')->insert([
         ['hotel_id' => $hotel->id, 'room_type_id' => $type->id,
+            'guest_id' => $guest->id,
             'assigned_room_id' => $room->id, 'reference' => 'CAL-1',
             'check_in' => '2026-11-18', 'check_out' => '2026-11-20',
             'lifecycle_state' => 'confirmed'],
@@ -44,6 +46,7 @@ it('returns only selected hotel room bookings and blocks for a week', function (
     $response->assertOk()->assertJsonCount(1, 'data.rooms')
         ->assertJsonCount(1, 'data.bookings')
         ->assertJsonPath('data.bookings.0.reference', 'CAL-1')
+        ->assertJsonPath('data.bookings.0.guestName', 'Synthetic Calendar')
         ->assertJsonPath('data.unassignedBookings', 1)
         ->assertJsonPath('meta.checkoutDateExclusive', true);
     expect($response->getContent())->not->toContain('SECRET');
