@@ -162,3 +162,41 @@ it('checks current room-impact maintenance during enforced check-in even after a
     expect(DB::table('reservation_records')->where('id', $booking)->value('lifecycle_state'))
         ->toBe('confirmed');
 });
+
+
+it('invalidates approved inspection after a new housekeeping task even if that task is completed', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-10T09:00:00+08:00'));
+    [$hotel, $room, $booking] = phase36Booking();
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $this->patchJson($base.'/readiness/enforcement-policy', [
+        'expectedRevision' => 0, 'enforceAtCheckIn' => true,
+        'reason' => 'Activate independently reviewed physical room readiness',
+    ])->assertOk();
+
+    $inspection = $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections', [
+        'cleaningVerified' => true, 'safetyVerified' => true,
+        'amenitiesVerified' => true, 'note' => 'All physical room checks completed on site',
+    ])->assertCreated()->json('data.inspection.id');
+    phase36Admin($hotel);
+    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections/'.$inspection.'/review', [
+        'expectedRevision' => 1, 'decision' => 'approve',
+        'note' => 'Independent room inspection approval recorded',
+    ])->assertOk()->assertJsonPath('data.advisoryReady', true);
+
+    $task = $this->postJson($base.'/housekeeping-tasks', [
+        'roomId' => $room->id, 'type' => 'inspection',
+        'note' => 'Another physical inspection is required',
+    ])->assertCreated()->json('data.id');
+    $this->patchJson($base.'/housekeeping-tasks/'.$task, [
+        'expectedRevision' => 1, 'status' => 'done',
+        'note' => 'Task complete; old approval remains invalid',
+    ])->assertOk();
+
+    $this->getJson($base.'/rooms/'.$room->id.'/readiness')->assertOk()
+        ->assertJsonPath('data.blockers.unfinishedHousekeeping', false)
+        ->assertJsonPath('data.blockers.newRoomWorkSinceInspection', true)
+        ->assertJsonPath('data.advisoryReady', false);
+    $this->postJson($base.'/bookings/'.$booking.'/check-in')->assertStatus(409);
+    expect(DB::table('reservation_records')->where('id', $booking)
+        ->value('lifecycle_state'))->toBe('confirmed');
+});
