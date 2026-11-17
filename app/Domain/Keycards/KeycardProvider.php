@@ -12,4 +12,7 @@ interface KeycardProvider
 {
     /** @return array{provider:string,reference:string,physicalCardEncoded:bool} */
     public function authorize(int $hotelId, int $authorizationId): array;
+
+    /** @return array{provider:string,physicalCardRevoked:bool} */
+    public function revoke(int $hotelId, int $authorizationId): array;
 }
