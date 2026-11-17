@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\PropertyCatalogSummaryController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\HotelStaffController;
+use App\Http\Controllers\Api\StaffInvitationController;
 use App\Http\Controllers\Api\RoomCatalogController;
 use App\Http\Controllers\Api\ReservationRecordController;
 use App\Http\Controllers\Api\ReservationScenarioController;
@@ -29,6 +30,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/auth/spa-login', [SpaSessionController::class, 'login'])->middleware('throttle:5,1');
     Route::post('/auth/forgot-password', [StaffPasswordController::class, 'forgot'])->middleware('throttle:5,1');
     Route::post('/auth/reset-password', [StaffPasswordController::class, 'reset'])->middleware('throttle:5,1');
+    Route::post('/auth/accept-invitation', [StaffInvitationController::class, 'accept'])->middleware('throttle:5,1');
 
     Route::middleware(['auth:sanctum', 'active.user'])->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
@@ -62,6 +64,9 @@ Route::prefix('v1')->group(function (): void {
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::get('/staff', [HotelStaffController::class, 'index']);
+                Route::get('/staff/invitations', [StaffInvitationController::class, 'index']);
+                Route::post('/staff/invitations', [StaffInvitationController::class, 'store'])->middleware('throttle:10,1');
+                Route::patch('/staff/invitations/{invitation}/revoke', [StaffInvitationController::class, 'revoke'])->whereNumber('invitation');
                 Route::get('/staff/history', [HotelStaffController::class, 'history']);
                 Route::post('/staff', [HotelStaffController::class, 'attach']);
                 Route::patch('/staff/{userId}', [HotelStaffController::class, 'update'])->whereNumber('userId');
