@@ -66,3 +66,8 @@ Read `docs/PHASE_21_ROOM_INVENTORY.md` before editing inventory behavior. `RoomI
 ## Phase 22 — Reservation operations and catalogue locking
 
 Read `docs/PHASE_22_RESERVATION_OPERATIONS.md`. New admin-only check-in/check-out transitions are audited and constrained by planned dates in hotel-local time; check-in requires a physical room assignment. Admin inventory-block listing supports reviewing active and released records. Catalog room creation and physical room type edits must serialize with reservation inventory locks. Do not infer housekeeping readiness, billing settlement or identity verification from a reservation lifecycle state. Parallel MySQL/PostgreSQL booking-and-block concurrency verification remains a production gate.
+
+
+## Phase 23 — Reservation date amendments and turnover
+
+Read `docs/PHASE_23_RESERVATION_AMENDMENTS.md`. Date amendments are admin-only, confirmed and pre-arrival, share room-type locks, check all amended nights, preserve physical room assignment and write immutable date audit records. Front-desk manifests are read-only and hotel-scoped. Successful checkout creates exactly one `checkout_clean` housekeeping task in the checkout transaction. No automatic room readiness, rate repricing or early-departure financial adjustment is implied. The frontend booking wizard remains disconnected pending API contract and concurrency validation.
