@@ -31,6 +31,13 @@ jobs:
           APP_KEY: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           DB_CONNECTION: sqlite
           DB_DATABASE: ":memory:"
+      - name: Phase 43 persisted guest-to-checkout acceptance
+        run: php artisan test tests/Feature/Phase43RealWorkflowAcceptanceTest.php
+        env:
+          APP_ENV: testing
+          APP_KEY: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ":memory:"
       - name: Feature tests
         run: php artisan test
         env:
