@@ -51,11 +51,14 @@ it('requires room assignment for check-in and audits both stay transitions', fun
 
     $this->postJson($base.'/bookings/'.$id.'/check-out')->assertStatus(409);
     $this->postJson($base.'/bookings/'.$id.'/check-in')->assertStatus(409);
+    $this->travelTo(new \DateTimeImmutable('2026-12-10 12:00:00 Asia/Manila'));
     $this->patchJson($base.'/bookings/'.$id.'/assign-room', ['roomId' => $room->id])->assertOk();
     $this->postJson($base.'/bookings/'.$id.'/check-in')
         ->assertOk()->assertJsonPath('data.status', 'checked_in')
         ->assertJsonPath('data.assignedRoomId', (string) $room->id);
     $this->postJson($base.'/bookings/'.$id.'/check-in')->assertStatus(409);
+    $this->postJson($base.'/bookings/'.$id.'/check-out')->assertStatus(409);
+    $this->travelTo(new \DateTimeImmutable('2026-12-12 12:00:00 Asia/Manila'));
     $this->postJson($base.'/bookings/'.$id.'/check-out')
         ->assertOk()->assertJsonPath('data.status', 'checked_out');
     $this->postJson($base.'/bookings/'.$id.'/check-out')->assertStatus(409);
