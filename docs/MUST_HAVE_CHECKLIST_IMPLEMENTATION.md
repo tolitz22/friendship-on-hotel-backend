@@ -18,9 +18,15 @@ Updated November 2026. Both main branches must pass CI and have green Railway de
 - Guest directory **View stays** displays history with reference, dates, status and room type/number, with a link to the authoritative reservation detail.
 - No lifetime spend is inferred from an unverified folio or staff-confirmed payment evidence.
 
+## Reservation special request tagging — IMPLEMENTED
+
+- Booking staff may append one of six predefined tags with a written note using hotel-scoped `POST /bookings/{booking}/special-requests`; the entry is idempotent and stamped with staff identity/time. Read it using `GET /bookings/{booking}/special-requests`.
+- Notes have no pricing, room assignment, or reservation state side effects; they are not a guarantee that the hotel can fulfill them. Do not include unnecessary sensitive identity or medical details.
+- React booking details show an expandable special-requests section. Historical notes remain readable, but entries cannot be silently overwritten through this API.
+
 ## Other required core PMS features — NOT completed by this change
 
-**Reservations:** drag-to-move and resize existing rack reservations; atomic multi-room/group/block allocation; deposits and forfeiture, automated policy cancellation, special-request tagging; calendar-based seasonal/corporate/promotional rates.
+**Reservations:** drag-to-move and resize existing rack reservations; atomic multi-room/group/block allocation; deposits and forfeiture, automated policy cancellation; calendar-based seasonal/corporate/promotional rates.
 
 **Front desk:** ID document workflow with access controls and retention; guest registration signature; fast settlement checkout; split folios; VAT and municipal tax rules; preauthorization/capture/void; walk-in wizard; mid-stay transfer with atomic inventory and ledger adjustment.
 
