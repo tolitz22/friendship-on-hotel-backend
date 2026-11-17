@@ -51,3 +51,7 @@ Backend has a property-scoped guest-directory API: `GET /api/v1/hotels/{hotel}/g
 ## Frontend Phase 5 implemented
 
 React now has staff sign-in against `/auth/login`, in-memory bearer token, `/auth/me` property membership selection, sign-out, and a live Guests directory for the selected hotel. Guest create/edit is admin-only. Other PMS modules remain expressly mock previews. UI work continues from the existing Hotel Settings milestone, not from a rebuild. Frontend docs: `docs/PHASE_5_LARAVEL_INTEGRATION.md`.
+
+## Phase 6 frontend connected read-only catalogue
+
+Frontend API mode now reads real selected-hotel settings, registered room/type counts, floor groups and paginated filtered rooms from Laravel, alongside live Guests. Overview no longer labels sample occupancy figures as live. Reservation calendar/timeline and remaining PMS operational workflows stay mock previews. See both repositories' `docs/PHASE_6_LIVE_CATALOG.md`.
