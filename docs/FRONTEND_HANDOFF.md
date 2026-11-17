@@ -99,3 +99,7 @@ React API mode adds public `/forgot-password` and `/reset-password` routes plus 
 ## Phase 17 — Opt-in SPA sessions
 
 The frontend may set `VITE_AUTH_MODE=cookie` with backend `SPA_SESSION_ENABLED=true`, `SANCTUM_STATEFUL_DOMAINS`, credentialed CORS, shared site and session cookie configuration. New `/auth/spa-login` and `/auth/spa-logout` routes manage Laravel web sessions; `/auth/me` and hotel routes remain under `auth:sanctum`. The old bearer endpoints remain available. See `docs/PHASE_17_SANCTUM_SPA_SESSIONS.md`; browser CSRF and production HTTPS must be verified.
+
+## Phase 18 — Invitation onboarding
+
+API-mode Hotel staff now exposes administrator-only invitation issue/list/revoke endpoints. The public token-based `POST /api/v1/auth/accept-invitation` creates a verified account and hotel membership after secure password setup. The frontend uses `/accept-invitation`; the backend builds this link from trusted `STAFF_INVITE_URL`. See `docs/PHASE_18_STAFF_INVITATIONS.md`.
