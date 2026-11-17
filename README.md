@@ -158,3 +158,7 @@ A new read-only `/api/v1/hotels/{hotel}/reservation-policy-readiness` endpoint r
 ## Phase 12 — Read-only Stay Simulation
 
 New protected `GET /api/v1/hotels/{hotel}/reservation-simulation?roomId=&from=&to=` explains direct physical-room overlaps, unassigned room-type demand and other assigned same-type record counts for a proposed stay. All stored lifecycle states are included; reports **never** assert availability or bookability. No booking write route or new migration exists. See [Phase 12](docs/PHASE_12_RESERVATION_SIMULATION.md).
+
+## Phase 13 — Live Maintenance Work Orders
+
+Added maintenance work-order and audit-event tables with authenticated, hotel-scoped GET/history and administrator-only POST/PATCH endpoints. Work-order statuses and updates are audited transactionally with optimistic revision checks. **Run `php artisan migrate`** before accessing Maintenance. Work-order room impact is informational only; no booking/availability block has been added. See [Phase 13](docs/PHASE_13_LIVE_MAINTENANCE.md).
