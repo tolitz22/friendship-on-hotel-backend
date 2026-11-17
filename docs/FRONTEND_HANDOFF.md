@@ -75,3 +75,7 @@ React API mode now exposes the hotel policy draft editor and revision history vi
 ## Phase 11 — Advisory readiness
 
 The live Booking policies page now consumes the backend's scoped GET `/reservation-policy-readiness`, which returns missing/conditional issues and explicitly denies booking readiness even for complete drafts. No real Reservations wizard integration or booking mutations are active. See `docs/PHASE_11_POLICY_READINESS.md`.
+
+## Phase 12 — Stay simulator
+
+React API mode adds the read-only Stay simulator based on `GET /api/v1/hotels/{hotel}/reservation-simulation` with room ID and inclusive/exclusive date range. It presents assigned-room overlaps, unassigned type demand and other assigned records without claiming availability or activating booking writes. See `docs/PHASE_12_RESERVATION_SIMULATION.md`.
