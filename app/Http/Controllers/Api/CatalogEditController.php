@@ -26,6 +26,7 @@ final class CatalogEditController
         ])->validate();
 
         $result = DB::transaction(function () use ($request, $hotel, $record, $data): RoomType {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $type = $hotel->roomTypes()->lockForUpdate()->findOrFail($record->id);
             $before = ['name' => $type->name, 'maxOccupancy' => (int) $type->max_occupancy];
 
@@ -78,6 +79,7 @@ final class CatalogEditController
         ])->validate();
 
         $result = DB::transaction(function () use ($request, $hotel, $record, $data): Room {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             // The booking and inventory services lock the type before the room.
             // Use that same order for catalogue updates to prevent deadlocks.
             $original = $hotel->rooms()->findOrFail($record->id);
