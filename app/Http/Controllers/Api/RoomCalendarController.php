@@ -48,17 +48,21 @@ final class RoomCalendarController
             ->paginate((int) ($input['per_page'] ?? 30));
 
         $roomIds = $page->getCollection()->pluck('id')->all();
-        $bookings = count($roomIds) ? DB::table('reservation_records')
-            ->where('hotel_id', $hotel->id)
-            ->whereIn('assigned_room_id', $roomIds)
-            ->where('check_in', '<', $input['end'])
-            ->where('check_out', '>', $input['start'])
-            ->where(function ($q): void {
-                $q->whereNull('lifecycle_state')
-                    ->orWhereNotIn('lifecycle_state', ['cancelled', 'no_show']);
+        $bookings = count($roomIds) ? DB::table('reservation_records as rr')
+            ->leftJoin('guests as guest', function ($join): void {
+                $join->on('guest.id', '=', 'rr.guest_id')->on('guest.hotel_id', '=', 'rr.hotel_id');
             })
-            ->orderBy('check_in')->get([
-                'id', 'reference', 'assigned_room_id', 'check_in', 'check_out', 'lifecycle_state',
+            ->where('rr.hotel_id', $hotel->id)
+            ->whereIn('rr.assigned_room_id', $roomIds)
+            ->where('rr.check_in', '<', $input['end'])
+            ->where('rr.check_out', '>', $input['start'])
+            ->where(function ($q): void {
+                $q->whereNull('rr.lifecycle_state')
+                    ->orWhereNotIn('rr.lifecycle_state', ['cancelled', 'no_show']);
+            })
+            ->orderBy('rr.check_in')->get([
+                'rr.id', 'rr.reference', 'rr.assigned_room_id', 'rr.check_in', 'rr.check_out', 'rr.lifecycle_state',
+                'guest.first_name as guest_first_name', 'guest.last_name as guest_last_name',
             ]) : collect();
 
         $blocks = count($roomIds) ? DB::table('room_inventory_blocks')
@@ -91,6 +95,8 @@ final class RoomCalendarController
                     'roomId' => (string) $r->assigned_room_id,
                     'checkIn' => $r->check_in, 'checkOut' => $r->check_out,
                     'status' => $r->lifecycle_state,
+                    'guestName' => $r->guest_first_name !== null
+                        ? trim($r->guest_first_name.' '.($r->guest_last_name ?? '')) : null,
                 ])->values(),
                 'blocks' => $blocks->map(fn ($r): array => [
                     'id' => (string) $r->id, 'roomId' => (string) $r->room_id,
