@@ -83,3 +83,7 @@ React API mode adds the read-only Stay simulator based on `GET /api/v1/hotels/{h
 ## Phase 13 live maintenance
 
 React API mode now consumes `maintenance-work-orders` (scoped list, detail, history, creation and update). Staff read, admins write. Room impact remains an informational flag and cannot block bookable inventory or alter reservations. See `docs/PHASE_13_LIVE_MAINTENANCE.md`.
+
+## Phase 14 — Housekeeping live integration
+
+React API mode now uses `housekeeping-tasks` list/detail/history and admin create/update routes. Task assignment and completion are saved; room readiness and availability remain separate, unresolved policies. See `docs/PHASE_14_LIVE_HOUSEKEEPING.md`.
