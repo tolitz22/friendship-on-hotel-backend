@@ -116,3 +116,7 @@ Phase 16 implements password management and basic account recovery. It **does no
 Laravel's current bearer token is held in browser module memory rather than localStorage; token expiration defaults to 480 minutes. Switching the browser to cookie-auth is a distinct architecture milestone that requires correct domains, CSRF handling, credentials, session rotation, and security validation. Do not claim a production-ready staff identity system solely from these additions.
 
 Neither password reset nor changing credentials affects booking policies, reservation inventory, room readiness, payments or operational lifecycle state.
+
+## Phase 17 continuation
+
+Phase 17 introduces an **opt-in** first-party Laravel Sanctum cookie session flow in addition to the original memory-only bearer-token mode. Password changes now invalidate the current cookie session as well as API tokens. This does not by itself confirm multi-device password-reset revocation or production browser security. Follow `docs/PHASE_17_SANCTUM_SPA_SESSIONS.md`.
