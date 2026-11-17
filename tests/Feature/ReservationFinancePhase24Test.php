@@ -85,7 +85,7 @@ it('creates a priced booking with a permanent nightly folio snapshot and idempot
     ])->assertStatus(409);
     $this->postJson($base.'/bookings/'.$id.'/cancel')->assertStatus(409);
     expect(DB::table('reservation_records')->find($id)->lifecycle_state)->toBe('confirmed');
-    expect(DB::table('folio_entries')->sum('amount_minor'))->toBe(500000);
+    expect((int) DB::table('folio_entries')->sum('amount_minor'))->toBe(500000);
 });
 
 it('preserves unpriced legacy bookings without an invented folio', function (): void {
