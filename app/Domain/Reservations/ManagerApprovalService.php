@@ -263,7 +263,9 @@ final class ManagerApprovalService
             'action' => $row->action,
             'status' => $row->status,
             'reason' => $row->reason,
-            'payload' => json_decode($row->request_payload, true, 512, JSON_THROW_ON_ERROR),
+            'payload' => $row->action === 'amend_dates'
+                ? json_decode($row->request_payload, true, 512, JSON_THROW_ON_ERROR)
+                : (object) [],
             'snapshot' => json_decode($row->booking_snapshot, true, 512, JSON_THROW_ON_ERROR),
             'reviewNote' => $row->review_note,
             'expiresAt' => $row->expires_at,
