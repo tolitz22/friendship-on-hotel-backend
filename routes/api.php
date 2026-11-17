@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\HotelStaffController;
 use App\Http\Controllers\Api\StaffInvitationController;
 use App\Http\Controllers\Api\RoomCatalogController;
+use App\Http\Controllers\Api\RoomCalendarController;
 use App\Http\Controllers\Api\ReservationRecordController;
 use App\Http\Controllers\Api\ReservationHistoryController;
 use App\Http\Controllers\Api\ReservationTurnoverController;
@@ -59,6 +60,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/', [HotelController::class, 'show']);
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
+            Route::get('/room-calendar', RoomCalendarController::class);
             Route::get('/catalog-summary', PropertyCatalogSummaryController::class);
             Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
             Route::get('/reservation-records/{booking}', [ReservationRecordController::class, 'show'])->whereNumber('booking');
