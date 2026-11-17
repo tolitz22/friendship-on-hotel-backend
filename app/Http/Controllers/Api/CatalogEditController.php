@@ -78,6 +78,18 @@ final class CatalogEditController
         ])->validate();
 
         $result = DB::transaction(function () use ($request, $hotel, $record, $data): Room {
+            // The booking and inventory services lock the type before the room.
+            // Use that same order for catalogue updates to prevent deadlocks.
+            $original = $hotel->rooms()->findOrFail($record->id);
+            $typeIds = [(int) $original->room_type_id];
+            if (isset($data['roomTypeId'])) {
+                $typeIds[] = (int) $data['roomTypeId'];
+            }
+            $typeIds = array_values(array_unique($typeIds));
+            sort($typeIds, SORT_NUMERIC);
+            foreach ($typeIds as $typeId) {
+                $hotel->roomTypes()->whereKey($typeId)->lockForUpdate()->firstOrFail();
+            }
             $room = $hotel->rooms()->lockForUpdate()->findOrFail($record->id);
             $before = [
                 'number' => $room->number,
@@ -102,9 +114,11 @@ final class CatalogEditController
                 $destinationReferenced = DB::table('reservation_records')
                     ->where('hotel_id', $hotel->id)
                     ->where('room_type_id', $newType->id)->exists();
-                if ($referenced || $destinationReferenced) {
+                $blocked = DB::table('room_inventory_blocks')
+                    ->where('hotel_id', $hotel->id)->where('room_id', $room->id)->exists();
+                if ($referenced || $destinationReferenced || $blocked) {
                     throw ValidationException::withMessages([
-                        'roomTypeId' => ['Room type reassignment is blocked when the room, its current type or destination type has reservation records.'],
+                        'roomTypeId' => ['Room type reassignment is blocked when the room has inventory blocks or either room type has reservation records.'],
                     ]);
                 }
                 $room->room_type_id = $newType->id;
