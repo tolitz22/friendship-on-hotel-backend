@@ -73,11 +73,14 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/staff/history', [HotelStaffController::class, 'history']);
                 Route::post('/staff', [HotelStaffController::class, 'attach']);
                 Route::patch('/staff/{userId}', [HotelStaffController::class, 'update'])->whereNumber('userId');
+                Route::get('/inventory-blocks', [RoomInventoryController::class, 'blocks']);
                 Route::post('/inventory-blocks', [RoomInventoryController::class, 'block']);
                 Route::post('/inventory-blocks/{block}/release', [RoomInventoryController::class, 'release'])->whereNumber('block');
                 Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])->whereNumber('booking');
                 Route::post('/bookings', [ReservationBookingController::class, 'store']);
                 Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
+                Route::post('/bookings/{booking}/check-in', [ReservationBookingController::class, 'checkIn'])->whereNumber('booking');
+                Route::post('/bookings/{booking}/check-out', [ReservationBookingController::class, 'checkOut'])->whereNumber('booking');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
                 Route::get('/reservation-policy-draft/history', [ReservationPolicyDraftController::class, 'history']);
                 Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
