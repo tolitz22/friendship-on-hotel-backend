@@ -65,23 +65,6 @@ it('reports complete hotel room totals with separately paginated room details', 
     $this->getJson($base.'?room_per_page=101')->assertUnprocessable();
 });
 
-it('reports confirmed arrivals as unassigned or requiring a current inspection', function (): void {
-    $this->travelTo(new DateTimeImmutable('2026-12-10T09:00:00+08:00'));
-    [$hotel, $first, $second, $actor, $type] = phase37Fixture();
-    $guest = $hotel->guests()->create(['first_name' => 'Arrival', 'last_name' => 'Guest']);
-    $base = '/api/v1/hotels/'.$hotel->id;
-
-    $booking = $this->postJson($base.'/bookings', [
-        'idempotencyKey' => 'phase37-dashboard-01',
-        'guestId' => $guest->id, 'roomTypeId' => $type->id,
-        'checkIn' => '2026-12-11', 'checkOut' => '2026-12-12',
-    ])->assertCreated()->json('data.id');
-
-    $this->getJson($base.'/readiness/dashboard?days=7')->assertOk()
-        ->assertJsonPath('meta.arrivalTotal', 1)
-        ->assertJsonPath('data.arrivals.0.reference', 'no-such-reference');
-})->skip('Replaced by explicit risk test below');
-
 it('distinguishes an unassigned arrival from an assigned room needing inspection', function (): void {
     $this->travelTo(new DateTimeImmutable('2026-12-10T09:00:00+08:00'));
     [$hotel, $first, $second, $actor, $type] = phase37Fixture();
