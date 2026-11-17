@@ -42,13 +42,17 @@ final class RoomReadinessService
             ->where('tasks.hotel_id', $hotel->id)
             ->where('tasks.room_id', $roomId)
             ->orderByDesc('links.id')
-            ->first(['tasks.id', 'tasks.status']);
+            ->first(['tasks.id', 'tasks.status', 'links.created_at']);
         $unfinishedTurnover = $turnover !== null && $turnover->status !== 'done';
+        $lastInspection = $this->latest($hotel, $roomId);
+        $newTurnoverSinceInspection = $turnover !== null && $lastInspection !== null
+            && $turnover->created_at > $lastInspection->created_at;
 
         return [
             'activeInventoryBlockToday' => $blocks,
             'activeRoomImpactMaintenance' => $maintenance,
             'latestTurnoverIncomplete' => $unfinishedTurnover,
+            'newTurnoverSinceInspection' => $newTurnoverSinceInspection,
         ];
     }
 
