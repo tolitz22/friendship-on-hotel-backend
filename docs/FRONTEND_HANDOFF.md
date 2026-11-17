@@ -166,3 +166,20 @@ To support a real, non-mocked event timeline, backend `main` adds read-only, hot
 This returns recorded booking events, actor IDs, old/new state and timestamps. It is **not** a financial audit, guest identity verification or evidence of room readiness. It is covered by `tests/Feature/ReservationHistoryPhase32Test.php`.
 
 The frontend reads physical rooms and active dated blocks before enabling assignment, but the Laravel transaction remains the source of truth for collisions and maintenance blocks. Frontend check-in/out buttons require explicit staff UI acknowledgement; that acknowledgement is **not recorded by Laravel**. Check-out generates the existing linked `checkout_clean` task. No automatic payment, settlement, identity approval, housekeeper attestation or early departure is enabled. All POST/PATCH operations require property administration. See frontend `docs/API_CONTRACT.md` Phase 32.
+
+
+## Frontend Phase 36 — Opt-in hotel check-in readiness gate
+
+The Laravel backend now exposes hotel-member policy/history reads and administrator-only revisioned writes:
+
+\`\`\`http
+GET /api/v1/hotels/{hotel}/readiness/enforcement-policy
+GET /api/v1/hotels/{hotel}/readiness/enforcement-policy/history?page=1
+PATCH /api/v1/hotels/{hotel}/readiness/enforcement-policy
+\`\`\`
+
+The policy defaults to \`enforceAtCheckIn:false\` with revision \`0\` (no row). A hotel administrator must provide \`expectedRevision\`, \`enforceAtCheckIn\` and a substantive \`reason\`. Writes are actor-attributed and audited. The room \`GET /rooms/{room}/readiness\` response now reports actual enforcement and the additional \`unfinishedHousekeeping\`/\`newRoomWorkSinceInspection\` blocker flags.
+
+In \`VITE_DATA_SOURCE=api\`, the React Rooms page contains \`ReadinessEnforcementPanel\` and its room inspection panel accurately shows policy state. Front Desk reservation operations disable check-in when mandatory readiness is enabled and the current selected room has no approved clean assessment. The backend ALWAYS checks again under its hotel-first write lock, independent of frontend state. Missing policy data fails closed on the frontend.
+
+Default-off behavior preserves existing check-in rules until the administrator explicitly enables the policy. Enable only after migrated staging tests and a verified operational rollout. See \`docs/PHASE_36_TRANSACTIONAL_READINESS_ENFORCEMENT.md\` for lock scope, migration order, concurrency tests and audited rollback.
