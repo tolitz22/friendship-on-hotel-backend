@@ -136,6 +136,11 @@ final class ReservationBookingService
                 throw new HttpException(409, 'Only confirmed reservations can be cancelled through this endpoint.');
             }
 
+            if (DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+                ->where('reservation_record_id', $record->id)->exists()) {
+                throw new HttpException(409, 'Priced reservations require a financial reversal policy before cancellation.');
+            }
+
             // This starter workflow does not compute refunds or cancellation fees.
             DB::table('reservation_records')->where('id', $record->id)->update([
                 'lifecycle_state' => 'cancelled', 'updated_at' => now(),
