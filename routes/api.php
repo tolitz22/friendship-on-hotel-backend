@@ -102,7 +102,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/rooms/{room}/readiness/history', [RoomReadinessController::class, 'history'])->whereNumber('room');
             Route::get('/readiness/dashboard', RoomReadinessDashboardController::class);
             Route::get('/room-inventory-status', RoomInventoryStatusController::class)
-                ->middleware('hotel.permission:room.read');
+                ->middleware('hotel.permission:reservation.read');
             Route::get('/readiness/enforcement-policy', [ReadinessEnforcementPolicyController::class, 'show']);
             Route::get('/readiness/enforcement-policy/history', [ReadinessEnforcementPolicyController::class, 'history']);
 
