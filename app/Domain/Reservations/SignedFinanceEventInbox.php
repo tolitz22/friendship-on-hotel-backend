@@ -85,7 +85,7 @@ final class SignedFinanceEventInbox
                 'provider' => 'custom_hmac_v1', 'event_id' => $eventId,
                 'hotel_id' => $hotelId,
                 'event_type' => $eventType,
-                'provider_occurred_at' => (new \DateTimeImmutable($occurredAt))->format('Y-m-d H:i:s'),
+                'provider_occurred_at' => (new \DateTimeImmutable($occurredAt))->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'),
                 'payload_sha256' => $digest,
                 'verification_method' => 'hmac_sha256_timestamped',
                 'processing_status' => 'unmapped',
