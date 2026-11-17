@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\HotelController;
 use App\Http\Controllers\Api\RoomCatalogController;
 use App\Http\Controllers\Api\ReservationRecordController;
+use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -24,6 +25,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
             Route::get('/reservation-records', [ReservationRecordController::class, 'index']);
+            Route::get('/rooms/{room}/reservation-overlaps', RoomConflictDiagnosticsController::class);
 
             Route::middleware('hotel.admin')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
