@@ -232,3 +232,50 @@ it('only returns a receptionist their own requests and blocks cross-request even
     $this->getJson($base.'/approval-requests')->assertOk()->assertJsonCount(0, 'data');
     $this->getJson($base.'/approval-requests/'.$approval.'/history')->assertNotFound();
 });
+
+it('does not execute expired or revoked-staff approvals', function (): void {
+    $hotel = Hotel::create(['name' => 'Phase 51 Expiry']);
+    $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Basic', 'max_occupancy' => 2]);
+    Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => 'P51-701']);
+    $guest = $hotel->guests()->create(['first_name' => 'Expiry', 'last_name' => 'Guest']);
+    $manager = phase51Member($hotel, 'admin');
+    $staff = phase51Member($hotel, 'front_desk');
+    $base = '/api/v1/hotels/'.$hotel->id;
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $booking = $this->postJson($base.'/bookings', [
+        'idempotencyKey' => 'phase51-expiry-create-'.uniqid(),
+        'guestId' => $guest->id, 'roomTypeId' => $type->id,
+        'checkIn' => now()->addDays(10)->toDateString(),
+        'checkOut' => now()->addDays(11)->toDateString(),
+    ])->assertCreated()->json('data.id');
+
+    Sanctum::actingAs($staff, ['hotel:read', 'booking:write']);
+    $endpoint = $base.'/bookings/'.$booking.'/approval-requests';
+    $one = $this->postJson($endpoint, [
+        'idempotencyKey' => 'phase51-expiry-one-'.uniqid(),
+        'action' => 'cancel_booking', 'reason' => 'Please cancel this planned guest stay.',
+    ])->assertCreated()->json('data.id');
+    DB::table('manager_approval_requests')->where('id', $one)
+        ->update(['expires_at' => now()->subMinute()]);
+
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $this->postJson($base.'/approval-requests/'.$one.'/review', [
+        'decision' => 'approve',
+    ])->assertStatus(409);
+
+    Sanctum::actingAs($staff, ['hotel:read', 'booking:write']);
+    $two = $this->postJson($endpoint, [
+        'idempotencyKey' => 'phase51-expiry-two-'.uniqid(),
+        'action' => 'cancel_booking', 'reason' => 'This pending cancellation needs review.',
+    ])->assertCreated()->json('data.id');
+    HotelMembership::where('hotel_id', $hotel->id)->where('user_id', $staff->id)
+        ->update(['role' => 'housekeeping']);
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $this->postJson($base.'/approval-requests/'.$two.'/review', [
+        'decision' => 'approve',
+    ])->assertStatus(409);
+    expect(DB::table('reservation_records')->where('id', $booking)->value('lifecycle_state'))
+        ->toBe('confirmed');
+    expect(DB::table('manager_approval_requests')->whereIn('id', [$one, $two])
+        ->where('status', 'pending')->count())->toBe(2);
+});
