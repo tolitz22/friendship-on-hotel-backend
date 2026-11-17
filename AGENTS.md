@@ -25,3 +25,7 @@ Read `docs/BUSINESS_RULES.md`, `docs/ARCHITECTURE.md`, and `docs/FRONTEND_HANDOF
 - Run `composer install`, `php artisan migrate`, `php artisan test`, PHP lint and GitHub CI.
 - Never commit production secrets or real guest records.
 - Don't claim a full build/test pass unless verified in a PHP/Composer environment.
+
+## Reservation Phase 2
+
+Review `docs/RESERVATION_DOMAIN.md` and `docs/PHASE_2.md`. `StayPeriod` uses half-open nights. `RoomOverlapDetector` only identifies conflicts among given physical-room records; it never determines availability or enforces inventory. Reservation records have **no write routes** and an intentionally unsettled state machine. Do not introduce booking mutations, inventory locks or cancellation rules until the hotel has approved the inventory unit and lifecycle.
