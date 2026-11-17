@@ -122,3 +122,7 @@ php artisan test
 ```
 
 Do not run `composer install --no-dev` in local testing or CI. If you already have a `composer.lock`, commit its intentional dependency changes once the test suite passes; do not commit `vendor/`. If additional failures appear after Mockery is available, inspect their first full stack trace separately.
+
+## Backend Phase 4 — Guest Management
+
+Added a hotel-scoped guest directory and validated profile create/update endpoints. Active hotel members can list/search/view; for this initial permissions model, only hotel admins with write-capable tokens may create or edit. No guest deletion endpoint or automatic reservation-to-guest linkage has been enabled. The frontend Guests page remains on mock data until its selected-hotel API routing and browser authentication are implemented. See [Guest Management Phase 4](docs/PHASE_4_GUESTS.md).
