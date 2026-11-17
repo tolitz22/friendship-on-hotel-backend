@@ -95,3 +95,7 @@ The API-mode frontend now offers `Hotel staff` to administrators and linked `ass
 ## Phase 16 — Staff account recovery
 
 React API mode adds public `/forgot-password` and `/reset-password` routes plus authenticated `/change-password`; Laravel provides matching password broker endpoints and revokes all personal access tokens on reset/change. Backend SMTP and `STAFF_PASSWORD_RESET_URL` configuration are required for delivery. See `docs/PHASE_16_STAFF_PASSWORD_SECURITY.md`.
+
+## Phase 17 — Opt-in SPA sessions
+
+The frontend may set `VITE_AUTH_MODE=cookie` with backend `SPA_SESSION_ENABLED=true`, `SANCTUM_STATEFUL_DOMAINS`, credentialed CORS, shared site and session cookie configuration. New `/auth/spa-login` and `/auth/spa-logout` routes manage Laravel web sessions; `/auth/me` and hotel routes remain under `auth:sanctum`. The old bearer endpoints remain available. See `docs/PHASE_17_SANCTUM_SPA_SESSIONS.md`; browser CSRF and production HTTPS must be verified.
