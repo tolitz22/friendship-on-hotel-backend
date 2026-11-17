@@ -51,3 +51,45 @@ it('makes room endpoints read only', function (): void {
 
     $this->postJson('/api/v1/hotels/'.$hotel->id.'/rooms', ['number' => '401'])->assertForbidden();
 });
+
+
+it('treats newly created staff as active before reloading the database default', function (): void {
+    $user = User::create([
+        'name' => 'Default Active',
+        'email' => 'default-active@example.test',
+        'password' => 'long-passphrase',
+    ]);
+    $hotel = Hotel::create(['name' => 'Default Active Hotel']);
+    HotelMembership::create([
+        'hotel_id' => $hotel->id,
+        'user_id' => $user->id,
+        'role' => 'front_desk',
+    ]);
+
+    // Sanctum uses this same in-memory model instance.
+    expect($user->is_active)->toBeTrue();
+    Sanctum::actingAs($user, ['hotel:read']);
+
+    $this->getJson('/api/v1/hotels/'.$hotel->id)
+        ->assertOk()
+        ->assertJsonPath('data.name', 'Default Active Hotel');
+});
+
+it('denies a deliberately inactive user even when they hold an active hotel membership', function (): void {
+    $user = User::create([
+        'name' => 'Inactive Agent',
+        'email' => 'inactive-agent@example.test',
+        'password' => 'long-passphrase',
+        'is_active' => false,
+    ]);
+    $hotel = Hotel::create(['name' => 'Inactive Account Hotel']);
+    HotelMembership::create([
+        'hotel_id' => $hotel->id,
+        'user_id' => $user->id,
+        'role' => 'front_desk',
+    ]);
+
+    Sanctum::actingAs($user, ['hotel:read']);
+
+    $this->getJson('/api/v1/hotels/'.$hotel->id)->assertForbidden();
+});
