@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\RoomReadinessController;
 use App\Http\Controllers\Api\ReadinessEnforcementPolicyController;
 use App\Http\Controllers\Api\RoomReadinessDashboardController;
 use App\Http\Controllers\Api\RoomInventoryStatusController;
+use App\Http\Controllers\Api\NightAuditPreviewController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
@@ -160,6 +161,7 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('hotel.permission:keycard.request')->middleware('throttle:20,1');
 
             Route::middleware('hotel.admin')->group(function (): void {
+                Route::get('/night-audit/preview', NightAuditPreviewController::class);
                 Route::get('/occupancy-coverage-report', OccupancyCoverageReportController::class);
                 Route::post('/keycard-authorizations/{authorization}/review', [KeycardAuthorizationController::class, 'review'])
                     ->whereNumber('authorization')->middleware('throttle:20,1');
