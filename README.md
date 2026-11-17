@@ -138,3 +138,7 @@ New `GET /api/v1/hotels/{hotel}/catalog-summary` returns registered room totals,
 ## Phase 7 — Admin room setup through React
 
 The React Settings and Room Inventory screens now use the existing admin-only room type/room creation endpoints. No new migration is needed. Added `tests/Feature/CatalogAdministrationTest.php` covering input validation, hotel isolation and permission boundaries. See [Phase 7](docs/PHASE_7_CATALOG_ADMIN.md). This creates room catalogue records, not availability or bookings.
+
+## Phase 8 — Audited Room Catalogue Edits
+
+Added `catalog_audit_logs` migration plus admin-only PATCH endpoints for room types and physical rooms, with scoped before/after history. Structural room type/capacity changes are denied when reservation records refer to the affected room or types; no booking/availability mutation is enabled. **Run `php artisan migrate`** then `php artisan test`. See [Phase 8](docs/PHASE_8_CATALOG_EDITS.md).
