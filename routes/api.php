@@ -38,6 +38,7 @@ use App\Http\Controllers\Api\ReservationPolicyReadinessController;
 use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
+use App\Http\Controllers\Api\CashierShiftController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -122,7 +123,18 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('booking')->middleware('hotel.permission:approval.request')
                 ->middleware('throttle:20,1');
 
+            Route::get('/cashier-shifts', [CashierShiftController::class, 'index'])->middleware('hotel.permission:cashier.read');
+            Route::get('/cashier-shifts/{shift}', [CashierShiftController::class, 'show'])->whereNumber('shift')->middleware('hotel.permission:cashier.read');
+            Route::get('/cashier-shifts/{shift}/history', [CashierShiftController::class, 'history'])->whereNumber('shift')->middleware('hotel.permission:cashier.read');
+            Route::post('/cashier-shifts', [CashierShiftController::class, 'open'])->middleware('hotel.permission:cashier.write')->middleware('throttle:20,1');
+            Route::post('/cashier-shifts/{shift}/bookings/{booking}/cash-receipts', [CashierShiftController::class, 'receive'])
+                ->whereNumber('shift')->whereNumber('booking')->middleware('hotel.permission:cashier.write')->middleware('throttle:30,1');
+            Route::post('/cashier-shifts/{shift}/close', [CashierShiftController::class, 'close'])
+                ->whereNumber('shift')->middleware('hotel.permission:cashier.write')->middleware('throttle:20,1');
+
             Route::middleware('hotel.admin')->group(function (): void {
+                Route::post('/cashier-shifts/{shift}/reconcile', [CashierShiftController::class, 'reconcile'])
+                    ->whereNumber('shift')->middleware('throttle:20,1');
                 Route::post('/approval-requests/{approval}/review', [ManagerApprovalController::class, 'review'])
                     ->whereNumber('approval')->middleware('throttle:20,1');
                 Route::patch('/', [HotelController::class, 'update']);
