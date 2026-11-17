@@ -60,6 +60,9 @@ it('searches reservation records by guest, reference, and physical room across s
         ->assertJsonPath('meta.total', 1)
         ->assertJsonPath('data.0.reference', 'DESK-MARIA')
         ->assertJsonPath('data.0.guestName', 'Maria Santos');
+    $this->getJson($url.'?search=maria%20santos')->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.0.reference', 'DESK-MARIA');
     $this->getJson($url.'?search=201')->assertOk()
         ->assertJsonPath('meta.total', 1)
         ->assertJsonPath('data.0.reference', 'DESK-MARIA');
