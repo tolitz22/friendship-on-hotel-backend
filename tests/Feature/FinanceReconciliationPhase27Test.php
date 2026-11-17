@@ -133,7 +133,7 @@ it('rejects mismatched amounts and forbids cross-property event reviews', functi
         'requestKey' => 'p27-payment-0002', 'method' => 'bank_transfer',
         'reference' => 'BANK-P27-TEST', 'amountMinor' => 11000,
     ])->assertCreated()->json('data.id');
-    $eventId = phase27Webhook($this, phase27EventPayload())->assertStatus(202)->json('data.id');
+    $eventId = phase27Webhook($this, phase27EventPayload(hotelId: (int) $hotel->id))->assertStatus(202)->json('data.id');
 
     $this->postJson($base.'/finance-event-reviews', [
         'eventId' => $eventId, 'paymentRecordId' => $payment,
