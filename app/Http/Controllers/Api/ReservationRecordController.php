@@ -67,18 +67,21 @@ final class ReservationRecordController
         if ($search !== '') {
             // Literal LIKE matching. A guest/room cannot leak across hotels.
             $like = '%'.addcslashes($search, '%_\\').'%';
-            $query->where(function ($q) use ($hotel, $like, $search): void {
+            $fullGuestName = DB::connection()->getDriverName() === 'mysql'
+                ? "CONCAT(guests.first_name, ' ', guests.last_name)"
+                : "(guests.first_name || ' ' || guests.last_name)";
+            $query->where(function ($q) use ($hotel, $like, $search, $fullGuestName): void {
                 $q->where('reference', 'like', $like);
                 if (ctype_digit($search) && (int) $search > 0) {
                     $q->orWhere('id', (int) $search);
                 }
                 $q->orWhereHas('assignedRoom', fn ($rooms) =>
                     $rooms->where('hotel_id', $hotel->id)->where('number', 'like', $like));
-                $q->orWhereExists(function ($guestQuery) use ($hotel, $like): void {
+                $q->orWhereExists(function ($guestQuery) use ($hotel, $like, $fullGuestName): void {
                     $guestQuery->selectRaw('1')->from('guests')
                         ->whereColumn('guests.id', 'reservation_records.guest_id')
                         ->where('guests.hotel_id', $hotel->id)
-                        ->whereRaw("CONCAT(guests.first_name, ' ', guests.last_name) LIKE ?", [$like]);
+                        ->whereRaw($fullGuestName.' LIKE ?', [$like]);
                 });
             });
         }
