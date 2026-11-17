@@ -89,3 +89,50 @@ it('does not let an admin token without write ability bypass permissions', funct
     $this->postJson('/api/v1/hotels/'.$hotel->id.'/bookings/999999/check-out')
         ->assertForbidden();
 });
+
+it('hides guest, reservation and financial records from cleaning staff', function (): void {
+    $hotel = Hotel::create(['name' => 'Phase 50 Private Records']);
+    $cleaner = phase50Staff($hotel, 'housekeeping');
+    Sanctum::actingAs($cleaner, ['hotel:read']);
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $this->getJson($base.'/guests')->assertForbidden();
+    $this->getJson($base.'/reservation-records')->assertForbidden();
+    $this->getJson($base.'/front-desk/manifest')->assertForbidden();
+    $this->getJson($base.'/bookings/999999/folio-ledger')->assertForbidden();
+
+    $reception = phase50Staff($hotel, 'front_desk');
+    Sanctum::actingAs($reception, ['hotel:read', 'booking:write']);
+    $this->getJson($base.'/guests')->assertOk();
+    $this->getJson($base.'/reservation-records')->assertOk();
+});
+
+it('permits front desk to assign within a hotel and audits the room assignment', function (): void {
+    $hotel = Hotel::create(['name' => 'Phase 50 Assignment']);
+    $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2]);
+    $room = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => 'P50-202']);
+    $guest = $hotel->guests()->create(['first_name' => 'Assign', 'last_name' => 'Guest']);
+
+    $manager = phase50Staff($hotel, 'admin');
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $id = $this->postJson($base.'/bookings', [
+        'idempotencyKey' => 'phase50-assign-'.uniqid(),
+        'guestId' => $guest->id,
+        'roomTypeId' => $type->id,
+        'checkIn' => '2026-12-10',
+        'checkOut' => '2026-12-12',
+    ])->assertCreated()->json('data.id');
+
+    $receptionist = phase50Staff($hotel, 'front_desk');
+    Sanctum::actingAs($receptionist, ['hotel:read', 'booking:write']);
+    $this->getJson($base.'/inventory-blocks?roomId='.$room->id)->assertOk();
+    $this->patchJson($base.'/bookings/'.$id.'/assign-room', [
+        'roomId' => $room->id,
+    ])->assertOk()->assertJsonPath('data.roomId', (string) $room->id);
+
+    expect(DB::table('reservation_booking_events')
+        ->where('hotel_id', $hotel->id)
+        ->where('reservation_record_id', $id)
+        ->where('actor_id', $receptionist->id)
+        ->where('event_type', 'room_assigned')->exists())->toBeTrue();
+});
