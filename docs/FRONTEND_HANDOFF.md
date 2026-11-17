@@ -55,3 +55,7 @@ React now has staff sign-in against `/auth/login`, in-memory bearer token, `/aut
 ## Phase 6 frontend connected read-only catalogue
 
 Frontend API mode now reads real selected-hotel settings, registered room/type counts, floor groups and paginated filtered rooms from Laravel, alongside live Guests. Overview no longer labels sample occupancy figures as live. Reservation calendar/timeline and remaining PMS operational workflows stay mock previews. See both repositories' `docs/PHASE_6_LIVE_CATALOG.md`.
+
+## Phase 7 frontend admin creation
+
+The React frontend can now create room types and physical rooms for the selected hotel via the existing Laravel administrator-only POST APIs. Room counts and listings invalidate after successful creation. Existing read-only views and mock-mode screens remain available. No room catalogue edit/delete, booking writes or availability state is implied. See `docs/PHASE_7_CATALOG_ADMIN.md`.
