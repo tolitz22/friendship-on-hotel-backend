@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\ReservationBookingController;
 use App\Http\Controllers\Api\FrontDeskReservationController;
 use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
+use App\Http\Controllers\Api\FinancePolicyController;
 use App\Http\Controllers\Api\RoomInventoryController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
@@ -57,6 +58,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking');
+            Route::get('/finance/charge-policy-drafts', [FinancePolicyController::class, 'policies']);
+            Route::get('/bookings/{booking}/charge-preview', [FinancePolicyController::class, 'preview'])->whereNumber('booking');
+            Route::get('/bookings/{booking}/refund-requests', [FinancePolicyController::class, 'refunds'])->whereNumber('booking');
             Route::get('/reservation-simulation', ReservationScenarioController::class);
             Route::get('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'show']);
             Route::get('/reservation-policy-readiness', ReservationPolicyReadinessController::class);
@@ -86,6 +90,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/inventory-blocks/{block}/release', [RoomInventoryController::class, 'release'])->whereNumber('block');
                 Route::patch('/bookings/{booking}/assign-room', [RoomInventoryController::class, 'assign'])->whereNumber('booking');
                 Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
+                Route::post('/finance/charge-policy-drafts', [FinancePolicyController::class, 'draft']);
+                Route::post('/bookings/{booking}/refund-requests', [FinancePolicyController::class, 'requestRefund'])->whereNumber('booking');
+                Route::post('/bookings/{booking}/refund-requests/{refund}/review', [FinancePolicyController::class, 'reviewRefund'])->whereNumber('booking')->whereNumber('refund');
                 Route::post('/bookings/{booking}/cancel-priced-unpaid', [FolioAccountingController::class, 'cancelUnpaid'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/folio-adjustments', [FolioAccountingController::class, 'adjust'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/payment-records', [FolioAccountingController::class, 'recordPayment'])->whereNumber('booking');
