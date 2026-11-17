@@ -86,6 +86,17 @@ final class ReservationAmendmentService
             DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->update([
                 'check_in' => $newStay->arrival, 'check_out' => $newStay->departure, 'updated_at' => now(),
             ]);
+            DB::table('reservation_date_amendments')->insert([
+                'hotel_id' => $hotel->id,
+                'reservation_record_id' => $bookingId,
+                'actor_id' => $actor,
+                'old_check_in' => $booking->check_in,
+                'old_check_out' => $booking->check_out,
+                'new_check_in' => $newStay->arrival,
+                'new_check_out' => $newStay->departure,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
             DB::table('reservation_booking_events')->insert([
                 'hotel_id' => $hotel->id, 'reservation_record_id' => $bookingId, 'actor_id' => $actor,
                 'event_type' => 'stay_amended', 'old_state' => 'confirmed',
