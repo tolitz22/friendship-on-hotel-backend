@@ -39,6 +39,17 @@ final class ReservationStayLifecycleService
             if ($record->lifecycle_state !== $expected) {
                 throw new HttpException(409, 'This reservation cannot perform the requested transition from its current state.');
             }
+            // Default front-desk policy: no advance check-in and no
+            // premature checkout (early departures need an amendment workflow).
+            $hotelDate = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
+            if ($operation === 'check_in'
+                && ($hotelDate < $record->check_in || $hotelDate >= $record->check_out)) {
+                throw new HttpException(409, 'Check-in is allowed from arrival day until departure day.');
+            }
+            if ($operation === 'check_out' && $hotelDate < $record->check_out) {
+                throw new HttpException(409, 'Early check-out requires a separate stay amendment.');
+            }
+
             if ($operation === 'check_in') {
                 if ($record->assigned_room_id === null) {
                     throw new HttpException(409, 'Assign a physical room before check-in.');
