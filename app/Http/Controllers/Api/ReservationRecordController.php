@@ -45,20 +45,58 @@ final class ReservationRecordController
         $data = $request->validate([
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+            'search' => ['sometimes', 'string', 'max:100'],
+            'filter' => ['sometimes', 'in:all,needs_room,arrivals,in_house,completed'],
         ]);
 
         $perPage = (int) ($data['per_page'] ?? 20);
-        $records = $hotel->reservationRecords()
-            ->with(['roomType:id,name', 'assignedRoom:id,number'])
-            ->orderBy('check_in')
-            ->orderBy('id')
-            ->paginate($perPage);
+        $query = $hotel->reservationRecords()
+            ->with(['roomType:id,name', 'assignedRoom:id,number']);
+        $filter = $data['filter'] ?? 'all';
+        if ($filter === 'needs_room') {
+            $query->where('lifecycle_state', 'confirmed')->whereNull('assigned_room_id');
+        } elseif ($filter === 'arrivals') {
+            $query->where('lifecycle_state', 'confirmed');
+        } elseif ($filter === 'in_house') {
+            $query->where('lifecycle_state', 'checked_in');
+        } elseif ($filter === 'completed') {
+            $query->whereIn('lifecycle_state', ['checked_out', 'cancelled']);
+        }
+
+        $search = trim((string) ($data['search'] ?? ''));
+        if ($search !== '') {
+            // Literal LIKE matching. A guest/room cannot leak across hotels.
+            $like = '%'.addcslashes($search, '%_\\').'%';
+            $query->where(function ($q) use ($hotel, $like, $search): void {
+                $q->where('reference', 'like', $like);
+                if (ctype_digit($search) && (int) $search > 0) {
+                    $q->orWhere('id', (int) $search);
+                }
+                $q->orWhereHas('assignedRoom', fn ($rooms) =>
+                    $rooms->where('hotel_id', $hotel->id)->where('number', 'like', $like));
+                $q->orWhereExists(function ($guestQuery) use ($hotel, $like): void {
+                    $guestQuery->selectRaw('1')->from('guests')
+                        ->whereColumn('guests.id', 'reservation_records.guest_id')
+                        ->where('guests.hotel_id', $hotel->id)
+                        ->whereRaw("CONCAT(guests.first_name, ' ', guests.last_name) LIKE ?", [$like]);
+                });
+            });
+        }
+
+        $records = $query->orderBy('check_in')->orderBy('id')->paginate($perPage);
+        $guestNames = DB::table('guests')
+            ->where('hotel_id', $hotel->id)
+            ->whereIn('id', $records->getCollection()->pluck('guest_id')->filter()->all())
+            ->get(['id', 'first_name', 'last_name'])->keyBy('id');
 
         return response()->json([
             'data' => $records->getCollection()->map(fn ($record): array => [
                 'id' => (string) $record->id,
                 'hotelId' => (string) $record->hotel_id,
                 'reference' => $record->reference,
+                'guestName' => isset($guestNames[$record->guest_id])
+                    ? trim($guestNames[$record->guest_id]->first_name.' '.$guestNames[$record->guest_id]->last_name)
+                    : null,
                 'roomTypeName' => $record->roomType?->name,
                 'assignedRoomNumber' => $record->assignedRoom?->number,
                 'roomTypeId' => (string) $record->room_type_id,
