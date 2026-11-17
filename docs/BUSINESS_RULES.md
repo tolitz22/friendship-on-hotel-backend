@@ -16,3 +16,7 @@ UI sample records do **not** constitute approved policies.
 ## Phase 2 decision log
 
 All eight questions above remain unresolved. Phase 2 stores optional physical room references and half-open stay dates but **does not select an inventory-selling model**. See [Reservation domain decisions](RESERVATION_DOMAIN.md) for consequences and alternatives. The backend now has structural reservation records with no mutation API and an overlap-analysis utility that does not promise availability.
+
+## Phase 9 decision checkpoint
+
+Read `docs/PHASE_9_RESERVATION_DEMAND.md` before implementing any booking mutation. Phase 9 reports every stored reservation record by hotel night and room type (assigned or unassigned) **without filtering lifecycle status or computing sellable inventory**. The hotel has not approved inventory unit, assignment timing, holds, maintenance blocks, statuses, overbooking, rates, or cancellation rules. No reservation mutation may be enabled from these diagnostic totals.
