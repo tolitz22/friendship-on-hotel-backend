@@ -120,3 +120,8 @@ The Laravel backend now exposes selected-hotel room-type availability by night, 
 ## Phase 22 — Front-desk backend lifecycle and inventory block review
 
 Backend `main` now has admin-only `POST /bookings/{booking}/check-in`, `POST /bookings/{booking}/check-out` and paginated `GET /inventory-blocks` under `/api/v1/hotels/{hotel}`. Check-in requires an assigned room and hotel-local valid dates, checkout cannot occur before planned departure. No automated housekeeping readiness, billing, refund or guest identity confirmation is implied. Preserve existing React mock workflows until the typed API contract, role behavior and production database concurrency verification are completed. See `docs/PHASE_22_RESERVATION_OPERATIONS.md`.
+
+
+## Phase 23 — Front-desk manifest, date amendments and housekeeping turnover
+
+Backend `main` adds read-only `GET /api/v1/hotels/{hotel}/front-desk/manifest?date=YYYY-MM-DD&kind=arrivals|departures|in_house` and admin-only `PATCH /api/v1/hotels/{hotel}/bookings/{booking}/dates`. Date amendments are pre-arrival, preserve room type and assigned room, and perform nightly inventory checks; no repricing or payments are performed. A successful checkout creates a linked `checkout_clean` housekeeping task transactionally, but its existence or completion is not a room-readiness guarantee. Frontend mock booking and billing flows remain separate. See `docs/PHASE_23_RESERVATION_AMENDMENTS.md`.
