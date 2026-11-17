@@ -87,3 +87,7 @@ React API mode now consumes `maintenance-work-orders` (scoped list, detail, hist
 ## Phase 14 — Housekeeping live integration
 
 React API mode now uses `housekeeping-tasks` list/detail/history and admin create/update routes. Task assignment and completion are saved; room readiness and availability remain separate, unresolved policies. See `docs/PHASE_14_LIVE_HOUSEKEEPING.md`.
+
+## Phase 15 — Hotel staff and assigned workers
+
+The API-mode frontend now offers `Hotel staff` to administrators and linked `assignedUserId` selectors on live housekeeping/maintenance forms. Active assigned role members may PATCH only the status and note of their own linked task; the API retains server-side authorization. Legacy assignment strings grant no rights. See `docs/PHASE_15_STAFF_PERMISSIONS.md`.
