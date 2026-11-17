@@ -61,9 +61,11 @@ final class ReservationBookingService
                 ->where('room_type_id', $type->id)
                 ->where('check_in', '<', $period->departure)
                 ->where('check_out', '>', $period->arrival)
+                // Fail closed for provisional/unknown states: only explicitly
+                // released states stop consuming inventory.
                 ->where(function ($query): void {
                     $query->whereNull('lifecycle_state')
-                        ->orWhereIn('lifecycle_state', config('booking.consuming_states', ['confirmed', 'checked_in']));
+                        ->orWhereNotIn('lifecycle_state', ['cancelled', 'checked_out', 'no_show']);
                 })
                 ->get(['check_in', 'check_out']);
 
