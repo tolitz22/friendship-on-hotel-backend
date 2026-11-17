@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Reservations\ReservationBookingService;
+use App\Domain\Reservations\ReservationStayLifecycleService;
 use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -28,6 +29,20 @@ final class ReservationBookingController
             ['data' => $result],
             $result['idempotentReplay'] ? 200 : 201
         );
+    }
+
+    public function checkIn(Request $request, Hotel $hotel, string $booking, ReservationStayLifecycleService $lifecycle): JsonResponse
+    {
+        return response()->json(['data' => $lifecycle->transition(
+            $hotel, (int) $request->user()->id, (int) $booking, 'check_in'
+        )]);
+    }
+
+    public function checkOut(Request $request, Hotel $hotel, string $booking, ReservationStayLifecycleService $lifecycle): JsonResponse
+    {
+        return response()->json(['data' => $lifecycle->transition(
+            $hotel, (int) $request->user()->id, (int) $booking, 'check_out'
+        )]);
     }
 
     public function cancel(Request $request, Hotel $hotel, string $booking, ReservationBookingService $bookings): JsonResponse
