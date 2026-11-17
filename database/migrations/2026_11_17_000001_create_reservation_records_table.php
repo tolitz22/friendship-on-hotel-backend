@@ -22,8 +22,8 @@ return new class extends Migration {
             $table->timestamps();
 
             $table->unique(['hotel_id', 'reference']);
-            $table->index(['hotel_id', 'check_in', 'check_out']);
-            $table->index(['hotel_id', 'assigned_room_id', 'check_in', 'check_out']);
+            $table->index(['hotel_id', 'check_in', 'check_out'], 'res_hotel_stay_idx');
+            $table->index(['hotel_id', 'assigned_room_id', 'check_in', 'check_out'], 'res_room_stay_idx');
             $table->foreign(['hotel_id', 'room_type_id'])
                 ->references(['hotel_id', 'id'])->on('room_types')->restrictOnDelete();
             $table->foreign(['hotel_id', 'room_type_id', 'assigned_room_id'], 'reservation_room_type_match')
