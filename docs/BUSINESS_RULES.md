@@ -36,3 +36,7 @@ The `/reservation-policy-readiness` report identifies missing draft fields, pote
 ## Phase 13 maintenance boundary
 
 Work orders and `affects_room` are now live maintenance records, **not** booking holds or room-night inventory blocks. Approve maintenance effective dates, manual vs automatic blocking, priority, overrides and release procedures before connecting work orders to reservation availability. See `docs/PHASE_13_LIVE_MAINTENANCE.md`.
+
+## Phase 14 housekeeping operational boundary
+
+A housekeeping task's `done` status does **not** make a room clean, vacant, bookable or available, and cannot release any inventory hold. Approve turnover, inspection, staff role, room-state and front-desk policies before implementing automatic room readiness. See `docs/PHASE_14_LIVE_HOUSEKEEPING.md`.
