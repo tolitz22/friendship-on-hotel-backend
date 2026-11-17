@@ -66,22 +66,22 @@ final class ReservationRecordController
         $search = trim((string) ($data['search'] ?? ''));
         if ($search !== '') {
             // Literal LIKE matching. A guest/room cannot leak across hotels.
-            $like = '%'.addcslashes($search, '%_\\').'%';
+            $like = '%'.addcslashes(mb_strtolower($search), '%_\\').'%';
             $fullGuestName = DB::connection()->getDriverName() === 'mysql'
                 ? "CONCAT(guests.first_name, ' ', guests.last_name)"
                 : "(guests.first_name || ' ' || guests.last_name)";
             $query->where(function ($q) use ($hotel, $like, $search, $fullGuestName): void {
-                $q->where('reference', 'like', $like);
+                $q->whereRaw('LOWER(reservation_records.reference) LIKE ?', [$like]);
                 if (ctype_digit($search) && (int) $search > 0) {
                     $q->orWhere('id', (int) $search);
                 }
                 $q->orWhereHas('assignedRoom', fn ($rooms) =>
-                    $rooms->where('hotel_id', $hotel->id)->where('number', 'like', $like));
+                    $rooms->where('hotel_id', $hotel->id)->whereRaw('LOWER(rooms.number) LIKE ?', [$like]));
                 $q->orWhereExists(function ($guestQuery) use ($hotel, $like, $fullGuestName): void {
                     $guestQuery->selectRaw('1')->from('guests')
                         ->whereColumn('guests.id', 'reservation_records.guest_id')
                         ->where('guests.hotel_id', $hotel->id)
-                        ->whereRaw($fullGuestName.' LIKE ?', [$like]);
+                        ->whereRaw('LOWER('.$fullGuestName.') LIKE ?', [$like]);
                 });
             });
         }
