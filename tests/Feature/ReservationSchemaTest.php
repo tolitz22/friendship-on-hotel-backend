@@ -120,3 +120,37 @@ it('has no public or authenticated reservation creation endpoint', function (): 
 
     expect(DB::table('reservation_records')->count())->toBe(0);
 });
+
+
+it('rejects a reservation update that makes checkout equal to checkin', function (): void {
+    $hotel = Hotel::create(['name'=>'Constraint Property']);
+    $type = RoomType::create([
+        'hotel_id'=>$hotel->id,'name'=>'Standard','max_occupancy'=>2,
+    ]);
+    $id = DB::table('reservation_records')->insertGetId([
+        'hotel_id'=>$hotel->id,'room_type_id'=>$type->id,
+        'reference'=>'DATE-UPDATE','check_in'=>'2026-11-17','check_out'=>'2026-11-20',
+    ]);
+
+    expect(fn () => DB::table('reservation_records')->where('id',$id)
+        ->update(['check_out'=>'2026-11-17']))
+        ->toThrow(\Illuminate\Database\QueryException::class);
+
+    expect(DB::table('reservation_records')->find($id)->check_out)
+        ->toBe('2026-11-20');
+});
+
+it('enforces hotel-scoped reference uniqueness at the database layer', function (): void {
+    $hotel = Hotel::create(['name'=>'Reference Property']);
+    $type = RoomType::create([
+        'hotel_id'=>$hotel->id,'name'=>'Standard','max_occupancy'=>2,
+    ]);
+    $record = [
+        'hotel_id'=>$hotel->id,'room_type_id'=>$type->id,
+        'reference'=>'DUPLICATE-REFERENCE','check_in'=>'2026-11-17','check_out'=>'2026-11-19',
+    ];
+    DB::table('reservation_records')->insert($record);
+
+    expect(fn () => DB::table('reservation_records')->insert($record))
+        ->toThrow(\Illuminate\Database\QueryException::class);
+});
