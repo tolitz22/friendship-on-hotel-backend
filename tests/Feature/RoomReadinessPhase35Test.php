@@ -113,6 +113,9 @@ it('does not approve failed inspection checks or active maintenance blockers', f
     $id2 = $this->postJson($base.'/inspections', phase35Checklist())
         ->assertCreated()->json('data.inspection.id');
     $this->getJson($base)->assertJsonPath('data.blockers.activeRoomImpactMaintenance', true);
+    // A different administrator must review the new inspection; otherwise
+    // the self-approval guard returns 403 before evaluating blockers.
+    phase35Staff($hotel);
     $this->postJson($base.'/inspections/'.$id2.'/review', [
         'expectedRevision' => 1, 'decision' => 'approve',
         'note' => 'Cannot approve during maintenance',
