@@ -76,3 +76,8 @@ Read `docs/PHASE_23_RESERVATION_AMENDMENTS.md`. Date amendments are admin-only, 
 ## Phase 24 — Room rate snapshots and unpriced legacy compatibility
 
 Read `docs/PHASE_24_FINANCE_FOUNDATION.md`. Hotel administrators may create fixed nightly `room_rate_plans`; optionally priced bookings snapshot one room-night folio entry per night atomically within booking creation. Amounts are integer minor units and quote only room subtotal; never imply tax, invoice, payment, fee or deposit calculation. Unpriced legacy booking creation still works. Priced bookings cannot be amended or cancelled with the old unfunded/no-reversal routes. Before live financial use, implement approved refund/reversal, tax and payment settlement policies plus MySQL/PostgreSQL integration tests.
+
+
+## Phase 25 — Provisional Folio Ledger and Payment Evidence
+
+Read `docs/PHASE_25_PROVISIONAL_FINANCE_LEDGER.md`. Folio adjustments and manual payment evidence are hotel-scoped, admin-only writes with idempotency keys and actor/reviewer audit. Bank-transfer evidence requires an independent staff confirmer; confirmation remains **staff attestation, not bank verification**. Ledger differences are not tax-complete payable balances, official receipts or settlement. Priced cancellations via `/cancel-priced-unpaid` require no payment evidence and no manual adjustments, then atomically credit all room-night charges before cancelling. Never assume this issues a refund. Preserve room-type/folio transaction locks and the guard on priced date amendments. Production money operations require external verification and finance-policy approval.
