@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\ReservationPolicyDraftController;
 use App\Http\Controllers\Api\ReservationPolicyReadinessController;
 use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use App\Http\Controllers\Api\OperationalExceptionsController;
+use App\Http\Controllers\Api\ManagerApprovalController;
 use Illuminate\Support\Facades\Route;
 
 Route::prefix('v1')->group(function (): void {
@@ -111,7 +112,19 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/bookings/{booking}/check-out', [ReservationBookingController::class, 'checkOut'])
                 ->whereNumber('booking')->middleware('hotel.permission:booking.check_out');
 
+            // Reception can request narrow exceptions; managers can review and
+            // atomically execute them through the original domain services.
+            Route::get('/approval-requests', [ManagerApprovalController::class, 'index'])
+                ->middleware('hotel.permission:approval.read');
+            Route::get('/approval-requests/{approval}/history', [ManagerApprovalController::class, 'history'])
+                ->whereNumber('approval')->middleware('hotel.permission:approval.read');
+            Route::post('/bookings/{booking}/approval-requests', [ManagerApprovalController::class, 'store'])
+                ->whereNumber('booking')->middleware('hotel.permission:approval.request')
+                ->middleware('throttle:20,1');
+
             Route::middleware('hotel.admin')->group(function (): void {
+                Route::post('/approval-requests/{approval}/review', [ManagerApprovalController::class, 'review'])
+                    ->whereNumber('approval')->middleware('throttle:20,1');
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::get('/operational-exceptions', OperationalExceptionsController::class);
                 Route::get('/staff', [HotelStaffController::class, 'index']);
