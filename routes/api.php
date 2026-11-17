@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\StaffPasswordController;
+use App\Http\Controllers\Api\SpaSessionController;
 use App\Http\Controllers\Api\CatalogEditController;
 use App\Http\Controllers\Api\GuestController;
 use App\Http\Controllers\Api\HousekeepingTaskController;
@@ -25,12 +26,14 @@ Route::prefix('v1')->group(function (): void {
     Route::get('/health', HealthController::class);
 
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:5,1');
+    Route::post('/auth/spa-login', [SpaSessionController::class, 'login'])->middleware('throttle:5,1');
     Route::post('/auth/forgot-password', [StaffPasswordController::class, 'forgot'])->middleware('throttle:5,1');
     Route::post('/auth/reset-password', [StaffPasswordController::class, 'reset'])->middleware('throttle:5,1');
 
     Route::middleware(['auth:sanctum', 'active.user'])->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
+        Route::post('/auth/spa-logout', [SpaSessionController::class, 'logout']);
         Route::post('/auth/change-password', [StaffPasswordController::class, 'change'])->middleware('throttle:5,1');
         Route::get('/hotels', [HotelController::class, 'index']);
 
