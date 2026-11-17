@@ -9,6 +9,7 @@ use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Support\Facades\DB;
 
 final class RoomInventoryController
 {
@@ -28,6 +29,46 @@ final class RoomInventoryController
                 'scope' => 'registered_room_type_inventory',
                 'housekeepingReadinessVerified' => false,
                 'pricingIncluded' => false,
+            ],
+        ]);
+    }
+
+    public function blocks(Request $request, Hotel $hotel): JsonResponse
+    {
+        $params = $request->validate([
+            'roomId' => ['sometimes', 'integer', 'min:1'],
+            'active' => ['sometimes', 'boolean'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $query = DB::table('room_inventory_blocks')->where('hotel_id', $hotel->id);
+        if (isset($params['roomId'])) {
+            $query->where('room_id', (int) $params['roomId']);
+        }
+        if (array_key_exists('active', $params)) {
+            $query->where('is_active', (bool) $params['active']);
+        }
+
+        $page = $query->orderByDesc('id')->paginate((int) ($params['per_page'] ?? 20));
+        return response()->json([
+            'data' => $page->getCollection()->map(fn (object $row): array => [
+                'id' => (string) $row->id,
+                'roomId' => (string) $row->room_id,
+                'roomTypeId' => (string) $row->room_type_id,
+                'checkIn' => $row->check_in,
+                'checkOut' => $row->check_out,
+                'reason' => $row->reason,
+                'active' => (bool) $row->is_active,
+                'createdBy' => (string) $row->created_by,
+                'releasedBy' => $row->released_by === null ? null : (string) $row->released_by,
+                'createdAt' => $row->created_at,
+                'updatedAt' => $row->updated_at,
+            ])->values(),
+            'meta' => [
+                'page' => $page->currentPage(),
+                'perPage' => $page->perPage(),
+                'total' => $page->total(),
+                'totalPages' => $page->lastPage(),
             ],
         ]);
     }
