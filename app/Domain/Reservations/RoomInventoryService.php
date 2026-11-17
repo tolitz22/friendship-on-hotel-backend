@@ -66,6 +66,66 @@ final class RoomInventoryService
         ];
     }
 
+    /**
+     * Advisory room choices for a confirmed booking. Conflict checks are
+     * repeated transactionally by assign(); this read cannot reserve a room.
+     */
+    public function assignmentOptions(Hotel $hotel, int $bookingId, int $page, int $perPage): array
+    {
+        $booking = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+            ->where('id', $bookingId)->first();
+        abort_unless($booking !== null, 404);
+
+        $rooms = DB::table('rooms')->where('hotel_id', $hotel->id)
+            ->where('room_type_id', $booking->room_type_id)
+            ->orderBy('number')->orderBy('id')->paginate($perPage, ['*'], 'page', $page);
+        $ids = $rooms->getCollection()->pluck('id')->all();
+        $blockedIds = $ids === [] ? [] : DB::table('room_inventory_blocks')
+            ->where('hotel_id', $hotel->id)->whereIn('room_id', $ids)
+            ->where('is_active', true)
+            ->where('check_in', '<', $booking->check_out)
+            ->where('check_out', '>', $booking->check_in)
+            ->pluck('room_id')->map(fn ($id): string => (string) $id)->all();
+        $occupiedIds = $ids === [] ? [] : DB::table('reservation_records')
+            ->where('hotel_id', $hotel->id)->whereIn('assigned_room_id', $ids)
+            ->where('id', '!=', $bookingId)
+            ->where('check_in', '<', $booking->check_out)
+            ->where('check_out', '>', $booking->check_in)
+            ->where(function ($query): void {
+                $query->whereNull('lifecycle_state')
+                    ->orWhereNotIn('lifecycle_state', config('booking.released_states',
+                        ['cancelled', 'checked_out', 'no_show']));
+            })->pluck('assigned_room_id')->map(fn ($id): string => (string) $id)->all();
+
+        return [
+            'data' => $rooms->getCollection()->map(function (object $room) use ($booking, $blockedIds, $occupiedIds): array {
+                $id = (string) $room->id;
+                $reason = in_array($id, $blockedIds, true) ? 'maintenance_block'
+                    : (in_array($id, $occupiedIds, true) ? 'reservation_conflict' : null);
+                return [
+                    'id' => $id,
+                    'number' => $room->number,
+                    'floor' => $room->floor_number === null ? null : (int) $room->floor_number,
+                    'roomTypeId' => (string) $room->room_type_id,
+                    'status' => $reason === null ? 'available' : 'unavailable',
+                    'reason' => $reason,
+                    'current' => (int) $booking->assigned_room_id === (int) $room->id,
+                ];
+            })->values(),
+            'meta' => [
+                'hotelId' => (string) $hotel->id,
+                'bookingId' => (string) $bookingId,
+                'roomTypeId' => (string) $booking->room_type_id,
+                'checkIn' => $booking->check_in,
+                'checkOut' => $booking->check_out,
+                'page' => $rooms->currentPage(), 'perPage' => $rooms->perPage(),
+                'total' => $rooms->total(), 'totalPages' => $rooms->lastPage(),
+                'advisoryOnly' => true,
+                'readinessVerified' => false,
+            ],
+        ];
+    }
+
     public function block(Hotel $hotel, int $actor, array $data): array
     {
         $stay = $this->stay($data['checkIn'], $data['checkOut']);
