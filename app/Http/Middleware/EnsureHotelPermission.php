@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class EnsureHotelPermission
 {
     private const ROLE_PERMISSIONS = [
-        'admin' => ['booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room'],
+        'admin' => ['booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room', 'guest.read', 'reservation.read', 'finance.read'],
         'front_desk' => ['booking.create', 'booking.check_in', 'booking.check_out'],
         'housekeeping' => [],
         'maintenance' => [],
@@ -46,9 +46,9 @@ final class EnsureHotelPermission
 
         // Admin tokens require the legacy write ability. Receptionist tokens
         // require an explicitly issued booking capability (never read alone).
-        $tokenAllowed = $membership->role === 'admin'
-            ? $user->tokenCan('hotel:write')
-            : $user->tokenCan('booking:write');
+        $tokenAllowed = str_starts_with($permission, 'booking.')
+            ? ($membership->role === 'admin' ? $user->tokenCan('hotel:write') : $user->tokenCan('booking:write'))
+            : $user->tokenCan('hotel:read');
         if (! $allowed || ! $tokenAllowed) {
             abort(403, 'Your hotel role does not permit this operation.');
         }
