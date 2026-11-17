@@ -38,6 +38,34 @@ final class ChargePolicyPreviewService
         }, 3);
     }
 
+    /**
+     * Two-person administrative review only; activation remains unavailable
+     * until jurisdiction-specific legal validation and folio snapshot rules exist.
+     */
+    public function reviewDraft(Hotel $hotel, int $actor, int $policyId, array $input): array
+    {
+        return DB::transaction(function () use ($hotel, $actor, $policyId, $input): array {
+            DB::table('hotels')->where('id', $hotel->id)->lockForUpdate()->firstOrFail();
+            $policy = DB::table('hotel_charge_policy_versions')
+                ->where('hotel_id', $hotel->id)->where('id', $policyId)
+                ->lockForUpdate()->first();
+            abort_unless($policy !== null, 404);
+            if ($policy->status !== 'draft') {
+                throw new HttpException(409, 'This policy version has already been reviewed.');
+            }
+            if ((int) $policy->created_by === $actor && $input['decision'] === 'approve') {
+                throw new HttpException(403, 'Independent administrator approval is required.');
+            }
+            $status = $input['decision'] === 'approve' ? 'reviewed' : 'rejected';
+            DB::table('hotel_charge_policy_versions')->where('id', $policyId)
+                ->update(['status' => $status,
+                    'reviewed_by' => $actor, 'review_note' => trim($input['note']),
+                    'updated_at' => now()]);
+            return ['id' => (string) $policyId, 'status' => $status,
+                'effectiveForBookings' => false, 'legallyValidated' => false];
+        }, 3);
+    }
+
     public function policies(Hotel $hotel): array
     {
         return DB::table('hotel_charge_policy_versions')->where('hotel_id', $hotel->id)
@@ -47,6 +75,8 @@ final class ChargePolicyPreviewService
                 'serviceBasisPoints' => (int) $row->service_basis_points,
                 'taxLabel' => $row->tax_label, 'serviceLabel' => $row->service_label,
                 'reason' => $row->reason, 'status' => $row->status,
+                'reviewedBy' => $row->reviewed_by === null ? null : (string) $row->reviewed_by,
+                'reviewNote' => $row->review_note,
                 'effectiveForBookings' => false,
             ])->values()->all();
     }
