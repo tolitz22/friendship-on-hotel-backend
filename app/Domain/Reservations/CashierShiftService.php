@@ -172,6 +172,9 @@ final class CashierShiftService
             }
             $linked = DB::table('cashier_shift_receipts')
                 ->where('hotel_id', $hotel->id)->where('payment_id', $record->id)->first();
+            if ($payment['replayed'] && $linked === null) {
+                throw new HttpException(409, 'An older unlinked cash payment requires manager investigation; it cannot be adopted into a shift.');
+            }
             if ($linked !== null) {
                 if ((int) $linked->shift_id !== $shiftId) {
                     throw new HttpException(409, 'Payment is already linked to another shift.');
