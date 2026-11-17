@@ -40,3 +40,7 @@ Work orders and `affects_room` are now live maintenance records, **not** booking
 ## Phase 14 housekeeping operational boundary
 
 A housekeeping task's `done` status does **not** make a room clean, vacant, bookable or available, and cannot release any inventory hold. Approve turnover, inspection, staff role, room-state and front-desk policies before implementing automatic room readiness. See `docs/PHASE_14_LIVE_HOUSEKEEPING.md`.
+
+## Phase 15 staff authorization
+
+Only active selected-hotel admins can manage memberships and assign linked staff. Active linked `housekeeping`/`maintenance` users may update only their own matching tasks' status and note; admin-only task creation/assignment remains in effect. A free-text assignee never confers permission. Staff membership role/activation changes are audited. Staff task completion does not imply room readiness, inventory availability or booking authorization. See `docs/PHASE_15_STAFF_PERMISSIONS.md`.
