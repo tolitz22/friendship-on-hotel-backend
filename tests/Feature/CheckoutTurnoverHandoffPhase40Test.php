@@ -69,7 +69,7 @@ it('links a completed checkout to the exact hotel-scoped cleaning task', functio
 
     $other = Hotel::create(['name' => 'Different Hotel']);
     $this->getJson('/api/v1/hotels/'.$other->id.'/bookings/'.$booking.'/turnover')
-        ->assertForbidden();
+        ->assertNotFound();
 
     $staff = User::create([
         'name' => 'Turnover Reader',
