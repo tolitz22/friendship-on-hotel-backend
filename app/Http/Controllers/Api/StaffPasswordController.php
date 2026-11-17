@@ -31,7 +31,7 @@ final class StaffPasswordController
         if ($user !== null && $user->is_active) {
             try {
                 Password::broker('users')->sendResetLink(['email' => $user->email]);
-            } catch (\\Throwable $error) {
+            } catch (\Throwable $error) {
                 // Do not reveal account existence through email-delivery errors.
                 report($error);
             }
