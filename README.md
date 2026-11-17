@@ -174,3 +174,7 @@ Added admin-managed hotel membership roles (`admin`, `front_desk`, `housekeeping
 ## Phase 16 — Staff Password Security
 
 Staff can request emailed password resets, redeem one-use broker reset tokens, and change passwords while signed in. All Sanctum API tokens are revoked on successful password reset/change, and account-enumeration-safe recovery responses are returned. Configure `STAFF_PASSWORD_RESET_URL` and the mail transport in `.env`; development mail logging is **not** production delivery. No new migration. See [Phase 16](docs/PHASE_16_STAFF_PASSWORD_SECURITY.md). Cookie-based SPA authentication and secure invitation onboarding remain future work.
+
+## Phase 17 — Opt-in Sanctum SPA Cookie Authentication
+
+Laravel now supports first-party browser sessions using Sanctum's stateful API middleware, `/sanctum/csrf-cookie`, token-free `POST /api/v1/auth/spa-login`, and session-invalidating `POST /api/v1/auth/spa-logout`. The old bearer-token auth remains the default. For local opt-in, set `SPA_SESSION_ENABLED=true`, `SANCTUM_STATEFUL_DOMAINS=localhost:5173`, and `FRONTEND_ORIGINS=http://localhost:5173`, with matching frontend cookie mode. Run `php artisan optimize:clear` after configuration changes. See [Phase 17](docs/PHASE_17_SANCTUM_SPA_SESSIONS.md). HTTPS, CSRF and browser validation are required before production rollout.
