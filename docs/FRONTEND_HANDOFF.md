@@ -47,3 +47,7 @@ A new property-scoped diagnostic endpoint reports structural reservation overlap
 ## Backend Phase 4 — Guest Management
 
 Backend has a property-scoped guest-directory API: `GET /api/v1/hotels/{hotel}/guests`, `GET /guests/{guest}`, plus admin-only `POST` and `PATCH`. The DTO fields match the frontend's typed `Guest` shape, but the frontend's HTTP adapter still uses unscoped `GET /guests`. **No frontend screen or mock adapter has been changed**, and the last completed frontend milestone remains **Hotel Settings & Configuration**. Do not turn on API mode until selected-hotel identity and secure browser authentication are implemented. See `docs/PHASE_4_GUESTS.md`.
+
+## Frontend Phase 5 implemented
+
+React now has staff sign-in against `/auth/login`, in-memory bearer token, `/auth/me` property membership selection, sign-out, and a live Guests directory for the selected hotel. Guest create/edit is admin-only. Other PMS modules remain expressly mock previews. UI work continues from the existing Hotel Settings milestone, not from a rebuild. Frontend docs: `docs/PHASE_5_LARAVEL_INTEGRATION.md`.
