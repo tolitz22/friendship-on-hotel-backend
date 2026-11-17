@@ -20,6 +20,8 @@ jobs:
         run: composer validate --no-check-publish
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
+      - name: Verify Laravel test mocking dependency
+        run: php -r "require 'vendor/autoload.php'; if (!class_exists('Mockery')) { fwrite(STDERR, 'Mockery is missing'.PHP_EOL); exit(1); }"
       - name: Lint PHP sources
         run: find app bootstrap config database routes tests -type f -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Verify route registration
@@ -75,6 +77,8 @@ jobs:
           coverage: none
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
+      - name: Verify Laravel test mocking dependency
+        run: php -r "require 'vendor/autoload.php'; if (!class_exists('Mockery')) { fwrite(STDERR, 'Mockery is missing'.PHP_EOL); exit(1); }"
       - name: PostgreSQL feature and domain tests
         run: php artisan test
 
@@ -117,5 +121,7 @@ jobs:
           coverage: none
       - name: Install dependencies
         run: composer install --prefer-dist --no-interaction --no-progress
+      - name: Verify Laravel test mocking dependency
+        run: php -r "require 'vendor/autoload.php'; if (!class_exists('Mockery')) { fwrite(STDERR, 'Mockery is missing'.PHP_EOL); exit(1); }"
       - name: MySQL migrations and feature tests
         run: php artisan test
