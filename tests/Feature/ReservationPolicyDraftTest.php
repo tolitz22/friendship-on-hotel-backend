@@ -62,10 +62,10 @@ it('rejects unknown and unsupported policy selections', function (): void {
     $url='/api/v1/hotels/'.$hotel->id.'/reservation-policy-draft';
     $this->patchJson($url,[
         'expectedRevision'=>0,'decisions'=>['sellableUnit'=>'magic'],
-    ])->assertUnprocessable();
+    ])->assertUnprocessable()->assertJsonValidationErrors(['decisions.sellableUnit']);
     $this->patchJson($url,[
         'expectedRevision'=>0,'decisions'=>['unapprovedFlag'=>'true'],
-    ])->assertUnprocessable();
+    ])->assertUnprocessable()->assertJsonValidationErrors(['decisions']);
     expect(DB::table('reservation_policy_drafts')->count())->toBe(0);
 });
 
