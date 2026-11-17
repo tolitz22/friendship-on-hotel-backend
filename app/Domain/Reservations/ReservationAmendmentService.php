@@ -35,6 +35,13 @@ final class ReservationAmendmentService
                 throw new HttpException(409, 'Only confirmed reservations may change stay dates.');
             }
 
+            // Prevent changing priced nights without an approved repricing
+            // and charge-reversal workflow. Original folio stays immutable.
+            if (DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+                ->where('reservation_record_id', $bookingId)->exists()) {
+                throw new HttpException(409, 'Priced reservations require the future repricing workflow to amend dates.');
+            }
+
             $today = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
             if ($today >= $booking->check_in || $newStay->arrival < $today) {
                 throw new HttpException(409, 'Stay dates can only be amended before planned arrival.');
