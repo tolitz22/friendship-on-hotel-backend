@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\HotelStaffController;
 use App\Http\Controllers\Api\StaffInvitationController;
 use App\Http\Controllers\Api\RoomCatalogController;
 use App\Http\Controllers\Api\ReservationRecordController;
+use App\Http\Controllers\Api\ReservationBookingController;
 use App\Http\Controllers\Api\ReservationScenarioController;
 use App\Http\Controllers\Api\ReservationDemandReportController;
 use App\Http\Controllers\Api\ReservationPolicyDraftController;
@@ -70,6 +71,8 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/staff/history', [HotelStaffController::class, 'history']);
                 Route::post('/staff', [HotelStaffController::class, 'attach']);
                 Route::patch('/staff/{userId}', [HotelStaffController::class, 'update'])->whereNumber('userId');
+                Route::post('/bookings', [ReservationBookingController::class, 'store']);
+                Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
                 Route::get('/reservation-policy-draft/history', [ReservationPolicyDraftController::class, 'history']);
                 Route::post('/room-types', [RoomCatalogController::class, 'createRoomType']);
