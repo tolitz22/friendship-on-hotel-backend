@@ -194,6 +194,71 @@ final class FolioAccountingService
         ];
     }
 
+    /**
+     * Credit the full room subtotal and release inventory only when no money or
+     * manual adjustment has ever been recorded. Not a refund.
+     */
+    public function cancelUnpaidPriced(Hotel $hotel, int $bookingId, int $actor): array
+    {
+        return DB::transaction(function () use ($hotel, $bookingId, $actor): array {
+            $snapshot = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->first();
+            abort_unless($snapshot !== null, 404);
+            DB::table('room_types')->where('hotel_id', $hotel->id)
+                ->where('id', $snapshot->room_type_id)->lockForUpdate()->firstOrFail();
+
+            $booking = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->lockForUpdate()->first();
+            abort_unless($booking !== null, 404);
+            if ($booking->lifecycle_state !== 'confirmed') {
+                throw new HttpException(409, 'Only confirmed reservations may be cancelled.');
+            }
+            if (now($hotel->timezone ?: 'Asia/Manila')->toDateString() >= $booking->check_in) {
+                throw new HttpException(409, 'A priced cancellation after arrival requires manual financial review.');
+            }
+
+            $folio = $this->findFolio($hotel, $bookingId, true);
+            if (DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->exists()) {
+                throw new HttpException(409, 'Payment evidence exists; a refund/reconciliation workflow is required.');
+            }
+            if (DB::table('folio_adjustments')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->exists()) {
+                throw new HttpException(409, 'Adjusted folios require manual cancellation reconciliation.');
+            }
+
+            $summary = $this->summaryFor($folio);
+            $amount = $summary['roomSubtotalMinor'];
+            if ($amount > 0) {
+                DB::table('folio_adjustments')->insert([
+                    'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
+                    'request_key' => 'auto-cancel-booking-'.$bookingId,
+                    'payload_sha256' => $this->fingerprint([$bookingId, 'cancel', $amount]),
+                    'kind' => 'credit',
+                    'amount_minor' => $amount,
+                    'reason' => 'Full room-charge reversal for unpaid pre-arrival cancellation',
+                    'actor_id' => $actor,
+                    'created_at' => now(), 'updated_at' => now(),
+                ]);
+            }
+
+            DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->update(['lifecycle_state' => 'cancelled', 'updated_at' => now()]);
+            DB::table('reservation_booking_events')->insert([
+                'hotel_id' => $hotel->id, 'reservation_record_id' => $bookingId,
+                'actor_id' => $actor, 'event_type' => 'cancelled_priced_unpaid',
+                'old_state' => 'confirmed', 'new_state' => 'cancelled',
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            return [
+                'id' => (string) $bookingId,
+                'status' => 'cancelled',
+                'roomChargesReversedMinor' => $amount,
+                'refundIssued' => false,
+            ];
+        }, 3);
+    }
+
     private function fingerprint(array $fields): string
     {
         return hash('sha256', json_encode($fields, JSON_THROW_ON_ERROR));
