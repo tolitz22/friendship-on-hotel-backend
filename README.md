@@ -162,3 +162,7 @@ New protected `GET /api/v1/hotels/{hotel}/reservation-simulation?roomId=&from=&t
 ## Phase 13 — Live Maintenance Work Orders
 
 Added maintenance work-order and audit-event tables with authenticated, hotel-scoped GET/history and administrator-only POST/PATCH endpoints. Work-order statuses and updates are audited transactionally with optimistic revision checks. **Run `php artisan migrate`** before accessing Maintenance. Work-order room impact is informational only; no booking/availability block has been added. See [Phase 13](docs/PHASE_13_LIVE_MAINTENANCE.md).
+
+## Phase 14 — Live Housekeeping
+
+Added hotel-scoped housekeeping task and event tables with active-member reads, administrator-only create/update, revision checks and audit history. **Run `php artisan migrate`**. Task completion deliberately does not alter room availability, occupancy or readiness. See [Phase 14](docs/PHASE_14_LIVE_HOUSEKEEPING.md).
