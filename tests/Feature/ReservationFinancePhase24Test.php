@@ -83,6 +83,8 @@ it('creates a priced booking with a permanent nightly folio snapshot and idempot
     $this->patchJson($base.'/bookings/'.$id.'/dates', [
         'checkIn' => '2026-12-10', 'checkOut' => '2026-12-13',
     ])->assertStatus(409);
+    $this->postJson($base.'/bookings/'.$id.'/cancel')->assertStatus(409);
+    expect(DB::table('reservation_records')->find($id)->lifecycle_state)->toBe('confirmed');
     expect(DB::table('folio_entries')->sum('amount_minor'))->toBe(500000);
 });
 
