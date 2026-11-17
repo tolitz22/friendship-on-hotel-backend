@@ -156,6 +156,10 @@ final class ManagerApprovalService
             }
 
             $note = $note === null ? null : trim($note);
+            if ($request->action === 'early_check_in' && $decision === 'approve'
+                && mb_strlen($note ?? '') < 10) {
+                throw new HttpException(422, 'Early check-in approval requires a manager note of at least 10 characters.');
+            }
             if ($decision === 'reject') {
                 DB::table('manager_approval_requests')->where('id', $id)->update([
                     'status' => 'rejected', 'reviewed_by' => $actor,
