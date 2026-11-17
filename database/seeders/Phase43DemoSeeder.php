@@ -43,7 +43,9 @@ final class Phase43DemoSeeder extends Seeder
             || DB::table('rooms')->where('hotel_id', $hotel->id)
                 ->whereNotIn('number', ['P43-101', 'P43-199', 'P43-201'])->exists();
         $unrelatedGuests = DB::table('guests')->where('hotel_id', $hotel->id)
-            ->where('email', '!=', 'phase43-checkout@example.test')->exists();
+            ->where(function ($query): void {
+                $query->whereNull('email')->orWhere('email', '!=', 'phase43-checkout@example.test');
+            })->exists();
         $unrelatedBookings = DB::table('reservation_records')->where('hotel_id', $hotel->id)
             ->where('reference', 'not like', 'PHASE43-CHECKOUT-%')->exists();
         if ($unrelatedInventory || $unrelatedGuests || $unrelatedBookings) {
