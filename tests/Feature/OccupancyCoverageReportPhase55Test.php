@@ -136,3 +136,30 @@ it('keeps prior inspection snapshots and does not misclassify missing rooms as v
         ->assertOk()->assertJsonPath('summary.unexpectedOccupied', 1);
     expect(DB::table('reservation_records')->where('hotel_id', $fx['hotel']->id)->count())->toBe(0);
 });
+
+it('keeps the flagged observation while excluding independently closed follow-up cases from outstanding work', function (): void {
+    $fx = phase55Fixture();
+    $verification = phase55Record($fx, 0, 'flagged', 'unexpected_occupied');
+    $caseId = DB::table('occupancy_investigations')->insertGetId([
+        'hotel_id' => $fx['hotel']->id,
+        'verification_id' => $verification,
+        'owner_id' => $fx['manager']->id,
+        'opened_by' => $fx['manager']->id,
+        'closed_by' => $fx['reception']->id,
+        'status' => 'closed',
+        'resolution' => 'observation_unconfirmed',
+        'closing_note' => 'Independent investigation could not confirm the original observation.',
+        'closed_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    expect($caseId)->toBeGreaterThan(0);
+    Sanctum::actingAs($fx['manager'], ['hotel:read','hotel:write']);
+    $base = $fx['base'].'/occupancy-coverage-report?date='.$fx['date'];
+    $this->getJson($base)->assertOk()
+        ->assertJsonPath('summary.flagged', 1)
+        ->assertJsonPath('summary.resolvedInvestigations', 1)
+        ->assertJsonPath('summary.unresolved', 3)
+        ->assertJsonPath('data.0.status', 'flagged')
+        ->assertJsonPath('data.0.investigationStatus', 'closed');
+    $this->getJson($base.'&filter=flagged')->assertOk()->assertJsonCount(0,'data');
+    $this->getJson($base.'&filter=mismatch')->assertOk()->assertJsonCount(1,'data');
+});
