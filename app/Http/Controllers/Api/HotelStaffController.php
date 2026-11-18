@@ -64,11 +64,15 @@ final class HotelStaffController
     public function history(Request $request, Hotel $hotel): JsonResponse
     {
         $input=$request->validate(['per_page'=>['sometimes','integer','min:1','max:50']]);
-        $page=DB::table('hotel_staff_events')->where('hotel_id',$hotel->id)->orderByDesc('id')
-            ->paginate((int)($input['per_page']??20));
+        $page=DB::table('hotel_staff_events')
+            ->leftJoin('users as audit_actor','audit_actor.id','=','hotel_staff_events.actor_id')
+            ->leftJoin('users as audit_target','audit_target.id','=','hotel_staff_events.target_user_id')
+            ->where('hotel_staff_events.hotel_id',$hotel->id)->orderByDesc('hotel_staff_events.id')
+            ->paginate((int)($input['per_page']??20),['hotel_staff_events.*','audit_actor.name as actor_name','audit_target.name as target_name']);
         return response()->json([
             'data'=>$page->getCollection()->map(fn(object $row):array=>[
                 'id'=>(string)$row->id,'actorId'=>(string)$row->actor_id,
+                'actorName'=>$row->actor_name,'targetName'=>$row->target_name,
                 'targetUserId'=>(string)$row->target_user_id,'action'=>$row->action,
                 'before'=>$row->before_state?json_decode($row->before_state,true):null,
                 'after'=>json_decode($row->after_state,true),'createdAt'=>$row->created_at,
