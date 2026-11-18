@@ -149,6 +149,22 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         self::assertSame(0, (int) DB::table('financial_business_clocks')->where('hotel_id', 1)->value('version'));
     }
 
+    public function test_missing_next_day_period_prevents_partial_close(): void
+    {
+        $this->seedHotel(1);
+        DB::table('financial_accounting_periods')->where('hotel_id', 1)
+            ->update(['ends_on' => '2026-11-18']);
+
+        try {
+            (new FinancialBusinessDayCloseService())->close(1, '2026-11-18', 7);
+            self::fail('A day close cannot roll into an uncovered accounting date.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('accounting_period', $exception->errors());
+        }
+        self::assertSame(0, DB::table('financial_day_closes')->count());
+        self::assertSame('2026-11-18', DB::table('financial_business_clocks')->where('hotel_id', 1)->value('business_date'));
+    }
+
     public function test_duplicate_close_does_not_advance_clock_twice(): void
     {
         $this->seedHotel(1);
