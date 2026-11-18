@@ -29,7 +29,11 @@ if (getenv('APP_ENV') !== 'testing' || getenv('DB_DATABASE') !== 'friendship_on_
 
 if (($argv[1] ?? null) === 'worker') {
     [$script, $command, $barrier, $hotelId, $actor, $guest, $type, $start, $end, $key] = $argv;
-    $deadline = microtime(true) + 15;
+    // Signal readiness only after Laravel and the database have bootstrapped.
+    // The parent does not release the start barrier until ALL workers are
+    // waiting, otherwise process startup skew would not test a real race.
+    file_put_contents($barrier.'.ready.'.$key, 'ready');
+    $deadline = microtime(true) + 30;
     while (! file_exists($barrier) && microtime(true) < $deadline) {
         usleep(5000);
     }
@@ -91,6 +95,23 @@ for ($i = 0; $i < 6; $i++) {
     fclose($pipes[0]);
     $children[] = [$process, $pipes];
 }
+$readyDeadline = microtime(true) + 30;
+while (count(glob($barrier.'.ready.*') ?: []) < count($children)
+    && microtime(true) < $readyDeadline) {
+    usleep(10000);
+}
+if (count(glob($barrier.'.ready.*') ?: []) !== count($children)) {
+    foreach ($children as [$process, $pipes]) {
+        proc_terminate($process);
+        foreach ($pipes as $pipe) {
+            if (is_resource($pipe)) fclose($pipe);
+        }
+        proc_close($process);
+    }
+    foreach (glob($barrier.'.ready.*') ?: [] as $file) @unlink($file);
+    fwrite(STDERR, "Not all independent writers reached the start barrier.\n");
+    exit(3);
+}
 touch($barrier);
 
 $outcomes = [];
@@ -107,6 +128,7 @@ foreach ($children as [$process, $pipes]) {
     $outcomes[] = $stdout;
 }
 @unlink($barrier);
+foreach (glob($barrier.'.ready.*') ?: [] as $file) @unlink($file);
 $persisted = DB::table('reservation_records')->where('hotel_id', $hotel->id)->count();
 $successes = count(array_filter($outcomes, fn ($status) => $status === 'created'));
 if ($errors !== [] || $successes !== 1 || $persisted !== 1) {
