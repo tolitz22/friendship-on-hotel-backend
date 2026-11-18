@@ -94,6 +94,20 @@ final class FinancialBusinessDayCloseService
                 }
             }
 
+            if (Schema::hasTable('financial_folio_night_corrections')
+                && Schema::hasTable('financial_folio_night_assessments')) {
+                $pendingCorrections = DB::table('financial_folio_night_corrections as c')
+                    ->join('financial_folio_night_assessments as a', 'a.id', '=', 'c.assessment_id')
+                    ->where('c.hotel_id', $hotelId)->where('a.hotel_id', $hotelId)
+                    ->where('a.stay_date', $expectedBusinessDate)->where('c.status', 'pending')
+                    ->exists();
+                if ($pendingCorrections) {
+                    throw ValidationException::withMessages([
+                        'folio_corrections' => 'Pending tax/benefit corrections must be reviewed before financial day close.',
+                    ]);
+                }
+            }
+
             // Verify every journal is balanced before the date becomes immutable.
             $journals = DB::table('financial_posting_journals')
                 ->where('hotel_id', $hotelId)->where('business_date', $expectedBusinessDate)
