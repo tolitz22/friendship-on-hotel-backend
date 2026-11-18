@@ -136,3 +136,37 @@ it('requires management authorization for inventory holds and payment allocation
         'requestKey' => 'blocked-allocation-01', 'amountMinor' => 100,
     ])->assertForbidden();
 });
+
+it('does not expose or release another hotel allotment', function (): void {
+    [$hotel, $type, $guests, $admin] = allotmentFixture();
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $id = $this->postJson($base.'/group-allotments', holdInput($type))
+        ->assertCreated()->json('data.id');
+    $other = Hotel::create(['name' => 'Unrelated Hotel']);
+    HotelMembership::create(['hotel_id' => $other->id, 'user_id' => $admin->id,
+        'role' => 'admin', 'is_active' => true]);
+    $otherBase = '/api/v1/hotels/'.$other->id;
+    $this->getJson($otherBase.'/group-allotments')->assertOk()->assertJsonCount(0, 'data');
+    $this->postJson($otherBase.'/group-allotments/'.$id.'/release')->assertNotFound();
+    $this->assertDatabaseHas('group_allotments', ['id' => $id, 'status' => 'held']);
+});
+
+it('does not allocate group funds against a reservation outside the group', function (): void {
+    [$hotel, $type, $guests] = allotmentFixture();
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $group = $this->postJson($base.'/group-reservations', [
+        'idempotencyKey' => 'group-finance-test-001',
+        'name' => 'Finance Review Group',
+        'checkIn' => now('Asia/Manila')->addDay()->toDateString(),
+        'checkOut' => now('Asia/Manila')->addDays(2)->toDateString(),
+        'rooms' => array_map(fn ($guestId) => [
+            'guestId' => $guestId, 'roomTypeId' => $type->id,
+        ], $guests),
+    ])->assertCreated()->json('data');
+    $this->getJson($base.'/group-reservations/'.$group['id'].'/financial-summary')
+        ->assertOk()->assertJsonPath('meta.postsTransactions', false);
+    $this->postJson($base.'/group-reservations/'.$group['id'].'/bookings/99999/payments/1/allocations', [
+        'requestKey' => 'wrong-group-booking-001', 'amountMinor' => 100,
+    ])->assertNotFound();
+    expect(DB::table('folio_settlement_allocations')->where('hotel_id', $hotel->id)->count())->toBe(0);
+});
