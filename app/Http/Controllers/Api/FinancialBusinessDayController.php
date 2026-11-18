@@ -125,15 +125,6 @@ final class FinancialBusinessDayController
                     break;
                 }
             }
-            if (Schema::hasTable('financial_folio_night_corrections')) {
-                $pendingCorrection = DB::table('financial_folio_night_corrections as c')
-                    ->join('financial_folio_night_assessments as a', 'a.id', '=', 'c.assessment_id')
-                    ->where('c.hotel_id', $hotel->id)->where('a.hotel_id', $hotel->id)
-                    ->where('c.status', 'pending')->exists();
-                if ($pendingCorrection) {
-                    $blockers[] = 'A tax or benefit correction still requires a second review.';
-                }
-            }
             if (Schema::hasTable('folio_entries') && Schema::hasTable('reservation_folios')
                 && Schema::hasTable('reservation_records')) {
                 $unassessed = DB::table('folio_entries as e')
@@ -150,6 +141,17 @@ final class FinancialBusinessDayController
                 if ($unassessed) {
                     $blockers[] = 'Priced room nights for this date still require approved tax allocation.';
                 }
+            }
+        }
+
+        if (Schema::hasTable('financial_folio_night_corrections')
+            && Schema::hasTable('financial_folio_night_assessments')) {
+            $pendingCorrection = DB::table('financial_folio_night_corrections as c')
+                ->join('financial_folio_night_assessments as a', 'a.id', '=', 'c.assessment_id')
+                ->where('c.hotel_id', $hotel->id)->where('a.hotel_id', $hotel->id)
+                ->where('c.status', 'pending')->exists();
+            if ($pendingCorrection) {
+                $blockers[] = 'A tax or benefit correction still requires a second review.';
             }
         }
 
