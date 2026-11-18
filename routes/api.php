@@ -172,6 +172,8 @@ Route::prefix('v1')->group(function (): void {
 
             Route::middleware('hotel.admin')->group(function (): void {
                 // Tax preview is explicitly nonposting; approval does not touch guest balances.
+                Route::get('/bookings/{booking}/folio-night-entries', [FolioNightAssessmentController::class, 'nights'])
+                    ->whereNumber('booking');
                 Route::get('/bookings/{booking}/folio-night-assessments', [FolioNightAssessmentController::class, 'index'])
                     ->whereNumber('booking');
                 Route::post('/bookings/{booking}/folio-night-assessments', [FolioNightAssessmentController::class, 'prepare'])
