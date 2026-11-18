@@ -72,6 +72,7 @@ final class FinanceFolioIndexController
             // Summary uses the same posted ledger data used by settlement.
             $summary = $accounting->summaryFor((object) [
                 'id' => $row->folio_id, 'hotel_id' => $hotel->id,
+                'currency' => $row->currency,
             ]);
             return [
                 'bookingId' => (string) $row->booking_id,
