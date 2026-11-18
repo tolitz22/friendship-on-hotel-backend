@@ -230,7 +230,12 @@ final class FolioSettlementService
             if (!$statement['canSignOff']) {
                 throw ValidationException::withMessages(['settlement' => implode(' ', $statement['blockers'])]);
             }
-            $encoded = json_encode($statement, JSON_THROW_ON_ERROR);
+            // Cashier shift state, staff display names, and review handoff are
+            // mutable operational metadata. Keep them in the API response,
+            // but never embed them in the immutable financial sign-off snapshot.
+            $snapshot = $statement;
+            unset($snapshot['cashShiftContexts']);
+            $encoded = json_encode($snapshot, JSON_THROW_ON_ERROR);
             $id = DB::table('folio_settlement_signoffs')->insertGetId([
                 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
                 'reservation_record_id' => $bookingId, 'approved_by' => $actorId,
