@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\ReservationBookingController;
 use App\Http\Controllers\Api\FrontDeskReservationController;
 use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
+use App\Http\Controllers\Api\FolioSettlementController;
 use App\Http\Controllers\Api\FinancePolicyController;
 use App\Http\Controllers\Api\FinanceWebhookController;
 use App\Http\Controllers\Api\PayMongoSandboxController;
@@ -90,6 +91,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
+            Route::get('/bookings/{booking}/settlement-statement', [FolioSettlementController::class, 'statement'])
+                ->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/finance/charge-policy-drafts', [FinancePolicyController::class, 'policies']);
             Route::get('/bookings/{booking}/finance-event-reviews', [FinanceEventReviewController::class, 'index'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/charge-preview', [FinancePolicyController::class, 'preview'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
@@ -188,6 +191,14 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('booking')->whereNumber('assessment')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/folio-night-assessments/{assessment}/corrections/{correction}/approve', [FolioNightCorrectionController::class, 'approve'])
                     ->whereNumber('booking')->whereNumber('assessment')->whereNumber('correction')->middleware('throttle:5,1');
+                Route::post('/bookings/{booking}/payment-records/{payment}/verification', [FolioSettlementController::class, 'verifyPrepare'])
+                    ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:10,1');
+                Route::post('/bookings/{booking}/settlement-verifications/{verification}/review', [FolioSettlementController::class, 'verifyReview'])
+                    ->whereNumber('booking')->whereNumber('verification')->middleware('throttle:10,1');
+                Route::post('/bookings/{booking}/payment-records/{payment}/allocations', [FolioSettlementController::class, 'allocations'])
+                    ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:20,1');
+                Route::post('/bookings/{booking}/settlement-signoff', [FolioSettlementController::class, 'signoff'])
+                    ->whereNumber('booking')->middleware('throttle:5,1');
                 Route::get('/finance/tax-policies', [FinancialTaxPolicyController::class, 'index']);
                 Route::post('/finance/tax-policies', [FinancialTaxPolicyController::class, 'draft'])
                     ->middleware('throttle:10,1');
