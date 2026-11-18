@@ -75,6 +75,15 @@ final class NightlyRoomRevenueRecognitionService
                 ]);
             }
 
+            if ($linked !== null
+                && DB::table('financial_folio_night_corrections')
+                    ->where('hotel_id', $hotelId)->where('assessment_id', $linked->id)
+                    ->where('status', 'pending')->exists()) {
+                throw ValidationException::withMessages([
+                    'correction' => 'A pending independent correction review blocks new revenue recognition.',
+                ]);
+            }
+
             $existing = DB::table('financial_room_revenue_recognitions')
                 ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)
                 ->where('stay_date', $stayDate)->first();
