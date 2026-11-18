@@ -179,3 +179,23 @@ it('matches a genuinely registered checked-in room without altering its booking 
     expect(DB::table('reservation_records')->where('id',$id)->value('lifecycle_state'))
         ->toBe('checked_in');
 });
+
+it('filters selected-room checks within the hotel and inspection date', function (): void {
+    $fx = phase53Fixture();
+    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
+    $this->postJson($fx['base'], [
+        'roomId' => $fx['room']->id,
+        'assignedUserId' => $fx['worker']->id,
+        'inspectionDate' => $fx['date'],
+    ])->assertCreated();
+
+    $this->getJson($fx['base'].'?roomId='.$fx['room']->id.'&date='.$fx['date'])
+        ->assertOk()->assertJsonCount(1, 'data')
+        ->assertJsonPath('data.0.roomId', (string) $fx['room']->id);
+    $this->getJson($fx['base'].'?roomId=999999&date='.$fx['date'])
+        ->assertOk()->assertJsonCount(0, 'data');
+    $this->getJson($fx['base'].'?roomId='.$fx['room']->id.'&date='.
+        now('Asia/Manila')->subDay()->toDateString())
+        ->assertOk()->assertJsonCount(0, 'data');
+    $this->getJson($fx['base'].'?roomId=invalid')->assertUnprocessable();
+});
