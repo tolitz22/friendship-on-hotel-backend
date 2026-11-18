@@ -101,6 +101,99 @@ final class OperationalExceptionsController
                 (string) $payment->created_at);
         }
 
+        // Operational follow-up queues do not determine fraud or change records.
+        // Fetch only incomplete, hotel-scoped work and preserve accurate totals.
+        $inspections = $this->bounded(DB::table('room_readiness_inspections as inspection')
+            ->join('rooms as room', function ($join): void {
+                $join->on('room.id', '=', 'inspection.room_id')
+                    ->on('room.hotel_id', '=', 'inspection.hotel_id');
+            })
+            ->leftJoin('users as inspector', 'inspector.id', '=', 'inspection.inspected_by')
+            ->where('inspection.hotel_id', $hotel->id)->where('inspection.status', 'submitted')
+            ->orderBy('inspection.id')->limit(self::MAX_SOURCE + 1)
+            ->get(['inspection.id', 'inspection.room_id', 'inspection.inspected_by',
+                'inspection.created_at', 'room.number as room_number',
+                'inspector.name as inspector_name']), 'room inspections awaiting review');
+        foreach ($inspections as $row) {
+            $items[] = [
+                'id' => 'room_inspection:'.$row->id,
+                'type' => 'room_inspection_review', 'severity' => 'attention',
+                'bookingId' => null, 'roomId' => (string) $row->room_id,
+                'reference' => 'Room '.$row->room_number,
+                'ownerName' => $row->inspector_name,
+                'reason' => 'Room inspection is waiting for a different authorized manager to review it.',
+                'suggestion' => 'Review the submitted checklist and active readiness blockers.',
+                'recordDate' => (string) $row->created_at,
+            ];
+        }
+
+        $observations = $this->bounded(DB::table('occupancy_verifications as check')
+            ->join('rooms as room', function ($join): void {
+                $join->on('room.id', '=', 'check.room_id')
+                    ->on('room.hotel_id', '=', 'check.hotel_id');
+            })
+            ->leftJoin('occupancy_investigations as investigation', function ($join): void {
+                $join->on('investigation.verification_id', '=', 'check.id')
+                    ->on('investigation.hotel_id', '=', 'check.hotel_id');
+            })
+            ->leftJoin('users as owner', 'owner.id', '=', 'investigation.owner_id')
+            ->where('check.hotel_id', $hotel->id)
+            ->where(function ($query): void {
+                $query->where('check.status', 'submitted')
+                    ->orWhere(function ($flagged): void {
+                        $flagged->where('check.status', 'flagged')
+                            ->where(function ($open): void {
+                                $open->whereNull('investigation.id')
+                                    ->orWhere('investigation.status', 'open');
+                            });
+                    });
+            })
+            ->orderBy('check.id')->limit(self::MAX_SOURCE + 1)
+            ->get(['check.id', 'check.room_id', 'check.status', 'check.inspection_date',
+                'check.created_at', 'room.number as room_number',
+                'investigation.status as investigation_status',
+                'owner.name as owner_name']), 'occupancy follow-ups');
+        foreach ($observations as $row) {
+            $flagged = $row->status === 'flagged';
+            $items[] = [
+                'id' => 'occupancy_check:'.$row->id,
+                'type' => $flagged ? 'occupancy_investigation' : 'occupancy_review',
+                'severity' => $flagged ? 'critical' : 'attention',
+                'bookingId' => null, 'roomId' => (string) $row->room_id,
+                'reference' => 'Room '.$row->room_number,
+                'ownerName' => $row->owner_name,
+                'reason' => $flagged
+                    ? 'An occupancy discrepancy needs a documented investigation or follow-up.'
+                    : 'A submitted physical observation is awaiting independent manager review.',
+                'suggestion' => $flagged
+                    ? ($row->investigation_status === 'open'
+                        ? 'Continue the assigned investigation and document its findings.'
+                        : 'Open an investigation and assign a manager.')
+                    : 'Review the recorded observation against the saved reservation snapshot.',
+                'recordDate' => (string) $row->created_at,
+                'checkDate' => (string) $row->inspection_date,
+            ];
+        }
+
+        $shifts = $this->bounded(DB::table('cashier_shifts as shift')
+            ->leftJoin('users as cashier', 'cashier.id', '=', 'shift.cashier_id')
+            ->where('shift.hotel_id', $hotel->id)->where('shift.status', 'submitted')
+            ->orderBy('shift.id')->limit(self::MAX_SOURCE + 1)
+            ->get(['shift.id', 'shift.cashier_id', 'shift.submitted_at',
+                'cashier.name as cashier_name']), 'submitted cashier shifts');
+        foreach ($shifts as $row) {
+            $items[] = [
+                'id' => 'cashier_shift:'.$row->id,
+                'type' => 'cashier_shift_review', 'severity' => 'review',
+                'bookingId' => null, 'roomId' => null,
+                'reference' => 'Cashier shift '.$row->id,
+                'ownerName' => $row->cashier_name,
+                'reason' => 'Cashier has submitted a physical cash count for independent reconciliation.',
+                'suggestion' => 'Another authorized manager must review the receipts and counted cash.',
+                'recordDate' => (string) $row->submitted_at,
+            ];
+        }
+
         // Audit trail is a separate neutral activity feed. A modification alone
         // must never be called suspicious or classified as fraud.
         $activity = $this->bounded(DB::table('reservation_booking_events as ev')
@@ -116,7 +209,7 @@ final class OperationalExceptionsController
             ->get(['ev.id', 'ev.actor_id', 'audit_actor.name as actor_name', 'ev.event_type', 'ev.created_at',
                 'booking.id as booking_id', 'booking.reference']), 'reservation activity');
 
-        if (count($items) > 2000) {
+        if (count($items) > 3500) {
             throw new HttpException(422, 'Too many exception records for synchronous review. No partial totals returned.');
         }
 
@@ -169,7 +262,8 @@ final class OperationalExceptionsController
         return [
             'id' => $type.':'.$bookingId.':'.substr(hash('sha256', $reason.$suggestion.$recordDate), 0, 12),
             'type' => $type, 'severity' => $severity,
-            'bookingId' => (string) $bookingId, 'reference' => $reference,
+            'bookingId' => (string) $bookingId, 'roomId' => null,
+            'ownerName' => null, 'reference' => $reference,
             'reason' => $reason, 'suggestion' => $suggestion, 'recordDate' => $recordDate,
         ];
     }
