@@ -1,0 +1,106 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\Api;
+
+use App\Domain\Reservations\FolioAccountingService;
+use App\Models\Hotel;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * A non-posting, per-currency group view of the original reservation folios.
+ * A group reference is not a payment and cannot verify a payment.
+ */
+final class GroupFinanceController
+{
+    public function __invoke(Hotel $hotel, string $group, FolioAccountingService $accounting): JsonResponse
+    {
+        abort_unless(DB::table('group_reservations')->where('hotel_id', $hotel->id)
+            ->where('id', $group)->exists(), 404);
+        $rows = DB::table('group_reservation_members as gm')
+            ->join('reservation_records as booking', function ($join): void {
+                $join->on('booking.id', '=', 'gm.reservation_record_id')
+                    ->on('booking.hotel_id', '=', 'gm.hotel_id');
+            })
+            ->leftJoin('reservation_folios as folio', function ($join): void {
+                $join->on('folio.reservation_record_id', '=', 'booking.id')
+                    ->on('folio.hotel_id', '=', 'booking.hotel_id');
+            })
+            ->where('gm.hotel_id', $hotel->id)->where('gm.group_reservation_id', $group)
+            ->orderBy('gm.position')
+            ->get(['booking.id as booking_id', 'booking.reference',
+                'folio.id as folio_id', 'folio.currency']);
+
+        $totals = [];
+        $individual = [];
+        foreach ($rows as $row) {
+            if ($row->folio_id === null) {
+                $individual[] = ['bookingId' => (string) $row->booking_id,
+                    'reference' => $row->reference, 'priced' => false];
+                continue;
+            }
+            $summary = $accounting->summaryFor((object) [
+                'id' => $row->folio_id, 'hotel_id' => $hotel->id, 'currency' => $row->currency,
+            ]);
+            $verifiedAllocated = (int) DB::table('folio_settlement_allocations as alloc')
+                ->join('folio_settlement_verifications as verify', function ($join): void {
+                    $join->on('verify.payment_record_id', '=', 'alloc.payment_record_id')
+                        ->on('verify.folio_id', '=', 'alloc.folio_id')
+                        ->on('verify.hotel_id', '=', 'alloc.hotel_id');
+                })
+                ->where('alloc.hotel_id', $hotel->id)->where('alloc.folio_id', $row->folio_id)
+                ->where('verify.status', 'verified')->sum('alloc.amount_minor');
+            $groupAllocated = (int) DB::table('folio_settlement_allocations as alloc')
+                ->join('folio_settlement_verifications as verify', function ($join): void {
+                    $join->on('verify.payment_record_id', '=', 'alloc.payment_record_id')
+                        ->on('verify.folio_id', '=', 'alloc.folio_id')
+                        ->on('verify.hotel_id', '=', 'alloc.hotel_id');
+                })
+                ->where('alloc.hotel_id', $hotel->id)->where('alloc.folio_id', $row->folio_id)
+                ->where('alloc.payer_kind', 'group')
+                ->where('alloc.payer_reference', (string) DB::table('group_reservations')
+                    ->where('hotel_id', $hotel->id)->where('id', $group)->value('reference'))
+                ->where('verify.status', 'verified')->sum('alloc.amount_minor');
+            $signed = DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $row->folio_id)->exists();
+
+            $currency = $row->currency;
+            if (!isset($totals[$currency])) {
+                $totals[$currency] = ['currency' => $currency, 'netRecordedChargesMinor' => 0,
+                    'staffConfirmedPaymentsMinor' => 0, 'verifiedAllocatedMinor' => 0,
+                    'verifiedGroupPayerAllocatedMinor' => 0, 'unallocatedNetChargesMinor' => 0,
+                    'pricedFolioCount' => 0];
+            }
+            $net = (int) $summary['netRecordedChargesMinor'];
+            $totals[$currency]['netRecordedChargesMinor'] += $net;
+            $totals[$currency]['staffConfirmedPaymentsMinor'] += (int) $summary['staffConfirmedPaymentsMinor'];
+            $totals[$currency]['verifiedAllocatedMinor'] += $verifiedAllocated;
+            $totals[$currency]['verifiedGroupPayerAllocatedMinor'] += $groupAllocated;
+            $totals[$currency]['unallocatedNetChargesMinor'] += $net - $verifiedAllocated;
+            $totals[$currency]['pricedFolioCount']++;
+            $individual[] = [
+                'bookingId' => (string) $row->booking_id, 'reference' => $row->reference,
+                'folioId' => (string) $row->folio_id, 'priced' => true, 'currency' => $currency,
+                'netRecordedChargesMinor' => $net,
+                'staffConfirmedPaymentsMinor' => (int) $summary['staffConfirmedPaymentsMinor'],
+                'verifiedAllocatedMinor' => $verifiedAllocated,
+                'verifiedGroupPayerAllocatedMinor' => $groupAllocated,
+                'unallocatedNetChargesMinor' => $net - $verifiedAllocated,
+                'signed' => $signed,
+            ];
+        }
+
+        return response()->json([
+            'data' => ['hotelId' => (string) $hotel->id, 'groupId' => (string) $group,
+                'currencies' => array_values($totals), 'rooms' => $individual],
+            'meta' => [
+                'readOnly' => true, 'finalInvoice' => false, 'postsTransactions' => false,
+                'verifiedMeansIndependentStaffEvidenceReview' => true,
+                'bankOrGatewayVerificationClaimed' => false,
+                'groupPayerAllocationEndpoint' => 'Use the existing booking payment allocation endpoint after independent verification.',
+            ],
+        ]);
+    }
+}
