@@ -56,6 +56,17 @@ final class FolioSettlementService
                 || ($payment->method === 'bank_transfer' && $kind !== 'bank_statement')) {
                 throw ValidationException::withMessages(['evidence' => 'Evidence type and reference must match the payment method.']);
             }
+            if ($payment->method === 'bank_transfer'
+                && DB::table('folio_settlement_verifications')
+                    ->where('hotel_id', $hotel->id)
+                    ->where('payment_record_id', '!=', $paymentId)
+                    ->where('evidence_kind', 'bank_statement')
+                    ->where('evidence_reference', trim($reference))
+                    ->whereIn('status', ['pending', 'verified'])->exists()) {
+                throw ValidationException::withMessages([
+                    'evidence' => 'Bank evidence reference is already associated with another payment.',
+                ]);
+            }
             $existing = DB::table('folio_settlement_verifications')
                 ->where('hotel_id', $hotel->id)->where('payment_record_id', $paymentId)->first();
             if ($existing !== null) {
@@ -96,6 +107,11 @@ final class FolioSettlementService
             $payment = $this->payment($hotel, $folio, (int) $verification->payment_record_id);
             if ($payment->status !== 'staff_confirmed') {
                 throw ValidationException::withMessages(['payment' => 'Payment is no longer staff confirmed.']);
+            }
+            if ($decision === 'verify' && (int) $payment->recorded_by === $reviewerId) {
+                throw ValidationException::withMessages([
+                    'reviewer' => 'The payment recorder cannot independently verify their own evidence.',
+                ]);
             }
             if ($decision === 'verify' && $payment->method === 'cash') {
                 $receipt = DB::table('cashier_shift_receipts as sr')
@@ -159,6 +175,15 @@ final class FolioSettlementService
             $reservedRefunds = (int) DB::table('folio_refund_requests')
                 ->where('hotel_id', $hotel->id)->where('payment_record_id', $paymentId)
                 ->whereIn('status', ['requested', 'approved'])->sum('amount_minor');
+            $net = app(FolioAccountingService::class)->summaryFor($folio)['netRecordedChargesMinor'];
+            $folioAllocated = (int) DB::table('folio_settlement_allocations')
+                ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
+                ->sum('amount_minor');
+            if ($net < 0 || $folioAllocated > $net || $amountMinor > $net - $folioAllocated) {
+                throw ValidationException::withMessages([
+                    'amountMinor' => 'Allocations cannot exceed the folio net charges after credits and discounts.',
+                ]);
+            }
             if ($allocated > (int) $payment->amount_minor
                 || $reservedRefunds > (int) $payment->amount_minor - $allocated
                 || $amountMinor > (int) $payment->amount_minor - $allocated - $reservedRefunds) {
