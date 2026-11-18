@@ -24,6 +24,10 @@ final class OccupancyCoverageReportService
                     ->where('v.hotel_id', '=', $hotel->id)
                     ->where('v.inspection_date', '=', $date);
             })
+            ->leftJoin('occupancy_investigations as investigation', function ($join): void {
+                $join->on('investigation.verification_id', '=', 'v.id')
+                    ->on('investigation.hotel_id', '=', 'v.hotel_id');
+            })
             ->leftJoin('users as assigned_employee','assigned_employee.id','=','v.assigned_user_id')
             ->leftJoin('users as observer_employee','observer_employee.id','=','v.observed_by')
             ->leftJoin('users as reviewer_employee','reviewer_employee.id','=','v.reviewed_by')
@@ -36,6 +40,7 @@ final class OccupancyCoverageReportService
              SUM(CASE WHEN v.status = 'submitted' THEN 1 ELSE 0 END) as submitted_count,
              SUM(CASE WHEN v.status = 'verified' THEN 1 ELSE 0 END) as verified_count,
              SUM(CASE WHEN v.status = 'flagged' THEN 1 ELSE 0 END) as flagged_count,
+             SUM(CASE WHEN v.status = 'flagged' AND investigation.status = 'closed' THEN 1 ELSE 0 END) as resolved_count,
              SUM(CASE WHEN v.discrepancy = 'unexpected_occupied' THEN 1 ELSE 0 END) as unexpected_occupied_count,
              SUM(CASE WHEN v.discrepancy = 'expected_occupied_vacant' THEN 1 ELSE 0 END) as expected_occupied_vacant_count,
              SUM(CASE WHEN v.discrepancy = 'unverified' THEN 1 ELSE 0 END) as unverified_count,
@@ -47,7 +52,9 @@ final class OccupancyCoverageReportService
         if ($filter === 'missing') $records->whereNull('v.id');
         if ($filter === 'assigned') $records->where('v.status', 'assigned');
         if ($filter === 'needs_review') $records->where('v.status', 'submitted');
-        if ($filter === 'flagged') $records->where('v.status', 'flagged');
+        if ($filter === 'flagged') $records->where('v.status', 'flagged')->where(function ($query): void {
+            $query->whereNull('investigation.id')->orWhere('investigation.status', 'open');
+        });
         if ($filter === 'mismatch') $records->whereIn('v.discrepancy', [
             'unexpected_occupied', 'expected_occupied_vacant', 'unverified',
         ]);
@@ -60,6 +67,8 @@ final class OccupancyCoverageReportService
                 'v.expected_occupancy', 'v.observed_occupancy',
                 'v.assigned_user_id', 'v.observed_by', 'v.reviewed_by',
                 'v.observed_at', 'v.reviewed_at',
+                'investigation.status as investigation_status',
+                'investigation.resolution as investigation_resolution',
                 'assigned_employee.name as assigned_name',
                 'observer_employee.name as observer_name',
                 'reviewer_employee.name as reviewer_name',
@@ -79,6 +88,8 @@ final class OccupancyCoverageReportService
                 'floor' => $row->floor_number === null ? null : (int) $row->floor_number,
                 'verificationId' => $row->verification_id === null ? null : (string) $row->verification_id,
                 'status' => $row->status ?? 'missing',
+                'investigationStatus' => $row->investigation_status,
+                'investigationResolution' => $row->investigation_resolution,
                 'discrepancy' => $row->discrepancy,
                 'expectedOccupancy' => $row->expected_occupancy,
                 'observedOccupancy' => $row->observed_occupancy,
@@ -103,7 +114,8 @@ final class OccupancyCoverageReportService
                 'flagged' => $flagged,
                 'observed' => $submitted + $verified + $flagged,
                 'reviewed' => $verified + $flagged,
-                'unresolved' => $missing + $assigned + $submitted + $flagged,
+                'unresolved' => $missing + $assigned + $submitted + $flagged - (int) $totals->resolved_count,
+                'resolvedInvestigations' => (int) $totals->resolved_count,
                 'checked' => $roomCount - $missing,
                 'unexpectedOccupied' => (int) $totals->unexpected_occupied_count,
                 'expectedOccupiedVacant' => (int) $totals->expected_occupied_vacant_count,
