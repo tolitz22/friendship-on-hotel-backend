@@ -197,7 +197,7 @@ final class GroupReservationController
         $property = Hotel::findOrFail($hotelId);
         $assigned = $members->filter(fn (object $member): bool => $member->assigned_room_id !== null);
         $advisoryReadyCount = $assigned->filter(fn (object $member): bool =>
-            app(\\App\\Domain\\Reservations\\RoomReadinessService::class)
+            app(\App\Domain\Reservations\RoomReadinessService::class)
                 ->show($property, (int) $member->assigned_room_id)['advisoryReady']
         )->count();
         $departedIds = $members->filter(fn (object $member): bool =>
