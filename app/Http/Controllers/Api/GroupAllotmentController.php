@@ -118,9 +118,11 @@ final class GroupAllotmentController
             'name' => $row->name, 'roomTypeId' => (string) $row->room_type_id,
             'roomTypeName' => $row->room_type_name, 'quantity' => (int) $row->quantity,
             'checkIn' => $row->check_in, 'checkOut' => $row->check_out,
-            'expiresAt' => (string) $row->expires_at, 'createdByName' => $row->creator_name,
+            'expiresAt' => \Carbon\CarbonImmutable::parse($row->expires_at, 'UTC')->toIso8601String(),
+            'createdByName' => $row->creator_name,
             'releasedByName' => $row->releaser_name,
-            'status' => $row->status === 'held' && $row->expires_at <= now()
+            'status' => $row->status === 'held'
+                && \Carbon\CarbonImmutable::parse($row->expires_at, 'UTC')->isPast()
                 ? 'expired' : $row->status,
             'convertedGroupId' => $row->converted_group_id === null ? null : (string) $row->converted_group_id,
         ];
