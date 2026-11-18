@@ -33,7 +33,7 @@ final class FinancialBusinessDayCloseServiceTest extends TestCase
     }
     public function test_iso_business_date_validation_accepts_real_calendar_dates(): void
     {
-        $validator = new \\ReflectionMethod(FinancialBusinessDayCloseService::class, 'isValidDate');
+        $validator = new \ReflectionMethod(FinancialBusinessDayCloseService::class, 'isValidDate');
         $service = new FinancialBusinessDayCloseService();
 
         self::assertTrue($validator->invoke($service, '2026-11-18'));
@@ -41,7 +41,7 @@ final class FinancialBusinessDayCloseServiceTest extends TestCase
         self::assertFalse($validator->invoke($service, '2025-02-29'));
         self::assertFalse($validator->invoke($service, '2026-13-18'));
         self::assertFalse($validator->invoke($service, '2026-11-18T00:00:00'));
-        self::assertFalse($validator->invoke($service, '2026-11-18\\n'));
+        self::assertFalse($validator->invoke($service, "2026-11-18\n"));
     }
 
 }
