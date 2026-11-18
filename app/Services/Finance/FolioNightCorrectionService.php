@@ -31,6 +31,12 @@ final class FolioNightCorrectionService
                 ->where('status', 'pending')->exists()) {
                 throw ValidationException::withMessages(['assessment' => 'Resolve the pending correction first.']);
             }
+            if (DB::table('folio_payment_records')
+                ->where('hotel_id', $hotelId)->where('folio_id', $assessment->folio_id)->exists()) {
+                throw ValidationException::withMessages([
+                    'folio' => 'Corrections with payment evidence require the separate refund/reconciliation workflow.',
+                ]);
+            }
             $policy = $this->policy($assessment);
             $allocation = $this->allocation($assessment, $policy, $benefitKind,
                 $eligibleGrossMinor, $evidenceReference);
