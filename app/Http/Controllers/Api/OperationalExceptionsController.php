@@ -186,6 +186,7 @@ final class OperationalExceptionsController
                 'type' => $flagged ? 'occupancy_investigation' : 'occupancy_review',
                 'severity' => $flagged ? 'critical' : 'attention',
                 'bookingId' => null, 'roomId' => (string) $row->room_id,
+                'roomNumber' => (string) $row->room_number,
                 'reference' => 'Room '.$row->room_number,
                 'ownerName' => $row->owner_name,
                 'reason' => $flagged
