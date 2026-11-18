@@ -402,8 +402,7 @@ final class FolioSettlementService
         // Do not compare presentation-only fields such as "signed" or dates.
         $facts = [
             'charges' => $charges, 'adjustments' => $adjustments,
-            'payments' => $payments, 'cashShiftContexts' => $paymentHandoff,
-            'allocations' => $allocations,
+            'payments' => $payments, 'allocations' => $allocations,
             'refunds' => $refunds, 'taxAllocations' => $taxAllocations,
             'netRecordedChargesMinor' => $net,
             'verifiedPaymentsMinor' => $verified,
@@ -491,7 +490,8 @@ final class FolioSettlementService
             'status' => $booking->lifecycle_state, 'currency' => $folio->currency,
             'charges' => $charges, 'adjustments' => $adjustments,
             'taxAllocations' => $taxAllocations,
-            'payments' => $payments, 'allocations' => $allocations,
+            'payments' => $payments, 'cashShiftContexts' => $paymentHandoff,
+            'allocations' => $allocations,
             'refunds' => $refunds, 'verifiedRefundsMinor' => $verifiedRefunds,
             'netRecordedChargesMinor' => $net,
             'verifiedPaymentsMinor' => $verified,
