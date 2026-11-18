@@ -127,4 +127,48 @@ final class NightlyRoomRevenueRecognitionService
             return $journalId;
         }, 3);
     }
+    /**
+     * Corrections are append-only and never change the folio. The original
+     * recognition remains traceable; an adjustment must be explicitly reviewed.
+     */
+    public function reverse(int $hotelId, int $recognitionJournalId, int $actorId, string $reason): int
+    {
+        if ($hotelId < 1 || $recognitionJournalId < 1 || $actorId < 1
+            || mb_strlen(trim($reason)) < 10 || mb_strlen($reason) > 180) {
+            throw new InvalidArgumentException('A journal, authorized actor and substantive reason are required.');
+        }
+
+        return DB::transaction(function () use ($hotelId, $recognitionJournalId, $actorId, $reason): int {
+            $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotelId)
+                ->lockForUpdate()->first();
+            if ($clock === null || $clock->status !== 'open') {
+                throw ValidationException::withMessages(['business_date' => 'Financial business date is not open.']);
+            }
+            $record = DB::table('financial_room_revenue_recognitions')
+                ->where('hotel_id', $hotelId)->where('recognition_journal_id', $recognitionJournalId)->first();
+            if ($record === null) {
+                throw ValidationException::withMessages(['recognition_journal_id' => 'Recognition journal does not belong to this hotel.']);
+            }
+            $original = DB::table('financial_posting_journals')
+                ->where('hotel_id', $hotelId)->where('id', $recognitionJournalId)->first();
+            if ($original === null || $original->source_type !== 'nightly_revenue') {
+                throw ValidationException::withMessages(['recognition_journal_id' => 'Recognition journal could not be verified.']);
+            }
+            $lines = DB::table('financial_posting_lines')->where('journal_id', $recognitionJournalId)
+                ->orderBy('line_number')->get(['account_code', 'debit_minor', 'credit_minor'])
+                ->map(fn ($line): array => [
+                    'account_code' => $line->account_code,
+                    'debit_minor' => (int) $line->credit_minor,
+                    'credit_minor' => (int) $line->debit_minor,
+                ])->all();
+
+            return (new FinancialJournalPostingService())->post(
+                $hotelId, 'room-earned-reversal-'.$recognitionJournalId,
+                'nightly_revenue_reversal', (string) $recognitionJournalId,
+                'Reverse earned revenue: '.trim($reason), $lines,
+                $actorId, $recognitionJournalId,
+            );
+        }, 3);
+    }
+
 }
