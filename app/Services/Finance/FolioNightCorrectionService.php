@@ -6,6 +6,7 @@ namespace App\Services\Finance;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -191,6 +192,13 @@ final class FolioNightCorrectionService
             ->where('status', 'approved')->lockForUpdate()->first();
         if ($row === null) {
             throw ValidationException::withMessages(['assessment' => 'Approved original assessment required.']);
+        }
+        if (Schema::hasTable('folio_settlement_signoffs')
+            && DB::table('folio_settlement_signoffs')
+                ->where('hotel_id', $hotelId)->where('folio_id', $row->folio_id)->exists()) {
+            throw ValidationException::withMessages([
+                'folio' => 'A signed folio cannot be changed by a tax or benefit correction.',
+            ]);
         }
         return $row;
     }
