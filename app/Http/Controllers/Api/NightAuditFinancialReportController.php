@@ -89,7 +89,57 @@ final class NightAuditFinancialReportController
             && (int) ($closeSnapshot['debits_minor'] ?? -1) === $totals['debitsMinor']
             && (int) ($closeSnapshot['credits_minor'] ?? -1) === $totals['creditsMinor'];
 
+        // These values are derived from posted double-entry accounting lines,
+        // not reservation quotes or recorded payment evidence. Revenue and VAT
+        // reversals are reflected as debit movements on the same accounts.
+        $accounts = DB::table('financial_posting_journals as j')
+            ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
+            ->where('j.hotel_id', $hotel->id)
+            ->where('j.business_date', $date)
+            ->whereIn('l.account_code', ['ROOM_REV', 'VAT_PAYABLE'])
+            ->selectRaw('l.account_code, SUM(l.credit_minor) as credits, SUM(l.debit_minor) as debits')
+            ->groupBy('l.account_code')->get()->keyBy('account_code');
+        $roomRevenue = (int) ($accounts->get('ROOM_REV')?->credits ?? 0)
+            - (int) ($accounts->get('ROOM_REV')?->debits ?? 0);
+        $vatLiability = (int) ($accounts->get('VAT_PAYABLE')?->credits ?? 0)
+            - (int) ($accounts->get('VAT_PAYABLE')?->debits ?? 0);
+
+        // One independently checked room observation per room and day.
+        // An uninspected room is UNKNOWN, never assumed vacant.
+        $rooms = DB::table('rooms')->where('hotel_id', $hotel->id)->count();
+        $observations = DB::table('occupancy_verifications')
+            ->where('hotel_id', $hotel->id)->where('inspection_date', $date)
+            ->get(['room_id', 'status', 'observed_occupancy', 'discrepancy']);
+        $verified = $observations->filter(fn ($row) => $row->status === 'verified'
+            && $row->discrepancy === 'match'
+            && in_array($row->observed_occupancy, ['occupied', 'vacant'], true));
+        $covered = $rooms > 0 && $observations->count() === $rooms
+            && $verified->count() === $rooms
+            && $verified->pluck('room_id')->unique()->count() === $rooms;
+        $occupied = $covered
+            ? $verified->where('observed_occupancy', 'occupied')->count() : null;
+
+        // Use the submitted date, not the date the shift was first opened.
+        // A flagged shift is never reported as verified collections.
+        $shifts = DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
+            ->whereDate('submitted_at', $date)
+            ->get(['status', 'expected_cash_minor', 'counted_cash_minor', 'variance_minor']);
+        $cashier = [
+            'submittedCount' => $shifts->count(),
+            'reconciledCount' => $shifts->where('status', 'reconciled')->count(),
+            'flaggedCount' => $shifts->where('status', 'flagged')->count(),
+            'pendingCount' => $shifts->where('status', 'submitted')->count(),
+            'varianceMinor' => (int) $shifts->sum(fn ($row) => (int) ($row->variance_minor ?? 0)),
+            'reconciledCountedCashMinor' => (int) $shifts->where('status', 'reconciled')
+                ->sum(fn ($row) => (int) ($row->counted_cash_minor ?? 0)),
+            'scope' => 'staff_counted_cash_independently_reconciled_not_bank_deposit',
+        ];
+
         $blockers = [];
+        if (!$covered) $blockers[] = 'Independent occupancy observations do not cover every current room on this date.';
+        if ($cashier['flaggedCount'] > 0 || $cashier['pendingCount'] > 0) {
+            $blockers[] = 'Cashier exceptions still require manager investigation.';
+        }
         if (!$reviewValid) $blockers[] = 'Night-audit snapshot is missing or fails its integrity check.';
         if ($review !== null && $review->status !== 'reviewed') $blockers[] = 'Night audit was flagged, not cleared.';
         if ($close === null || $close->status !== 'completed') $blockers[] = 'Financial business date has not been closed.';
@@ -124,21 +174,31 @@ final class NightAuditFinancialReportController
                 'snapshotMatchesLedger' => $snapshotMatches,
             ],
             'kpis' => [
+                // Observations reflect an independent dated inspection, not
+                // continuous overnight hotel occupancy. These are deliberately
+                // labelled inspection proxies instead of certified KPIs.
                 'verifiedOccupiedRoomNights' => null,
-                'recognizedRoomRevenueMinor' => null,
+                'recognizedRoomRevenueMinor' => $close !== null && $snapshotMatches && $unbalanced === 0 ? $roomRevenue : null,
+                'vatLiabilityMovementMinor' => $close !== null && $snapshotMatches && $unbalanced === 0 ? $vatLiability : null,
                 'adrMinor' => null,
                 'revparMinor' => null,
                 'occupancyPercent' => null,
+                'inspectionOccupiedRooms' => $occupied,
+                'inspectionOccupancyPercent' => $covered ? round($occupied * 100 / $rooms, 2) : null,
+                'inspectionRoomCount' => $rooms,
+                'inspectionCoverageComplete' => $covered,
             ],
+            'cashier' => $cashier,
             'limitations' => [
                 'Scheduled room nights are not independently verified occupied room nights.',
+                'Point-in-time verified room inspections cannot establish overnight room-night occupancy; official ADR/RevPAR remain unavailable.',
                 'Posted charges and balanced journal totals are not themselves earned room revenue or collected cash.',
-                'ADR, RevPAR, occupancy and revenue KPIs remain null until reconciliation to independently verified occupancy and recognized revenue is implemented.',
+                'Revenue is recognized ROOM_REV account movement on the selected accounting date; it can include corrections to prior stays. Room-night ADR and RevPAR require historical occupied room nights and stay-date attribution.',
                 'No bank or gateway settlement confirmation is implied.',
             ],
             'blockers' => $blockers,
             'financialJournalReconciled' => $blockers === [],
-            'reportScope' => 'phase_62_financial_journal_reconciliation_foundation',
+            'reportScope' => 'phase_62_reconciled_journals_cashier_and_inspection_evidence',
         ]]);
     }
 }
