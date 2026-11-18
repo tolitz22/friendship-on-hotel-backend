@@ -117,9 +117,12 @@ final class CashierShiftService
     {
         $this->details($hotel, $actor, $manager, $id);
         return DB::table('cashier_shift_events')
-            ->where('hotel_id', $hotel->id)->where('shift_id', $id)->orderBy('id')
-            ->get()->map(fn (object $row): array => [
+            ->leftJoin('users as audit_actor', 'audit_actor.id', '=', 'cashier_shift_events.actor_id')
+            ->where('cashier_shift_events.hotel_id', $hotel->id)
+            ->where('cashier_shift_events.shift_id', $id)->orderBy('cashier_shift_events.id')
+            ->get(['cashier_shift_events.*', 'audit_actor.name as actor_name'])->map(fn (object $row): array => [
                 'id' => (string) $row->id, 'actorId' => (string) $row->actor_id,
+                'actorName' => $row->actor_name,
                 'event' => $row->event, 'details' => json_decode($row->details, true),
                 'createdAt' => $row->created_at,
             ])->all();
