@@ -133,6 +133,17 @@ final class FinanceFolioIndexTest extends TestCase
         self::assertSame('11', $this->index(1, ['search' => '11'])['data'][0]['bookingId']);
     }
 
+    public function test_missing_optional_signoff_history_does_not_break_billing_directory(): void
+    {
+        $this->seedFolio(1, 10, 100, 'ONE-010');
+        Schema::drop('folio_settlement_signoffs');
+        $result = $this->index(1);
+        self::assertSame(1, $result['meta']['total']);
+        self::assertFalse($result['meta']['signoffRecordsAvailable']);
+        self::assertNull($result['data'][0]['signed']);
+        self::assertTrue($result['data'][0]['provisionalOnly']);
+    }
+
     public function test_signed_folios_are_marked_without_claiming_bank_verification(): void
     {
         $this->seedFolio(1, 10, 100, 'ONE-010');
