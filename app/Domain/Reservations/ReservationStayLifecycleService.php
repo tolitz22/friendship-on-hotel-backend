@@ -69,6 +69,23 @@ final class ReservationStayLifecycleService
                 throw new HttpException(409, 'Early check-out requires a separate stay amendment.');
             }
 
+            if ($operation === 'check_out'
+                && config('financial_accounting.enable_verified_settlement', false)) {
+                $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+                    ->where('reservation_record_id', $bookingId)->lockForUpdate()->first();
+                if ($folio === null || !DB::table('folio_settlement_signoffs')
+                    ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
+                    ->where('reservation_record_id', $bookingId)->exists()) {
+                    throw new HttpException(409,
+                        'Checkout requires an approved immutable folio settlement statement.');
+                }
+                $settlement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
+                if (!$settlement['signed'] || !$settlement['canSignOff']) {
+                    throw new HttpException(409,
+                        'Signed folio no longer reconciles; manager financial investigation required.');
+                }
+            }
+
             if ($operation === 'check_in') {
                 if ($record->assigned_room_id === null) {
                     throw new HttpException(409, 'Assign a physical room before check-in.');
