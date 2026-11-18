@@ -53,6 +53,7 @@ use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
 use App\Http\Controllers\Api\OccupancyVerificationController;
+use App\Http\Controllers\Api\OccupancyInvestigationController;
 use App\Http\Controllers\Api\OccupancyCoverageReportController;
 use App\Http\Controllers\Api\KeycardAuthorizationController;
 use Illuminate\Support\Facades\Route;
@@ -229,6 +230,12 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('authorization')->middleware('throttle:20,1');
                 Route::post('/keycard-authorizations/{authorization}/revoke', [KeycardAuthorizationController::class, 'revoke'])
                     ->whereNumber('authorization')->middleware('throttle:20,1');
+                Route::get('/occupancy-verifications/{verification}/investigation', [OccupancyInvestigationController::class, 'show'])
+                    ->whereNumber('verification');
+                Route::post('/occupancy-verifications/{verification}/investigation', [OccupancyInvestigationController::class, 'store'])
+                    ->whereNumber('verification')->middleware('throttle:10,1');
+                Route::post('/occupancy-verifications/{verification}/investigation/action', [OccupancyInvestigationController::class, 'update'])
+                    ->whereNumber('verification')->middleware('throttle:20,1');
                 Route::post('/occupancy-verifications', [OccupancyVerificationController::class, 'assign'])
                     ->middleware('throttle:30,1');
                 Route::post('/occupancy-verifications/{verification}/review', [OccupancyVerificationController::class, 'review'])
