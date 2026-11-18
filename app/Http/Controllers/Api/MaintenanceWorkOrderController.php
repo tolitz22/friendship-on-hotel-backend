@@ -178,12 +178,16 @@ final class MaintenanceWorkOrderController
         abort_unless(DB::table('maintenance_work_orders')->where('hotel_id',$hotel->id)->where('id',$order)->exists(),404);
         $input=$request->validate(['per_page'=>['sometimes','integer','min:1','max:50']]);
         $page=DB::table('maintenance_work_order_events')
-            ->where('hotel_id',$hotel->id)->where('work_order_id',$order)
-            ->orderByDesc('id')->paginate((int)($input['per_page']??20));
+            ->leftJoin('users as audit_actor','audit_actor.id','=','maintenance_work_order_events.actor_id')
+            ->where('maintenance_work_order_events.hotel_id',$hotel->id)
+            ->where('maintenance_work_order_events.work_order_id',$order)
+            ->orderByDesc('maintenance_work_order_events.id')
+            ->paginate((int)($input['per_page']??20),['maintenance_work_order_events.*','audit_actor.name as actor_name']);
         return response()->json([
             'data'=>$page->getCollection()->map(fn(object $event):array=>[
                 'id'=>(string)$event->id,
                 'actorId'=>(string)$event->actor_id,
+                'actorName'=>$event->actor_name,
                 'action'=>$event->action,
                 'before'=>$event->before_state?json_decode($event->before_state,true):null,
                 'after'=>json_decode($event->after_state,true),
