@@ -25,7 +25,9 @@ final class RefundRequestService
     public function create(Hotel $hotel, int $bookingId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $bookingId, $actor, $input): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
+            app(FolioAccountingService::class)->assertNotSigned($hotel, $folio);
             $fingerprint = hash('sha256', json_encode([
                 $bookingId, (int) $input['paymentRecordId'],
                 (int) $input['amountMinor'], trim($input['reason']),
@@ -70,7 +72,9 @@ final class RefundRequestService
     public function review(Hotel $hotel, int $bookingId, int $requestId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $bookingId, $requestId, $actor, $input): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
+            app(FolioAccountingService::class)->assertNotSigned($hotel, $folio);
             $request = DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->where('id', $requestId)
                 ->lockForUpdate()->first();
