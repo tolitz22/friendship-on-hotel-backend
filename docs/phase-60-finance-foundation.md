@@ -63,3 +63,95 @@ All four endpoints run under existing `auth:sanctum`, `active.user`,
    to folio line items; prove concurrency against the production database engine.
 5. Run migrations and full Laravel tests on staging, confirm transaction
    rollback, constraints and deployment health.
+
+## Phase 60 continuation: connected, reviewed folio-night accounting
+
+The following API is implemented under `auth:sanctum`, `active.user`,
+`hotel.member` and `hotel.admin`:
+
+- `GET /api/v1/hotels/{hotel}/bookings/{booking}/folio-night-entries`
+- `GET /api/v1/hotels/{hotel}/bookings/{booking}/folio-night-assessments`
+- `POST /api/v1/hotels/{hotel}/bookings/{booking}/folio-night-assessments`
+- `POST /api/v1/hotels/{hotel}/bookings/{booking}/folio-night-assessments/{assessment}/approve`
+- `POST /api/v1/hotels/{hotel}/bookings/{booking}/folio-night-assessments/{assessment}/recognize`
+- `GET/POST /api/v1/hotels/{hotel}/bookings/{booking}/folio-night-assessments/{assessment}/corrections`
+- `POST /api/v1/hotels/{hotel}/bookings/{booking}/folio-night-assessments/{assessment}/corrections/{correction}/approve`
+
+The manager UI route is `/folio-night-accounting`.
+
+Tax and benefit assessments are anchored to **existing** `folio_entries`
+(`entry_type=room_night`). A unique hotel/folio-entry assessment prevents
+repeat accounting source creation. Preparation and approval require different
+administrator IDs. Approval is an atomic transaction sharing the Phase 59
+hotel clock lock with journal posting and day close.
+
+For an approved VAT-inclusive room night:
+
+1. Source journal: debit `AR`, credit `DEFERRED_ROOM_REV` for the original
+   folio amount (no additional `folio_entries` row is created).
+2. If an eligible statutory benefit was independently verified, post the
+   approved folio CREDIT and a balanced `DEFERRED_ROOM_REV` /`AR` journal.
+   The credit includes both VAT relief and the 20% of eligible VAT-exclusive
+   accommodation. Mixed-occupant bills require staff-approved eligible share.
+3. VAT liability: debit `DEFERRED_ROOM_REV`, credit `VAT_PAYABLE` for
+   the taxable non-exempt share, with immutable policy/folio linkage.
+4. When the stay date is the current open financial business date,
+   recognize the approved net deferred amount: debit `DEFERRED_ROOM_REV`,
+   credit `ROOM_REV`.
+5. Changes in verified eligibility use a NEW two-person correction record,
+   a balanced delta journal, and a compensating folio debit/credit. The original
+   assessment/journals are preserved; payments block such corrections pending
+   separate refund reconciliation.
+
+This is **not** BIR-compliant invoice issuance or proof that a tax obligation
+arose on the journal date. Before enabling, finance must verify the VAT tax
+point, invoice event, rate-plan semantics, hotel VAT registration,
+senior/PWD eligibility documentation, mixed-guest allocation, LGU charges,
+and handling of partially settled/legacy bookings.
+
+### Production-safe activation
+
+`FINANCE_ENABLE_LIVE_FOLIO_TAX=false` is the default in
+`config/financial_accounting.php`. Keep it OFF until sign-off and a staging
+backfill/reconciliation plan exist. Admin policy configuration and previews
+may be used without activating live folio tax posting. Any previously posted
+assessment still activates safety requirements for its own financial date
+even if the toggle is subsequently disabled.
+
+Enable only on an isolated staging environment AFTER passing the tests and
+reconciling the hotel chart of accounts:
+
+```bash
+php artisan test --filter=FolioNight
+php artisan test --filter=PhilippineTaxCalculator
+php artisan test --filter=FinancialBusinessDay
+php artisan test
+```
+
+For two-connection locking verification, use a dedicated disposable
+MySQL/InnoDB or PostgreSQL **test** database named with a `test`, `ci`,
+`staging`, or `sandbox` identifier, `APP_ENV=testing`,
+`FINANCE_REAL_DB_LOCK_TESTS=1` and the appropriate `DB_CONNECTION`.
+Then run:
+
+```bash
+php artisan test --filter=FinancialRealDatabaseConcurrency
+```
+
+The real-engine test proves actual row-lock exclusion on separate database
+connections. It must be *executed on a real configured database*; SQLite
+passing is NOT equivalent. Also run the full integration tests against that
+engine before enabling production journal writes.
+
+### Not yet production-certified
+
+- No historical backfill of existing charged/earned folios is attempted.
+  Existing journals may already recognize revenue; these must be reconciled
+  before a new deferred source is approved.
+- No BIR invoice/receipt generation, tax-event verification, external
+  settlement verification, scheduled night-audit posting, or automatic
+  rate-plan tax-inclusive conversion exists in this phase.
+- Reviewed discounts on partially paid folios intentionally require a
+  separate refund workflow.
+- True concurrent API posting/approval/close workload tests and external tax
+  compliance sign-off remain required.
