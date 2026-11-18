@@ -125,6 +125,114 @@ final class FolioAccountingService
         }, 3);
     }
 
+    /** Display provisional payment records before money is collected again.
+     * These are evidence records, not proof that cash or bank funds were received.
+     */
+    public function paymentSafety(Hotel $hotel, int $bookingId, ?string $method = null,
+        ?int $amountMinor = null): array
+    {
+        $folio = $this->findFolio($hotel, $bookingId);
+        $records = DB::table('folio_payment_records as payment')
+            ->leftJoin('users as staff', 'staff.id', '=', 'payment.recorded_by')
+            ->where('payment.hotel_id', $hotel->id)->where('payment.folio_id', $folio->id)
+            ->orderByDesc('payment.id')->limit(40)
+            ->get(['payment.id', 'payment.reference', 'payment.method',
+                'payment.amount_minor', 'payment.status', 'payment.created_at',
+                'staff.name as recorded_by_name']);
+        $recentMatches = $records->filter(fn (object $p): bool =>
+            $method !== null && $amountMinor !== null
+            && $p->method === $method && (int) $p->amount_minor === $amountMinor
+            && in_array($p->status, ['pending_review', 'staff_confirmed'], true)
+            && $p->created_at >= now()->subHours(24)->toDateTimeString());
+        return [
+            'currency' => $folio->currency, 'payments' => $records->map(fn (object $p): array => [
+                'id' => (string) $p->id, 'reference' => $p->reference,
+                'method' => $p->method, 'amountMinor' => (int) $p->amount_minor,
+                'status' => $p->status, 'createdAt' => (string) $p->created_at,
+                'recordedByName' => $p->recorded_by_name,
+            ])->values()->all(),
+            'recentMatchingPaymentIds' => $recentMatches->pluck('id')->map(fn ($v): string => (string) $v)->values()->all(),
+            'hasMore' => DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->count() > 40,
+            'provisionalOnly' => true,
+        ];
+    }
+
+    private function matchingPayment(Hotel $hotel, object $folio, array $input): ?object
+    {
+        return DB::table('folio_payment_records')
+            ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
+            ->where('method', $input['method'])->where('amount_minor', $input['amountMinor'])
+            ->whereIn('status', ['pending_review', 'staff_confirmed'])
+            ->where('created_at', '>=', now()->subHours(24))
+            ->orderByDesc('id')->first();
+    }
+
+    public function voidPayment(Hotel $hotel, int $bookingId, int $paymentId,
+        int $actor, string $key, string $reason): array
+    {
+        return DB::transaction(function () use ($hotel, $bookingId, $paymentId, $actor, $key, $reason): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
+            $folio = $this->findFolio($hotel, $bookingId, true);
+            $this->assertNotSigned($hotel, $folio);
+            $prior = DB::table('folio_payment_voids')->where('hotel_id', $hotel->id)
+                ->where('request_key', $key)->first();
+            if ($prior !== null) {
+                if ((int) $prior->payment_record_id !== $paymentId || $prior->reason !== $reason) {
+                    throw new HttpException(409, 'Void request key has already been used with different details.');
+                }
+                return ['paymentId' => (string) $paymentId, 'status' => 'voided', 'replayed' => true];
+            }
+            $payment = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->where('id', $paymentId)->lockForUpdate()->first();
+            abort_unless($payment !== null, 404);
+            if (! in_array($payment->status, ['pending_review', 'staff_confirmed'], true)) {
+                throw new HttpException(409, 'Only active, unallocated payment evidence may be voided.');
+            }
+            if ((int) $payment->recorded_by === $actor) {
+                throw new HttpException(403, 'Another hotel administrator must authorize voiding this payment.');
+            }
+            foreach (['folio_settlement_verifications', 'folio_settlement_allocations',
+                'folio_refund_requests'] as $table) {
+                if (DB::table($table)->where('hotel_id', $hotel->id)
+                    ->where('payment_record_id', $paymentId)->exists()) {
+                    throw new HttpException(409,
+                        'Payment already has verification, allocation or refund activity. Use reviewed finance correction.');
+                }
+            }
+            $cash = DB::table('cashier_shift_receipts as receipt')
+                ->join('cashier_shifts as shift', function ($join): void {
+                    $join->on('shift.id', '=', 'receipt.shift_id')
+                        ->on('shift.hotel_id', '=', 'receipt.hotel_id');
+                })->where('receipt.hotel_id', $hotel->id)
+                ->where('receipt.payment_id', $paymentId)
+                ->first(['receipt.shift_id', 'shift.status']);
+            if ($payment->method === 'cash' && ($cash === null || $cash->status !== 'open')) {
+                throw new HttpException(409,
+                    'Cash receipt belongs to a closed shift. Flag and reconcile the shift through finance review.');
+            }
+            DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
+                ->where('id', $paymentId)->update(['status' => 'voided', 'updated_at' => now()]);
+            DB::table('folio_payment_voids')->insert([
+                'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
+                'payment_record_id' => $paymentId, 'voided_by' => $actor,
+                'request_key' => $key, 'reason' => $reason,
+                'original_status' => $payment->status, 'created_at' => now(),
+            ]);
+            if ($cash !== null) {
+                DB::table('cashier_shift_events')->insert([
+                    'hotel_id' => $hotel->id, 'shift_id' => $cash->shift_id,
+                    'actor_id' => $actor, 'event' => 'payment_voided',
+                    'details' => json_encode([
+                        'paymentId' => (string) $paymentId, 'bookingId' => (string) $bookingId,
+                        'amountMinor' => (int) $payment->amount_minor, 'reason' => $reason,
+                    ], JSON_THROW_ON_ERROR), 'created_at' => now(),
+                ]);
+            }
+            return ['paymentId' => (string) $paymentId, 'status' => 'voided', 'replayed' => false];
+        }, 3);
+    }
+
     public function recordPayment(Hotel $hotel, int $bookingId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $bookingId, $actor, $input): array {
@@ -147,6 +255,17 @@ final class FolioAccountingService
                 ->where('method', $input['method'])->where('reference', $reference)->exists()) {
                 throw new HttpException(409, 'Payment reference already recorded for this hotel and method.');
             }
+            $matching = $this->matchingPayment($hotel, $folio, $input);
+            if ($matching !== null) {
+                if (empty($input['duplicateOverrideReason'])
+                    || ! ($input['duplicateOverrideAuthorized'] ?? false)) {
+                    throw new HttpException(409, 'Possible duplicate payment #'.$matching->id
+                        .' already recorded for this booking. Review the existing payment before recording another.');
+                }
+                if (mb_strlen(trim($input['duplicateOverrideReason'])) < 12) {
+                    throw new HttpException(422, 'Explain why the guest made a second payment (at least 12 characters).');
+                }
+            }
             $id = DB::table('folio_payment_records')->insertGetId([
                 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
                 'request_key' => $input['requestKey'], 'payload_sha256' => $fingerprint,
@@ -154,6 +273,15 @@ final class FolioAccountingService
                 'amount_minor' => $input['amountMinor'], 'status' => 'pending_review',
                 'recorded_by' => $actor, 'created_at' => now(), 'updated_at' => now(),
             ]);
+            if ($matching !== null) {
+                DB::table('folio_payment_duplicate_overrides')->insert([
+                    'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
+                    'payment_record_id' => $id, 'matched_payment_id' => $matching->id,
+                    'approved_by' => $actor,
+                    'reason' => trim($input['duplicateOverrideReason']),
+                    'created_at' => now(),
+                ]);
+            }
             return ['id' => (string) $id, 'status' => 'pending_review', 'replayed' => false];
         }, 3);
     }
@@ -200,12 +328,23 @@ final class FolioAccountingService
                     'reason' => $row->reason, 'actorId' => (string) $row->actor_id,
                     'createdAt' => $row->created_at,
                 ])->values(),
-            'payments' => DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
-                ->where('folio_id', $folio->id)->orderBy('id')->get()
+            'payments' => DB::table('folio_payment_records as payment')
+                ->leftJoin('users as recorder', 'recorder.id', '=', 'payment.recorded_by')
+                ->leftJoin('folio_payment_voids as voids', function ($join): void {
+                    $join->on('voids.payment_record_id', '=', 'payment.id')
+                        ->on('voids.hotel_id', '=', 'payment.hotel_id');
+                })
+                ->leftJoin('users as voider', 'voider.id', '=', 'voids.voided_by')
+                ->where('payment.hotel_id', $hotel->id)
+                ->where('payment.folio_id', $folio->id)->orderBy('payment.id')
+                ->get(['payment.*', 'recorder.name as recorder_name',
+                    'voider.name as voider_name', 'voids.reason as void_reason'])
                 ->map(fn (object $row): array => [
                     'id' => (string) $row->id, 'method' => $row->method,
                     'reference' => $row->reference, 'amountMinor' => (int) $row->amount_minor,
                     'status' => $row->status, 'recordedBy' => (string) $row->recorded_by,
+                    'recordedByName' => $row->recorder_name,
+                    'voidedByName' => $row->voider_name, 'voidReason' => $row->void_reason,
                     'reviewedBy' => $row->reviewed_by === null ? null : (string) $row->reviewed_by,
                     'reviewNote' => $row->review_note, 'createdAt' => $row->created_at,
                 ])->values(),
