@@ -44,6 +44,7 @@ final class OperationalExceptionsController
         $inHouse = $this->bounded(DB::table('reservation_records')
             ->where('hotel_id', $hotel->id)->where('lifecycle_state', 'checked_in')
             ->whereNull('assigned_room_id')->orderBy('id')
+            ->limit(self::MAX_SOURCE + 1)
             ->get(['id', 'reference', 'check_in', 'check_out']), 'in-house assignments');
         foreach ($inHouse as $row) {
             $items[] = $this->signal('in_house_without_room', 'critical', $row->id, $row->reference,
