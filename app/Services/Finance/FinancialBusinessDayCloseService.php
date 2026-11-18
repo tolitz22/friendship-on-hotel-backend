@@ -49,7 +49,8 @@ final class FinancialBusinessDayCloseService
 
             // Do not advance the business clock with unreviewed or unearned
             // accounting for room nights belonging to this financial date.
-            if (Schema::hasTable('financial_folio_night_assessments')) {
+            if (config('financial_accounting.enable_live_folio_tax', false)
+                && Schema::hasTable('financial_folio_night_assessments')) {
                 $open = DB::table('financial_folio_night_assessments')
                     ->where('hotel_id', $hotelId)->where('stay_date', $expectedBusinessDate)
                     ->where('status', '!=', 'approved')->count();
@@ -97,7 +98,8 @@ final class FinancialBusinessDayCloseService
                 }
             }
 
-            if (Schema::hasTable('financial_folio_night_corrections')
+            if (config('financial_accounting.enable_live_folio_tax', false)
+                && Schema::hasTable('financial_folio_night_corrections')
                 && Schema::hasTable('financial_folio_night_assessments')) {
                 $pendingCorrections = DB::table('financial_folio_night_corrections as c')
                     ->join('financial_folio_night_assessments as a', 'a.id', '=', 'c.assessment_id')
