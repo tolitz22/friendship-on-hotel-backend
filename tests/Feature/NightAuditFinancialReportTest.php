@@ -166,7 +166,7 @@ final class NightAuditFinancialReportTest extends TestCase
         $this->seed();
         DB::table('cashier_shifts')->insert([
             'hotel_id' => 1, 'status' => 'flagged',
-            'submitted_at' => '2026-11-17 19:00:00',
+            'submitted_at' => '2026-11-17 08:00:00',
             'expected_cash_minor' => 12000,
             'counted_cash_minor' => 11000, 'variance_minor' => -1000,
         ]);
