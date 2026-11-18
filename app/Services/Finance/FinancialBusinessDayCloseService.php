@@ -6,6 +6,7 @@ namespace App\Services\Finance;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
@@ -45,6 +46,53 @@ final class FinancialBusinessDayCloseService
                 throw ValidationException::withMessages(['accounting_period' => 'Exactly one open accounting period required.']);
             }
             $period = $periods->first();
+
+            // Do not advance the business clock with unreviewed or unearned
+            // accounting for room nights belonging to this financial date.
+            if (Schema::hasTable('financial_folio_night_assessments')) {
+                $open = DB::table('financial_folio_night_assessments')
+                    ->where('hotel_id', $hotelId)->where('stay_date', $expectedBusinessDate)
+                    ->where('status', '!=', 'approved')->count();
+                if ($open > 0) {
+                    throw ValidationException::withMessages([
+                        'folio_assessments' => 'Pending or rejected folio-night assessments must be resolved.',
+                    ]);
+                }
+                $approved = DB::table('financial_folio_night_assessments')
+                    ->where('hotel_id', $hotelId)->where('stay_date', $expectedBusinessDate)
+                    ->where('status', 'approved')->get(['source_journal_id']);
+                foreach ($approved as $assessment) {
+                    if ($assessment->source_journal_id === null
+                        || !DB::table('financial_room_revenue_recognitions')
+                            ->where('hotel_id', $hotelId)
+                            ->where('source_journal_id', $assessment->source_journal_id)
+                            ->where('stay_date', $expectedBusinessDate)->exists()) {
+                        throw ValidationException::withMessages([
+                            'revenue_recognition' => 'Every approved room-night assessment must have an earned-revenue journal before day close.',
+                        ]);
+                    }
+                }
+                if (Schema::hasTable('folio_entries') && Schema::hasTable('reservation_folios')
+                    && Schema::hasTable('reservation_records')) {
+                    $unassessed = DB::table('folio_entries as e')
+                        ->join('reservation_folios as f', 'f.id', '=', 'e.folio_id')
+                        ->join('reservation_records as r', 'r.id', '=', 'f.reservation_record_id')
+                        ->leftJoin('financial_folio_night_assessments as a', function ($join) {
+                            $join->on('a.folio_entry_id', '=', 'e.id')
+                                ->on('a.hotel_id', '=', 'e.hotel_id');
+                        })
+                        ->where('e.hotel_id', $hotelId)->where('f.hotel_id', $hotelId)
+                        ->where('r.hotel_id', $hotelId)->where('e.entry_type', 'room_night')
+                        ->where('e.stay_date', $expectedBusinessDate)
+                        ->where('r.lifecycle_state', '!=', 'cancelled')
+                        ->whereNull('a.id')->exists();
+                    if ($unassessed) {
+                        throw ValidationException::withMessages([
+                            'folio_assessments' => 'All priced room nights must receive reviewed tax allocation before financial close.',
+                        ]);
+                    }
+                }
+            }
 
             // Verify every journal is balanced before the date becomes immutable.
             $journals = DB::table('financial_posting_journals')
