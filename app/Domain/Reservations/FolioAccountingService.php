@@ -187,7 +187,8 @@ final class FolioAccountingService
             $prior = DB::table('folio_payment_voids')->where('hotel_id', $hotel->id)
                 ->where('request_key', $key)->first();
             if ($prior !== null) {
-                if ((int) $prior->payment_record_id !== $paymentId || $prior->reason !== $reason) {
+                if ((int) $prior->payment_record_id !== $paymentId || $prior->reason !== $reason
+                    || (int) $prior->voided_by !== $actor) {
                     throw new HttpException(409, 'Void request key has already been used with different details.');
                 }
                 return ['paymentId' => (string) $paymentId, 'status' => 'voided', 'replayed' => true];
