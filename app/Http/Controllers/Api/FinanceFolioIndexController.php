@@ -9,6 +9,7 @@ use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 /**
  * Read-only, tenant-scoped cashier work queue. Never computes a final payable
@@ -56,12 +57,18 @@ final class FinanceFolioIndexController
             ->get(['f.id as folio_id', 'f.currency', 'b.id as booking_id',
                 'b.reference', 'b.check_in', 'b.check_out', 'b.lifecycle_state',
                 'g.first_name as guest_first_name', 'g.last_name as guest_last_name']);
-        $signedFolioIds = DB::table('folio_settlement_signoffs')
-            ->where('hotel_id', $hotel->id)
-            ->whereIn('folio_id', $rows->pluck('folio_id')->all())
-            ->pluck('folio_id')->map(fn ($id) => (string) $id)->flip();
+        // The signed-folio table is introduced by the settlement migration.
+        // Older installations can still view charges, but we must not pretend
+        // a settlement status has been verified when its records are missing.
+        $signoffAvailable = Schema::hasTable('folio_settlement_signoffs');
+        $signedFolioIds = $signoffAvailable
+            ? DB::table('folio_settlement_signoffs')
+                ->where('hotel_id', $hotel->id)
+                ->whereIn('folio_id', $rows->pluck('folio_id')->all())
+                ->pluck('folio_id')->map(fn ($id) => (string) $id)->flip()
+            : collect();
 
-        $data = $rows->map(function (object $row) use ($accounting, $signedFolioIds, $hotel): array {
+        $data = $rows->map(function (object $row) use ($accounting, $signedFolioIds, $hotel, $signoffAvailable): array {
             // Summary uses the same posted ledger data used by settlement.
             $summary = $accounting->summaryFor((object) [
                 'id' => $row->folio_id, 'hotel_id' => $hotel->id,
@@ -79,7 +86,7 @@ final class FinanceFolioIndexController
                 'netRecordedChargesMinor' => $summary['netRecordedChargesMinor'],
                 'staffConfirmedPaymentsMinor' => $summary['staffConfirmedPaymentsMinor'],
                 'pendingReviewPaymentsMinor' => $summary['pendingReviewPaymentsMinor'],
-                'signed' => $signedFolioIds->has((string) $row->folio_id),
+                'signed' => $signoffAvailable ? $signedFolioIds->has((string) $row->folio_id) : null,
                 'provisionalOnly' => true,
             ];
         })->values();
@@ -91,6 +98,7 @@ final class FinanceFolioIndexController
                 'totalPages' => (int) ceil($total / $perPage),
                 'amountsProvisional' => true,
                 'paymentEvidenceNotIndependentlyVerified' => true,
+                'signoffRecordsAvailable' => $signoffAvailable,
             ],
         ]);
     }
