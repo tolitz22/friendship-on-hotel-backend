@@ -159,6 +159,44 @@ final class NightAuditFinancialReportTest extends TestCase
         self::assertFalse($data['financialJournalReconciled']);
     }
 
+    public function test_cashier_discrepancies_are_visible_and_block_clean_reconciliation(): void
+    {
+        $this->seed();
+        DB::table('cashier_shifts')->insert([
+            'hotel_id' => 1, 'status' => 'flagged',
+            'submitted_at' => '2026-11-17 19:00:00',
+            'expected_cash_minor' => 12000,
+            'counted_cash_minor' => 11000, 'variance_minor' => -1000,
+        ]);
+        $data = $this->report();
+        self::assertSame(1, $data['cashier']['flaggedCount']);
+        self::assertSame(-1000, $data['cashier']['varianceMinor']);
+        self::assertFalse($data['financialJournalReconciled']);
+    }
+
+    public function test_vat_posting_and_room_revenue_reversal_are_net_account_movements(): void
+    {
+        $this->seed();
+        // Add a balanced VAT journal while preserving matching close totals.
+        DB::table('financial_posting_journals')->insert([
+            'id' => 101, 'hotel_id' => 1, 'business_date' => '2026-11-17',
+        ]);
+        DB::table('financial_posting_lines')->insert([
+            ['journal_id'=>101,'account_code'=>'ROOM_REV','debit_minor'=>1000,'credit_minor'=>0],
+            ['journal_id'=>101,'account_code'=>'VAT_PAYABLE','debit_minor'=>0,'credit_minor'=>1000],
+        ]);
+        DB::table('financial_day_closes')->where('hotel_id', 1)->update([
+            'reconciliation_snapshot' => json_encode([
+                'journal_count'=>2,'line_count'=>4,'debits_minor'=>11000,
+                'credits_minor'=>11000,'currency'=>'PHP',
+            ], JSON_THROW_ON_ERROR),
+        ]);
+        $data = $this->report();
+        self::assertSame(9000, $data['kpis']['recognizedRoomRevenueMinor']);
+        self::assertSame(1000, $data['kpis']['vatLiabilityMovementMinor']);
+        self::assertTrue($data['financialJournalReconciled']);
+    }
+
     public function test_tampered_audit_snapshot_is_not_trusted(): void
     {
         $this->seed();
