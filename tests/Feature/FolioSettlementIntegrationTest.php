@@ -74,7 +74,7 @@ final class FolioSettlementIntegrationTest extends TestCase
             $t->string('status');$t->unsignedBigInteger('recorded_by');
             $t->unsignedBigInteger('reviewed_by')->nullable();$t->text('review_note')->nullable();
             $t->timestamp('reviewed_at')->nullable();$t->timestamps();
-            $t->unique(['hotel_id','refund_request_id']);
+            $t->unique(['hotel_id','refund_request_id'], 'refund_disbursement_per_request');
         });
         Schema::create('financial_folio_night_assessments', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
