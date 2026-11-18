@@ -96,7 +96,20 @@ final class NightAuditFinancialReportController
             ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
             ->where('j.hotel_id', $hotel->id)
             ->where('j.business_date', $date)
-            ->whereIn('l.account_code', ['ROOM_REV', 'VAT_PAYABLE'])
+            ->where(function ($query): void {
+                $query->where(function ($room): void {
+                    $room->where('l.account_code', 'ROOM_REV')
+                        ->whereIn('j.source_type', [
+                            'nightly_revenue', 'nightly_revenue_reversal',
+                            'folio_tax_correction',
+                        ]);
+                })->orWhere(function ($vat): void {
+                    $vat->where('l.account_code', 'VAT_PAYABLE')
+                        ->whereIn('j.source_type', [
+                            'vat_liability', 'folio_tax_correction',
+                        ]);
+                });
+            })
             ->selectRaw('l.account_code, SUM(l.credit_minor) as credits, SUM(l.debit_minor) as debits')
             ->groupBy('l.account_code')->get()->keyBy('account_code');
         $roomRevenue = (int) ($accounts->get('ROOM_REV')?->credits ?? 0)
@@ -136,6 +149,11 @@ final class NightAuditFinancialReportController
         ];
 
         $blockers = [];
+        $accountingReconciled = $reviewValid && $review?->status === 'reviewed'
+            && $close !== null && $close->status === 'completed'
+            && $unbalanced === 0
+            && $totals['debitsMinor'] === $totals['creditsMinor']
+            && $snapshotMatches;
         if (!$covered) $blockers[] = 'Independent occupancy observations do not cover every current room on this date.';
         if ($cashier['flaggedCount'] > 0 || $cashier['pendingCount'] > 0) {
             $blockers[] = 'Cashier exceptions still require manager investigation.';
@@ -197,7 +215,8 @@ final class NightAuditFinancialReportController
                 'No bank or gateway settlement confirmation is implied.',
             ],
             'blockers' => $blockers,
-            'financialJournalReconciled' => $blockers === [],
+            'financialJournalReconciled' => $accountingReconciled,
+            'allReportChecksClear' => $blockers === [],
             'reportScope' => 'phase_62_reconciled_journals_cashier_and_inspection_evidence',
         ]]);
     }
