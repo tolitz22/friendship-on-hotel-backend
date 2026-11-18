@@ -341,6 +341,11 @@ final class FolioSettlementService
         $verified = 0;
         $pending = 0;
         foreach ($payments as $p) {
+            // A manager-voided erroneous entry stays in audit history, but
+            // cannot be treated as received money or a settlement blocker.
+            if ($p['status'] === 'voided') {
+                continue;
+            }
             if ($p['status'] === 'staff_confirmed' && $p['verificationStatus'] === 'verified') {
                 $verified += $p['amountMinor'];
             } else {
