@@ -264,6 +264,43 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         self::assertSame(1, DB::table('financial_posting_journals')->where('hotel_id', 1)->count());
     }
 
+    public function test_readiness_explains_period_and_journal_blockers(): void
+    {
+        $this->seedHotel(1);
+        $hotel = new Hotel();
+        $hotel->id = 1;
+        $controller = new FinancialBusinessDayController();
+
+        $initial = $controller->show($hotel)->getData(true)['data'];
+        self::assertFalse($initial['canClose']);
+        self::assertNotEmpty($initial['blockers']);
+        self::assertTrue($initial['readinessIsAdvisory']);
+
+        DB::table('night_audit_reviews')->insert([
+            'hotel_id' => 1, 'business_date' => '2026-11-18', 'status' => 'reviewed',
+            'reviewed_by' => 7, 'reviewed_at' => now(),
+        ]);
+        self::assertTrue($controller->show($hotel)->getData(true)['data']['canClose']);
+
+        DB::table('financial_accounting_periods')->where('hotel_id', 1)
+            ->update(['ends_on' => '2026-11-18']);
+        $missingPeriod = $controller->show($hotel)->getData(true)['data'];
+        self::assertFalse($missingPeriod['canClose']);
+        self::assertTrue(collect($missingPeriod['blockers'])
+            ->contains(fn (string $reason) => str_contains($reason, 'Next business date')));
+
+        DB::table('financial_accounting_periods')->where('hotel_id', 1)
+            ->update(['ends_on' => '2026-11-30']);
+        $id = $this->postJournal(1);
+        DB::table('financial_posting_lines')->where('journal_id', $id)
+            ->where('account_code', 'ROOM_REV')->update(['credit_minor' => 12499]);
+        $unbalanced = $controller->show($hotel)->getData(true)['data'];
+        self::assertFalse($unbalanced['canClose']);
+        self::assertSame(1, $unbalanced['invalidJournalCount']);
+        self::assertSame(1, $unbalanced['journalCount']);
+        self::assertSame('2026-11-18', $unbalanced['businessDate']);
+    }
+
     public function test_admin_close_endpoint_requires_cleared_night_audit_review(): void
     {
         $this->seedHotel(1);
