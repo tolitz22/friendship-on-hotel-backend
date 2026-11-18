@@ -433,6 +433,9 @@ final class FolioSettlementService
         // signed financial facts: later shift reconciliation is not a folio edit.
         $cashShiftContexts = Schema::hasTable('cashier_shift_receipts')
             && Schema::hasTable('cashier_shifts')
+            && Schema::hasColumn('cashier_shift_receipts', 'reservation_record_id')
+            && Schema::hasColumn('cashier_shifts', 'cashier_id')
+            && Schema::hasColumn('cashier_shifts', 'reviewed_by')
             ? DB::table('cashier_shift_receipts as receipt')
             ->join('cashier_shifts as shift', function ($join): void {
                 $join->on('shift.id', '=', 'receipt.shift_id')
@@ -446,7 +449,8 @@ final class FolioSettlementService
                 'shift.cashier_id', 'cashier.name as cashier_name',
                 'shift.reviewed_by', 'reviewer.name as reviewer_name'])
             ->keyBy('payment_id') : collect();
-        $paymentActors = DB::table('folio_payment_records as payment')
+        $paymentActors = Schema::hasTable('users')
+            ? DB::table('folio_payment_records as payment')
             ->leftJoin('users as recorder', 'recorder.id', '=', 'payment.recorded_by')
             ->leftJoin('folio_settlement_verifications as verification', function ($join): void {
                 $join->on('verification.payment_record_id', '=', 'payment.id')
@@ -457,7 +461,7 @@ final class FolioSettlementService
             ->where('payment.folio_id', $folio->id)
             ->get(['payment.id', 'payment.recorded_by', 'recorder.name as recorder_name',
                 'preparer.name as preparer_name'])
-            ->keyBy('id');
+            ->keyBy('id') : collect();
         $paymentHandoff = array_values(array_map(function (array $payment) use ($cashShiftContexts, $paymentActors): array {
             $shift = $cashShiftContexts->get((int) $payment['id']);
             $actors = $paymentActors->get((int) $payment['id']);
