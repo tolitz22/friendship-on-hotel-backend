@@ -106,7 +106,7 @@ final class GroupReservationController
                 $matchingType = collect($data['rooms'])->every(
                     fn (array $room): bool => (int) $room['roomTypeId'] === (int) $allotment->room_type_id
                 );
-                if ($allotment->status !== 'held' || \Carbon\CarbonImmutable::parse($allotment->expires_at, 'UTC')->isPast()
+                if ($allotment->status !== 'held' || \Carbon\Carbon::parse($allotment->expires_at, 'UTC')->lessThanOrEqualTo(now())
                     || $allotment->check_in !== $data['checkIn']
                     || $allotment->check_out !== $data['checkOut']
                     || (int) $allotment->quantity !== count($data['rooms'])
