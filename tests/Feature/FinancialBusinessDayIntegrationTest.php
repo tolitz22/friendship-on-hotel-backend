@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Services\Finance\FinancialBusinessDayCloseService;
 use App\Services\Finance\FinancialJournalPostingService;
+use App\Services\Finance\NightlyRoomRevenueRecognitionService;
 use App\Http\Controllers\Api\FinancialBusinessDayController;
 use App\Models\Hotel;
 use Illuminate\Http\Request;
@@ -77,6 +78,16 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
             $table->timestamps();
             $table->unique(['hotel_id', 'idempotency_key']);
         });
+        Schema::create('financial_room_revenue_recognitions', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->unsignedBigInteger('source_journal_id');
+            $table->unsignedBigInteger('recognition_journal_id')->unique();
+            $table->date('stay_date');
+            $table->bigInteger('amount_minor');
+            $table->timestamp('created_at');
+            $table->unique(['hotel_id', 'source_journal_id', 'stay_date'], 'room_rev_once_per_source_night');
+        });
         Schema::create('financial_posting_lines', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('journal_id');
@@ -91,7 +102,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['night_audit_reviews', 'financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
+        foreach (['financial_room_revenue_recognitions', 'night_audit_reviews', 'financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
             'financial_accounting_periods', 'financial_business_clocks'] as $table) {
             Schema::dropIfExists($table);
         }
@@ -341,6 +352,78 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         self::assertSame('2026-11-19', $result['nextBusinessDate']);
         self::assertSame(1, DB::table('financial_day_closes')->where('hotel_id', 1)->count());
         self::assertFalse($controller->show($hotel)->getData(true)['data']['canClose']);
+    }
+
+    public function test_deferred_revenue_recognition_is_idempotent_and_never_charges_folio(): void
+    {
+        $this->seedHotel(1);
+        $source = (new FinancialJournalPostingService())->post(
+            1, 'defer-first', 'folio_deferred', 'booking-42', 'Deferred reservation revenue',
+            [
+                ['account_code' => 'AR', 'debit_minor' => 11200, 'credit_minor' => 0],
+                ['account_code' => 'DEFERRED_ROOM_REV', 'debit_minor' => 0, 'credit_minor' => 11200],
+            ],
+        );
+        $service = new NightlyRoomRevenueRecognitionService();
+        $earned = $service->recognize(1, $source, '2026-11-18', 10000, 7);
+        self::assertSame($earned, $service->recognize(1, $source, '2026-11-18', 10000, 7));
+        self::assertSame(1, DB::table('financial_room_revenue_recognitions')->count());
+        self::assertSame(2, DB::table('financial_posting_journals')->count());
+        self::assertSame('nightly_revenue',
+            DB::table('financial_posting_journals')->where('id', $earned)->value('source_type'));
+        self::assertSame(10000, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $earned)->where('account_code', 'ROOM_REV')->value('credit_minor'));
+
+        try {
+            $service->recognize(1, $source, '2026-11-18', 11000, 7);
+            self::fail('Recognition replay cannot change the amount.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('amount_minor', $exception->errors());
+        }
+    }
+
+    public function test_existing_revenue_journals_cannot_be_recognized_twice(): void
+    {
+        $this->seedHotel(1);
+        $alreadyEarned = $this->postJournal(1);
+        try {
+            (new NightlyRoomRevenueRecognitionService())
+                ->recognize(1, $alreadyEarned, '2026-11-18', 12500, 7);
+            self::fail('Existing ROOM_REV credits cannot be recognized twice.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('source_journal_id', $exception->errors());
+        }
+        self::assertSame(0, DB::table('financial_room_revenue_recognitions')->count());
+        self::assertSame(1, DB::table('financial_posting_journals')->count());
+    }
+
+    public function test_recognition_requires_current_open_date_and_hotel_isolation(): void
+    {
+        $this->seedHotel(1);
+        $this->seedHotel(2);
+        $source = (new FinancialJournalPostingService())->post(
+            1, 'defer-source', 'folio_deferred', 'booking-99', 'Deferred reservation revenue',
+            [
+                ['account_code' => 'AR', 'debit_minor' => 1000, 'credit_minor' => 0],
+                ['account_code' => 'DEFERRED_ROOM_REV', 'debit_minor' => 0, 'credit_minor' => 1000],
+            ],
+        );
+        $service = new NightlyRoomRevenueRecognitionService();
+        try {
+            $service->recognize(2, $source, '2026-11-18', 500);
+            self::fail('A different hotel cannot recognize the source.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('source_journal_id', $exception->errors());
+        }
+        try {
+            $service->recognize(1, $source, '2026-11-19', 500);
+            self::fail('A future stay date cannot be recognized.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('stay_date', $exception->errors());
+        }
+        $service->recognize(1, $source, '2026-11-18', 500);
+        self::assertSame(1, DB::table('financial_room_revenue_recognitions')->count());
+        self::assertSame(0, DB::table('financial_posting_journals')->where('hotel_id', 2)->count());
     }
 
 }
