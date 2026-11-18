@@ -161,6 +161,16 @@ final class NightAuditFinancialReportTest extends TestCase
         self::assertFalse($data['financialJournalReconciled']);
     }
 
+    public function test_legacy_booking_journal_does_not_count_as_earned_revenue(): void
+    {
+        $this->seed();
+        DB::table('financial_posting_journals')->where('id', 100)
+            ->update(['source_type' => 'folio']);
+        $data = $this->report();
+        self::assertTrue($data['financialJournalReconciled']);
+        self::assertSame(0, $data['kpis']['recognizedRoomRevenueMinor']);
+    }
+
     public function test_cashier_discrepancies_are_visible_and_block_clean_reconciliation(): void
     {
         $this->seed();
