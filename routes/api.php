@@ -115,6 +115,7 @@ Route::prefix('v1')->group(function (): void {
             Route::patch('/maintenance-work-orders/{order}', [MaintenanceWorkOrderController::class, 'update'])->whereNumber('order');
             Route::get('/housekeeping/handoff', HousekeepingHandoffController::class)
                 ->middleware('hotel.admin');
+            Route::get('/housekeeping/my-assignments', [HousekeepingHandoffController::class, 'myAssignments']);
             Route::get('/housekeeping-tasks', [HousekeepingTaskController::class, 'index']);
             Route::get('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'show'])->whereNumber('task');
             Route::get('/housekeeping-tasks/{task}/history', [HousekeepingTaskController::class, 'history'])->whereNumber('task');
