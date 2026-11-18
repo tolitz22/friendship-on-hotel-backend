@@ -1,0 +1,191 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Feature;
+
+use App\Services\Finance\FinancialBusinessDayCloseService;
+use App\Services\Finance\FinancialJournalPostingService;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\ValidationException;
+use Tests\TestCase;
+
+/**
+ * Isolated financial schema tests: no production data, payment provider or
+ * hotel authentication is needed to verify the posting/close transaction.
+ */
+final class FinancialBusinessDayIntegrationTest extends TestCase
+{
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        Schema::create('financial_business_clocks', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id')->unique();
+            $table->date('business_date');
+            $table->string('status');
+            $table->unsignedInteger('version')->default(0);
+            $table->timestamps();
+        });
+        Schema::create('financial_accounting_periods', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->date('starts_on');
+            $table->date('ends_on');
+            $table->string('status');
+            $table->timestamps();
+        });
+        Schema::create('financial_day_closes', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->date('business_date');
+            $table->string('status');
+            $table->unsignedBigInteger('closed_by');
+            $table->timestamp('closed_at');
+            $table->text('reconciliation_snapshot');
+            $table->timestamps();
+            $table->unique(['hotel_id', 'business_date']);
+        });
+        Schema::create('financial_posting_journals', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->unsignedBigInteger('accounting_period_id');
+            $table->date('business_date');
+            $table->string('source_type');
+            $table->string('source_reference');
+            $table->string('idempotency_key');
+            $table->unsignedBigInteger('reverses_journal_id')->nullable();
+            $table->string('currency');
+            $table->string('description');
+            $table->unsignedBigInteger('posted_by')->nullable();
+            $table->timestamp('posted_at');
+            $table->timestamps();
+            $table->unique(['hotel_id', 'idempotency_key']);
+        });
+        Schema::create('financial_posting_lines', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('journal_id');
+            $table->unsignedInteger('line_number');
+            $table->string('account_code');
+            $table->bigInteger('debit_minor');
+            $table->bigInteger('credit_minor');
+            $table->string('description')->nullable();
+            $table->unique(['journal_id', 'line_number']);
+        });
+    }
+
+    protected function tearDown(): void
+    {
+        foreach (['financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
+            'financial_accounting_periods', 'financial_business_clocks'] as $table) {
+            Schema::dropIfExists($table);
+        }
+        parent::tearDown();
+    }
+
+    private function seedHotel(int $hotelId, string $date = '2026-11-18'): void
+    {
+        DB::table('financial_business_clocks')->insert([
+            'hotel_id' => $hotelId, 'business_date' => $date, 'status' => 'open', 'version' => 0,
+        ]);
+        DB::table('financial_accounting_periods')->insert([
+            'hotel_id' => $hotelId, 'starts_on' => '2026-11-01',
+            'ends_on' => '2026-11-30', 'status' => 'open',
+        ]);
+    }
+
+    private function post(int $hotelId, string $key = 'charge-1'): int
+    {
+        return (new FinancialJournalPostingService())->post(
+            $hotelId, $key, 'folio', $key, 'Room charge',
+            [
+                ['account_code' => 'AR', 'debit_minor' => 12500, 'credit_minor' => 0],
+                ['account_code' => 'ROOM_REV', 'debit_minor' => 0, 'credit_minor' => 12500],
+            ],
+        );
+    }
+
+    public function test_close_rolls_date_and_persists_a_balanced_snapshot(): void
+    {
+        $this->seedHotel(1);
+        $journalId = $this->post(1);
+
+        $result = (new FinancialBusinessDayCloseService())->close(1, '2026-11-18', 7);
+
+        self::assertSame('2026-11-19', $result['next_business_date']);
+        self::assertSame(1, $result['snapshot']['journal_count']);
+        self::assertSame(2, $result['snapshot']['line_count']);
+        self::assertSame(12500, $result['snapshot']['debits_minor']);
+        self::assertSame(12500, $result['snapshot']['credits_minor']);
+        self::assertSame('2026-11-19', DB::table('financial_business_clocks')->where('hotel_id', 1)->value('business_date'));
+        self::assertSame(1, (int) DB::table('financial_business_clocks')->where('hotel_id', 1)->value('version'));
+        self::assertSame('2026-11-18', DB::table('financial_posting_journals')->where('id', $journalId)->value('business_date'));
+
+        // A repeated delivery of the same posting key is safe after day close.
+        self::assertSame($journalId, $this->post(1));
+        self::assertSame(1, DB::table('financial_posting_journals')->count());
+        $this->post(1, 'charge-2');
+        self::assertSame('2026-11-19', DB::table('financial_posting_journals')->where('id', '!=', $journalId)->value('business_date'));
+    }
+
+    public function test_failed_reconciliation_rolls_back_close_and_clock(): void
+    {
+        $this->seedHotel(1);
+        $journalId = $this->post(1);
+        DB::table('financial_posting_lines')->where('journal_id', $journalId)
+            ->where('account_code', 'ROOM_REV')->update(['credit_minor' => 12499]);
+
+        try {
+            (new FinancialBusinessDayCloseService())->close(1, '2026-11-18', 7);
+            self::fail('Unbalanced journals must prevent day close.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('journals', $exception->errors());
+        }
+        self::assertSame(0, DB::table('financial_day_closes')->count());
+        self::assertSame('2026-11-18', DB::table('financial_business_clocks')->where('hotel_id', 1)->value('business_date'));
+        self::assertSame(0, (int) DB::table('financial_business_clocks')->where('hotel_id', 1)->value('version'));
+    }
+
+    public function test_duplicate_close_does_not_advance_clock_twice(): void
+    {
+        $this->seedHotel(1);
+        $service = new FinancialBusinessDayCloseService();
+        $service->close(1, '2026-11-18', 7);
+
+        try {
+            $service->close(1, '2026-11-18', 7);
+            self::fail('A completed business date cannot be closed twice.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('business_date', $exception->errors());
+        }
+        self::assertSame('2026-11-19', DB::table('financial_business_clocks')->where('hotel_id', 1)->value('business_date'));
+        self::assertSame(1, DB::table('financial_day_closes')->count());
+    }
+
+    public function test_closed_day_cannot_be_reopened_by_restoring_clock_and_hotels_are_isolated(): void
+    {
+        $this->seedHotel(1);
+        $this->seedHotel(2);
+        (new FinancialBusinessDayCloseService())->close(1, '2026-11-18', 7);
+
+        // Simulate an out-of-band clock restore. The close ledger remains authoritative.
+        DB::table('financial_business_clocks')->where('hotel_id', 1)->update([
+            'business_date' => '2026-11-18',
+        ]);
+        try {
+            $this->post(1, 'late-post');
+            self::fail('A closed financial date must stay immutable.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('business_date', $exception->errors());
+        }
+
+        self::assertSame(0, DB::table('financial_posting_journals')->where('hotel_id', 1)->count());
+        self::assertSame(1, DB::table('financial_day_closes')->where('hotel_id', 1)->count());
+        $this->post(2, 'independent-post');
+        self::assertSame('2026-11-18', DB::table('financial_business_clocks')->where('hotel_id', 2)->value('business_date'));
+        self::assertSame(1, DB::table('financial_posting_journals')->where('hotel_id', 2)->count());
+    }
+}
