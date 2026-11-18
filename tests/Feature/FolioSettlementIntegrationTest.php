@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use App\Domain\Reservations\FolioAccountingService;
 use App\Domain\Reservations\FolioSettlementService;
+use App\Domain\Reservations\FolioRefundDisbursementService;
 use App\Models\Hotel;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,7 @@ use Tests\TestCase;
 final class FolioSettlementIntegrationTest extends TestCase
 {
     private const TABLES = [
+        'folio_refund_disbursement_evidence',
         'folio_settlement_signoffs', 'folio_settlement_allocations',
         'folio_settlement_verifications', 'financial_folio_night_assessments',
         'folio_refund_requests', 'folio_payment_records', 'folio_adjustments',
@@ -60,7 +62,18 @@ final class FolioSettlementIntegrationTest extends TestCase
         });
         Schema::create('folio_refund_requests', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
-            $t->string('status');
+            $t->unsignedBigInteger('payment_record_id');
+            $t->bigInteger('amount_minor');$t->string('reason');$t->string('status');
+            $t->unsignedBigInteger('requested_by')->default(7);
+        });
+        Schema::create('folio_refund_disbursement_evidence', function (Blueprint $t): void {
+            $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
+            $t->unsignedBigInteger('refund_request_id');$t->unsignedBigInteger('payment_record_id');
+            $t->bigInteger('amount_minor');$t->string('external_reference');
+            $t->string('status');$t->unsignedBigInteger('recorded_by');
+            $t->unsignedBigInteger('reviewed_by')->nullable();$t->text('review_note')->nullable();
+            $t->timestamp('reviewed_at')->nullable();$t->timestamps();
+            $t->unique(['hotel_id','refund_request_id']);
         });
         Schema::create('financial_folio_night_assessments', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
@@ -224,7 +237,8 @@ final class FolioSettlementIntegrationTest extends TestCase
         $service->allocate($hotel, 11, $id, 8, 'allocate-refund-test',
             'guest', 'guest-11', 11200, null);
         DB::table('folio_refund_requests')->insert([
-            'hotel_id' => 1, 'folio_id' => 12, 'status' => 'approved',
+            'hotel_id' => 1, 'folio_id' => 12, 'payment_record_id' => $id,
+            'amount_minor' => 500, 'reason' => 'Refund request pending', 'status' => 'approved',
         ]);
         self::assertFalse($service->statement($hotel, 11)['canSignOff']);
         try {
@@ -235,4 +249,72 @@ final class FolioSettlementIntegrationTest extends TestCase
         }
         self::assertSame(0, DB::table('folio_settlement_signoffs')->count());
     }
+    public function test_documented_bank_refund_frees_only_unallocated_deposit(): void
+    {
+        $service = new FolioSettlementService();
+        $hotel = $this->hotel();
+        $paymentId = $this->paymentEvidence(15000);
+        $verification = $service->prepareVerification($hotel, 11, $paymentId, 7,
+            'bank_statement', 'statement-match-refund-01');
+        $service->reviewVerification($hotel, 11, (int) $verification['id'], 8,
+            'verify', 'Bank statement line matched independently.');
+        $service->allocate($hotel, 11, $paymentId, 8, 'allocate-refund-seed',
+            'guest', 'guest-11', 11200, 13);
+
+        $refundId = DB::table('folio_refund_requests')->insertGetId([
+            'hotel_id' => 1, 'folio_id' => 12, 'payment_record_id' => $paymentId,
+            'amount_minor' => 3800, 'reason' => 'Refund unused deposit',
+            'status' => 'approved', 'requested_by' => 7,
+        ]);
+        $refunder = new FolioRefundDisbursementService();
+        $pending = $refunder->record($hotel, 11, $refundId, 8, 'BANK-REFUND-PROOF-10');
+        self::assertSame('pending', $pending['status']);
+        self::assertFalse($service->statement($hotel, 11)['canSignOff']);
+
+        try {
+            $refunder->review($hotel, 11, (int) $pending['id'], 8,
+                'verify', 'External refund reference independently matched.');
+            self::fail('Refund proof preparer cannot verify their own evidence.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('reviewer', $exception->errors());
+        }
+        $verified = $refunder->review($hotel, 11, (int) $pending['id'], 9,
+            'verify', 'Reviewed bank refund statement independently.');
+        self::assertSame('verified', $verified['status']);
+        $statement = $service->statement($hotel, 11);
+        self::assertSame(3800, $statement['verifiedRefundsMinor']);
+        self::assertSame(0, $statement['unallocatedVerifiedDepositsMinor']);
+        self::assertTrue($statement['canSignOff']);
+        $service->signoff($hotel, 11, 9);
+        self::assertSame(1, DB::table('folio_refund_disbursement_evidence')->count());
+    }
+
+    public function test_refund_cannot_reuse_allocated_amount_as_disbursement(): void
+    {
+        $service = new FolioSettlementService();
+        $hotel = $this->hotel();
+        $paymentId = $this->paymentEvidence(15000);
+        $verification = $service->prepareVerification($hotel, 11, $paymentId, 7,
+            'bank_statement', 'statement-match-refund-02');
+        $service->reviewVerification($hotel, 11, (int) $verification['id'], 8,
+            'verify', 'Supporting bank statement independently matched.');
+        $service->allocate($hotel, 11, $paymentId, 8, 'allocate-before-refund',
+            'guest', 'guest-11', 11200, null);
+
+        $refundId = DB::table('folio_refund_requests')->insertGetId([
+            'hotel_id' => 1, 'folio_id' => 12, 'payment_record_id' => $paymentId,
+            'amount_minor' => 4000, 'reason' => 'Excessive approved refund',
+            'status' => 'approved', 'requested_by' => 7,
+        ]);
+        try {
+            (new FolioRefundDisbursementService())->record(
+                $hotel, 11, $refundId, 8, 'BANK-REFUND-PROOF-11'
+            );
+            self::fail('Refund disbursement cannot consume allocated room charges.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('refund', $exception->errors());
+        }
+        self::assertSame(0, DB::table('folio_refund_disbursement_evidence')->count());
+    }
+
 }
