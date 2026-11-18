@@ -15,6 +15,42 @@ use Illuminate\Support\Facades\DB;
  */
 final class HousekeepingHandoffController
 {
+    public function myAssignments(\Illuminate\Http\Request $request, Hotel $hotel): JsonResponse
+    {
+        $staff = $request->user();
+        abort_unless($staff !== null, 403);
+        // The current hotel's membership, not just a bearer-token ID, must
+        // authorize the staff member to view housekeeping assignments.
+        $member = DB::table('hotel_memberships')->where('hotel_id', $hotel->id)
+            ->where('user_id', $staff->id)->where('is_active', true)->first();
+        abort_unless($member !== null && in_array($member->role, ['housekeeping', 'admin'], true), 403);
+
+        $tasks = DB::table('housekeeping_tasks as task')
+            ->join('rooms as room', function ($join): void {
+                $join->on('room.id', '=', 'task.room_id')
+                    ->on('room.hotel_id', '=', 'task.hotel_id');
+            })
+            ->where('task.hotel_id', $hotel->id)
+            ->where('task.assigned_user_id', $staff->id)
+            ->whereIn('task.status', ['todo', 'in_progress'])
+            ->orderByDesc('task.updated_at')->limit(20)
+            ->get(['task.id', 'task.status', 'task.type', 'task.due_at',
+                'task.updated_at', 'room.number as room_number']);
+
+        return response()->json([
+            'data' => $tasks->map(fn (object $task): array => [
+                'taskId' => (string) $task->id,
+                'roomNumber' => $task->room_number,
+                'type' => $task->type, 'status' => $task->status,
+                'dueAt' => $task->due_at,
+                'assignedTaskUpdatedAt' => (string) $task->updated_at,
+            ])->values(),
+            'meta' => ['limitedTo' => 20, 'inAppPollingOnly' => true,
+                'externalNotificationsConfigured' => false,
+                'changesReadiness' => false],
+        ]);
+    }
+
     public function __invoke(Hotel $hotel): JsonResponse
     {
         $query = DB::table('housekeeping_tasks as task')
