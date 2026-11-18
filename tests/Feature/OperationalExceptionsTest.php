@@ -151,3 +151,31 @@ it('shows current inspection, occupancy and independent cashier review without e
     expect(collect($after['items'])->pluck('type'))->not->toContain('occupancy_investigation');
     expect($pending)->toBeGreaterThan(0);
 });
+
+it('rejects oversized in-house assignment queues instead of returning partial totals', function (): void {
+    $hotel = Hotel::create(['name' => 'Large Synthetic Hotel', 'timezone' => 'Asia/Manila']);
+    $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2]);
+    $admin = User::create(['name' => 'Queue Reviewer', 'email' => 'ops-queue@example.test',
+        'password' => 'synthetic-password', 'is_active' => true]);
+    HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $admin->id,
+        'role' => 'admin', 'is_active' => true]);
+
+    $today = now('Asia/Manila')->toDateString();
+    $tomorrow = now('Asia/Manila')->addDay()->toDateString();
+    foreach (range(1, 6) as $batch) {
+        $rows = [];
+        for ($n = 1; $n <= 100; $n++) {
+            $id = ($batch - 1) * 100 + $n;
+            $rows[] = ['hotel_id' => $hotel->id, 'room_type_id' => $type->id,
+                'reference' => 'SYNTHETIC-IN-HOUSE-'.$id, 'check_in' => $today,
+                'check_out' => $tomorrow, 'assigned_room_id' => null,
+                'lifecycle_state' => 'checked_in'];
+        }
+        DB::table('reservation_records')->insert($rows);
+    }
+    Sanctum::actingAs($admin, ['hotel:read', 'hotel:write']);
+    $response = $this->getJson('/api/v1/hotels/'.$hotel->id.'/operational-exceptions');
+    $response->assertUnprocessable();
+    expect($response->json('message'))->toContain('in-house assignments');
+    expect($response->json('data'))->toBeNull();
+});
