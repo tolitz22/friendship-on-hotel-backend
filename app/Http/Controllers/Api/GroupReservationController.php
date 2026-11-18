@@ -51,6 +51,7 @@ final class GroupReservationController
             'checkIn' => ['required', 'date_format:Y-m-d'],
             'checkOut' => ['required', 'date_format:Y-m-d', 'after:checkIn'],
             'rooms' => ['required', 'array', 'min:2', 'max:10'],
+            'allotmentId' => ['sometimes', 'integer', 'min:1'],
             'rooms.*.guestId' => ['required', 'integer', 'min:1'],
             'rooms.*.roomTypeId' => ['required', 'integer', 'min:1'],
             'rooms.*.ratePlanId' => ['nullable', 'integer', 'min:1'],
@@ -65,6 +66,7 @@ final class GroupReservationController
         $fingerprint = hash('sha256', json_encode([
             'name' => $data['name'], 'contactName' => $data['contactName'],
             'checkIn' => $data['checkIn'], 'checkOut' => $data['checkOut'],
+            'allotmentId' => isset($data['allotmentId']) ? (int) $data['allotmentId'] : null,
             'rooms' => array_map(static fn (array $room): array => [
                 'guestId' => (int) $room['guestId'], 'roomTypeId' => (int) $room['roomTypeId'],
                 'ratePlanId' => isset($room['ratePlanId']) ? (int) $room['ratePlanId'] : null,
@@ -93,6 +95,28 @@ final class GroupReservationController
                 abort_unless($type !== null, 404);
             }
 
+            // Convert only a matching, unexpired hold. Releasing its
+            // inventory consumption and creating all bookings are atomic.
+            $allotment = null;
+            if (isset($data['allotmentId'])) {
+                $allotment = DB::table('group_allotments')
+                    ->where('hotel_id', $hotel->id)
+                    ->where('id', $data['allotmentId'])->lockForUpdate()->first();
+                abort_unless($allotment !== null, 404);
+                $matchingType = collect($data['rooms'])->every(
+                    fn (array $room): bool => (int) $room['roomTypeId'] === (int) $allotment->room_type_id
+                );
+                if ($allotment->status !== 'held' || $allotment->expires_at <= now()
+                    || $allotment->check_in !== $data['checkIn']
+                    || $allotment->check_out !== $data['checkOut']
+                    || (int) $allotment->quantity !== count($data['rooms'])
+                    || ! $matchingType) {
+                    throw new HttpException(409, 'The allotment is expired, released or does not match the selected rooms and stay.');
+                }
+                DB::table('group_allotments')->where('id', $allotment->id)
+                    ->update(['status' => 'converted', 'updated_at' => now()]);
+            }
+
             $groupId = DB::table('group_reservations')->insertGetId([
                 'hotel_id' => $hotel->id, 'reference' => 'GRP-'.Str::upper(Str::random(14)),
                 'name' => $data['name'], 'contact_name' => $data['contactName'],
@@ -100,6 +124,10 @@ final class GroupReservationController
                 'payload_sha256' => $fingerprint, 'created_by' => $request->user()->id,
                 'created_at' => now(), 'updated_at' => now(),
             ]);
+            if ($allotment !== null) {
+                DB::table('group_allotments')->where('id', $allotment->id)
+                    ->update(['converted_group_id' => $groupId, 'updated_at' => now()]);
+            }
             foreach ($data['rooms'] as $index => $room) {
                 // Child booking idempotency is separate from the group request.
                 // No child booking survives if any later member fails.
