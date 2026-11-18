@@ -10,6 +10,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -95,6 +96,54 @@ final class FinancialBusinessDayController
         }
         if ($invalidJournals > 0) {
             $blockers[] = $invalidJournals.' journal(s) have invalid or unbalanced lines.';
+        }
+
+        if (Schema::hasTable('financial_folio_night_assessments')) {
+            $pending = DB::table('financial_folio_night_assessments')
+                ->where('hotel_id', $hotel->id)->where('stay_date', $date)
+                ->where('status', '!=', 'approved')->count();
+            if ($pending > 0) {
+                $blockers[] = $pending.' folio-night assessment(s) await approval.';
+            }
+            $approved = DB::table('financial_folio_night_assessments')
+                ->where('hotel_id', $hotel->id)->where('stay_date', $date)
+                ->where('status', 'approved')->get(['source_journal_id']);
+            foreach ($approved as $item) {
+                if ($item->source_journal_id === null
+                    || !DB::table('financial_room_revenue_recognitions')
+                        ->where('hotel_id', $hotel->id)
+                        ->where('source_journal_id', $item->source_journal_id)
+                        ->where('stay_date', $date)->exists()) {
+                    $blockers[] = 'An approved room night has not yet been recognized as earned.';
+                    break;
+                }
+            }
+            if (Schema::hasTable('financial_folio_night_corrections')) {
+                $pendingCorrection = DB::table('financial_folio_night_corrections as c')
+                    ->join('financial_folio_night_assessments as a', 'a.id', '=', 'c.assessment_id')
+                    ->where('c.hotel_id', $hotel->id)->where('a.hotel_id', $hotel->id)
+                    ->where('a.stay_date', $date)->where('c.status', 'pending')->exists();
+                if ($pendingCorrection) {
+                    $blockers[] = 'A tax or benefit correction still requires a second review.';
+                }
+            }
+            if (Schema::hasTable('folio_entries') && Schema::hasTable('reservation_folios')
+                && Schema::hasTable('reservation_records')) {
+                $unassessed = DB::table('folio_entries as e')
+                    ->join('reservation_folios as f', 'f.id', '=', 'e.folio_id')
+                    ->join('reservation_records as r', 'r.id', '=', 'f.reservation_record_id')
+                    ->leftJoin('financial_folio_night_assessments as a', function ($join): void {
+                        $join->on('a.folio_entry_id', '=', 'e.id')
+                            ->on('a.hotel_id', '=', 'e.hotel_id');
+                    })
+                    ->where('e.hotel_id', $hotel->id)->where('f.hotel_id', $hotel->id)
+                    ->where('r.hotel_id', $hotel->id)->where('e.entry_type', 'room_night')
+                    ->where('e.stay_date', $date)->where('r.lifecycle_state', '!=', 'cancelled')
+                    ->whereNull('a.id')->exists();
+                if ($unassessed) {
+                    $blockers[] = 'Priced room nights for this date still require approved tax allocation.';
+                }
+            }
         }
 
         return response()->json(['data' => [
