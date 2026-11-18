@@ -73,7 +73,10 @@ it('reports assigned room overlaps as operational records without accusing staff
     Sanctum::actingAs($admin, ['hotel:read', 'hotel:write']);
     $response = $this->getJson('/api/v1/hotels/'.$hotel->id.'/operational-exceptions');
     $response->assertOk()->assertJsonPath('data.summary.critical', 1)
-        ->assertJsonPath('data.items.0.type', 'assigned_room_overlap');
+        ->assertJsonPath('data.items.0.type', 'assigned_room_overlap')
+        ->assertJsonPath('data.items.0.roomId', (string) $room->id)
+        ->assertJsonPath('data.items.0.roomNumber', '101');
+    expect($response->json('data.items.0.reason'))->toContain('room 101');
     expect($response->getContent())->not->toContain('employee theft');
 });
 
