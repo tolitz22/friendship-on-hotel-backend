@@ -66,7 +66,10 @@ final class FinancialBusinessDayCloseService
                         || !DB::table('financial_room_revenue_recognitions')
                             ->where('hotel_id', $hotelId)
                             ->where('source_journal_id', $assessment->source_journal_id)
-                            ->where('stay_date', $expectedBusinessDate)->exists()) {
+                            ->where('stay_date', $expectedBusinessDate)
+                            ->whereNotIn('recognition_journal_id', DB::table('financial_posting_journals')
+                                ->where('hotel_id', $hotelId)->whereNotNull('reverses_journal_id')
+                                ->select('reverses_journal_id'))->exists()) {
                         throw ValidationException::withMessages([
                             'revenue_recognition' => 'Every approved room-night assessment must have an earned-revenue journal before day close.',
                         ]);
