@@ -22,6 +22,15 @@ final class CashierShiftController
             $this->manager($request, $hotel), $filters));
     }
 
+    public function current(Request $request, Hotel $hotel, CashierShiftService $service): JsonResponse
+    {
+        // Always return the current cashier's drawer, even for a manager.
+        // Never choose an unrelated employee's shift from a hotel-wide list.
+        $result = $service->listing($hotel, (int) $request->user()->id, false,
+            ['status' => 'open', 'per_page' => 1]);
+        return response()->json(['data' => $result['data'][0] ?? null]);
+    }
+
     public function show(Request $request, Hotel $hotel, string $shift, CashierShiftService $service): JsonResponse
     {
         return response()->json(['data' => $service->details($hotel, (int) $request->user()->id,
