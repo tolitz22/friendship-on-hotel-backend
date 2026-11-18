@@ -225,6 +225,9 @@ final class FolioSettlementIntegrationTest extends TestCase
         self::assertSame($allocated['id'], $replayed['id']);
         self::assertTrue($replayed['replayed']);
         $statement = $service->statement($hotel, 11);
+        self::assertArrayHasKey('cashShiftContexts', $statement);
+        self::assertCount(1, $statement['cashShiftContexts']);
+        self::assertSame('not_applicable', $statement['cashShiftContexts'][0]['cashShiftStatus']);
         self::assertTrue($statement['canSignOff']);
         self::assertSame(0, $statement['remainingMinor']);
         self::assertSame(0, $statement['unallocatedVerifiedDepositsMinor']);
@@ -233,6 +236,11 @@ final class FolioSettlementIntegrationTest extends TestCase
         self::assertFalse($signoff['replayed']);
         self::assertSame($signoff['id'], $service->signoff($hotel, 11, 8)['id']);
         self::assertSame(1, DB::table('folio_settlement_signoffs')->count());
+        $snapshot = json_decode((string) DB::table('folio_settlement_signoffs')
+            ->value('statement_snapshot'), true, 512, JSON_THROW_ON_ERROR);
+        self::assertArrayNotHasKey('cashShiftContexts', $snapshot,
+            'Operational cash handoff metadata must never alter immutable signed financial facts.');
+        self::assertTrue($service->statement($hotel, 11)['signedSnapshotIntegrity']);
         self::assertSame(1, DB::table('folio_entries')->count());
         try {
             app(FolioAccountingService::class)->adjust($hotel, 11, 8, [
