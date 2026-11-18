@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use App\Services\Finance\FinancialBusinessDayCloseService;
 use App\Services\Finance\FinancialJournalPostingService;
 use App\Services\Finance\NightlyRoomRevenueRecognitionService;
+use App\Services\Finance\FinancialTaxPolicyService;
 use App\Http\Controllers\Api\FinancialBusinessDayController;
 use App\Models\Hotel;
 use Illuminate\Http\Request;
@@ -78,6 +79,20 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
             $table->timestamps();
             $table->unique(['hotel_id', 'idempotency_key']);
         });
+        Schema::create('financial_tax_policies', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->string('classification');
+            $table->string('price_mode');
+            $table->unsignedInteger('rate_bps');
+            $table->date('effective_from');
+            $table->date('effective_until')->nullable();
+            $table->string('status')->default('draft');
+            $table->unsignedBigInteger('approved_by')->nullable();
+            $table->timestamp('approved_at')->nullable();
+            $table->text('review_note')->nullable();
+            $table->timestamps();
+        });
         Schema::create('financial_room_revenue_recognitions', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('hotel_id');
@@ -102,7 +117,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['financial_room_revenue_recognitions', 'night_audit_reviews', 'financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
+        foreach (['financial_tax_policies', 'financial_room_revenue_recognitions', 'night_audit_reviews', 'financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
             'financial_accounting_periods', 'financial_business_clocks'] as $table) {
             Schema::dropIfExists($table);
         }
@@ -424,6 +439,56 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         $service->recognize(1, $source, '2026-11-18', 500);
         self::assertSame(1, DB::table('financial_room_revenue_recognitions')->count());
         self::assertSame(0, DB::table('financial_posting_journals')->where('hotel_id', 2)->count());
+    }
+
+    public function test_tax_policy_approval_requires_unique_effective_window(): void
+    {
+        $this->seedHotel(1);
+        $service = new FinancialTaxPolicyService();
+        $first = $service->draft(1, 'vat_standard', 'inclusive', 1200,
+            '2026-11-18', '2026-11-30', 'Hotel tax treatment reviewed by finance.');
+        try {
+            $service->preview(1, '2026-11-18', 11200);
+            self::fail('Draft tax policy must not be used in financial previews.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('tax_policy', $exception->errors());
+        }
+
+        $service->approve(1, $first, 7);
+        $result = $service->preview(1, '2026-11-18', 11200);
+        self::assertTrue($result['preview_only']);
+        self::assertFalse($result['folio_updated']);
+        self::assertFalse($result['journal_posted']);
+        self::assertSame(1200, $result['breakdown']['tax_minor']);
+        self::assertSame(10000, $result['breakdown']['base_minor']);
+
+        $overlap = $service->draft(1, 'vat_exempt', 'inclusive', 0,
+            '2026-11-25', null, 'Review of an alternate tax treatment.');
+        try {
+            $service->approve(1, $overlap, 7);
+            self::fail('Overlapping approved tax configurations must be rejected.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('effective_from', $exception->errors());
+        }
+        self::assertSame('draft', DB::table('financial_tax_policies')->where('id', $overlap)->value('status'));
+    }
+
+    public function test_tax_previews_are_hotel_scoped_and_drafts_are_not_live(): void
+    {
+        $this->seedHotel(1);
+        $this->seedHotel(2);
+        $service = new FinancialTaxPolicyService();
+        $policy = $service->draft(1, 'vat_zero', 'inclusive', 0,
+            '2026-11-18', null, 'Finance approved this classification for testing.');
+        $service->approve(1, $policy, 7);
+        self::assertSame(0, $service->preview(1, '2026-11-18', 10000)['breakdown']['tax_minor']);
+        try {
+            $service->preview(2, '2026-11-18', 10000);
+            self::fail('Other hotels must not inherit approved tax policies.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('tax_policy', $exception->errors());
+        }
+        self::assertSame(0, DB::table('financial_posting_journals')->count());
     }
 
 }
