@@ -31,7 +31,7 @@ function groupFixture(int $capacity = 2): array
         'password' => 'synthetic-password', 'is_active' => true]);
     HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $staff->id,
         'role' => 'front_desk', 'is_active' => true]);
-    Sanctum::actingAs($staff, ['hotel:read', 'hotel:write']);
+    Sanctum::actingAs($staff, ['hotel:read', 'booking:write']);
     return [$hotel, $type, $ids, $staff];
 }
 
