@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\RoomReadinessDashboardController;
 use App\Http\Controllers\Api\RoomInventoryStatusController;
 use App\Http\Controllers\Api\NightAuditPreviewController;
 use App\Http\Controllers\Api\NightAuditReviewController;
+use App\Http\Controllers\Api\NightAuditFinancialReportController;
 use App\Http\Controllers\Api\FinancialBusinessDayController;
 use App\Http\Controllers\Api\FinancialTaxPolicyController;
 use App\Http\Controllers\Api\FolioNightAssessmentController;
@@ -92,6 +93,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
+            Route::get('/finance/night-audit-reconciliation', NightAuditFinancialReportController::class)
+                ->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/settlement-statement', [FolioSettlementController::class, 'statement'])
                 ->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/finance/charge-policy-drafts', [FinancePolicyController::class, 'policies']);
