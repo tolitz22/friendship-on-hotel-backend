@@ -98,8 +98,11 @@ final class FinancialBusinessDayController
             $blockers[] = $invalidJournals.' journal(s) have invalid or unbalanced lines.';
         }
 
-        if (config('financial_accounting.enable_live_folio_tax', false)
-                && Schema::hasTable('financial_folio_night_assessments')) {
+        if (Schema::hasTable('financial_folio_night_assessments')
+                && (config('financial_accounting.enable_live_folio_tax', false)
+                    || DB::table('financial_folio_night_assessments')
+                        ->where('hotel_id', $hotel->id)
+                        ->where('stay_date', $date)->exists())) {
             $pending = DB::table('financial_folio_night_assessments')
                 ->where('hotel_id', $hotel->id)->where('stay_date', $date)
                 ->where('status', '!=', 'approved')->count();
