@@ -156,8 +156,12 @@ final class FolioSettlementService
             }
             $allocated = (int) DB::table('folio_settlement_allocations')
                 ->where('hotel_id', $hotel->id)->where('payment_record_id', $paymentId)->sum('amount_minor');
+            $reservedRefunds = (int) DB::table('folio_refund_requests')
+                ->where('hotel_id', $hotel->id)->where('payment_record_id', $paymentId)
+                ->whereIn('status', ['requested', 'approved'])->sum('amount_minor');
             if ($allocated > (int) $payment->amount_minor
-                || $amountMinor > (int) $payment->amount_minor - $allocated) {
+                || $reservedRefunds > (int) $payment->amount_minor - $allocated
+                || $amountMinor > (int) $payment->amount_minor - $allocated - $reservedRefunds) {
                 throw ValidationException::withMessages(['amountMinor' => 'Payment allocation exceeds verified payment amount.']);
             }
             if ($entryId !== null) {
@@ -285,6 +289,24 @@ final class FolioSettlementService
                 'amountMinor' => (int) $r->amount_minor,
             ])->all();
 
+        $refunds = DB::table('folio_refund_requests as r')
+            ->leftJoin('folio_refund_disbursement_evidence as d', function ($join): void {
+                $join->on('d.refund_request_id', '=', 'r.id')
+                    ->on('d.hotel_id', '=', 'r.hotel_id');
+            })
+            ->where('r.hotel_id', $hotel->id)->where('r.folio_id', $folio->id)
+            ->orderBy('r.id')->get(['r.id', 'r.payment_record_id', 'r.amount_minor',
+                'r.reason', 'r.status', 'd.id as evidence_id',
+                'd.status as evidence_status', 'd.external_reference'])
+            ->map(fn ($r) => [
+                'id' => (string) $r->id, 'paymentId' => (string) $r->payment_record_id,
+                'amountMinor' => (int) $r->amount_minor, 'reason' => $r->reason,
+                'status' => $r->status,
+                'evidenceId' => $r->evidence_id === null ? null : (string) $r->evidence_id,
+                'evidenceStatus' => $r->evidence_status,
+                'externalReference' => $r->external_reference,
+            ])->all();
+
         $verified = 0;
         $pending = 0;
         foreach ($payments as $p) {
@@ -299,6 +321,18 @@ final class FolioSettlementService
             $allocated += $allocation['amountMinor'];
         }
         $net = $summary['netRecordedChargesMinor'];
+        $verifiedRefunds = 0;
+        $unresolvedRefunds = 0;
+        foreach ($refunds as $refund) {
+            if (in_array($refund['status'], ['requested', 'approved'], true)) {
+                if ($refund['status'] === 'approved' && $refund['evidenceStatus'] === 'verified') {
+                    $verifiedRefunds += $refund['amountMinor'];
+                } else {
+                    $unresolvedRefunds++;
+                }
+            }
+        }
+        $unallocated = max(0, $verified - $allocated - $verifiedRefunds);
         $blockers = [];
         if ($net < 0) $blockers[] = 'Negative charges need a reviewed refund or correction.';
         if ($pending > 0) $blockers[] = 'Unverified or rejected payment evidence remains.';
@@ -314,9 +348,11 @@ final class FolioSettlementService
                 }
             }
         }
-        if (DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)
-            ->where('folio_id', $folio->id)->whereIn('status', ['requested', 'approved'])->exists()) {
-            $blockers[] = 'Refund requests require separate confirmed-disbursement reconciliation.';
+        if ($unresolvedRefunds > 0) {
+            $blockers[] = 'Outstanding refund requests require independently reviewed disbursement evidence.';
+        }
+        if ($unallocated > 0) {
+            $blockers[] = 'Unallocated verified deposit remains; apply it or review a documented refund.';
         }
         if (Schema::hasTable('financial_folio_night_assessments')
             && DB::table('financial_folio_night_assessments')->where('hotel_id', $hotel->id)
@@ -335,10 +371,11 @@ final class FolioSettlementService
             'charges' => $charges, 'adjustments' => $adjustments,
             'taxAllocations' => $taxAllocations,
             'payments' => $payments, 'allocations' => $allocations,
+            'refunds' => $refunds, 'verifiedRefundsMinor' => $verifiedRefunds,
             'netRecordedChargesMinor' => $net,
             'verifiedPaymentsMinor' => $verified,
             'verifiedAllocatedMinor' => $allocated,
-            'unallocatedVerifiedDepositsMinor' => max(0, $verified - $allocated),
+            'unallocatedVerifiedDepositsMinor' => $unallocated,
             'remainingMinor' => $net - $allocated,
             'blockers' => $blockers, 'canSignOff' => $blockers === [],
             'signed' => $signed !== null,
