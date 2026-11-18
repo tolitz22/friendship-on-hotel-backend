@@ -17,6 +17,28 @@ final class NightAuditFinancialReportTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Schema::create('rooms', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+        });
+        Schema::create('occupancy_verifications', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->unsignedBigInteger('room_id');
+            $table->date('inspection_date');
+            $table->string('status');
+            $table->string('observed_occupancy')->nullable();
+            $table->string('discrepancy')->nullable();
+        });
+        Schema::create('cashier_shifts', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->string('status');
+            $table->timestamp('submitted_at')->nullable();
+            $table->bigInteger('expected_cash_minor')->nullable();
+            $table->bigInteger('counted_cash_minor')->nullable();
+            $table->bigInteger('variance_minor')->nullable();
+        });
         Schema::create('night_audit_reviews', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('hotel_id');
@@ -42,6 +64,7 @@ final class NightAuditFinancialReportTest extends TestCase
         Schema::create('financial_posting_lines', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('journal_id');
+            $table->string('account_code');
             $table->bigInteger('debit_minor');
             $table->bigInteger('credit_minor');
         });
@@ -50,7 +73,8 @@ final class NightAuditFinancialReportTest extends TestCase
     protected function tearDown(): void
     {
         foreach (['financial_posting_lines', 'financial_posting_journals',
-            'financial_day_closes', 'night_audit_reviews'] as $table) {
+            'financial_day_closes', 'night_audit_reviews',
+            'cashier_shifts', 'occupancy_verifications', 'rooms'] as $table) {
             Schema::dropIfExists($table);
         }
         parent::tearDown();
@@ -80,8 +104,13 @@ final class NightAuditFinancialReportTest extends TestCase
             'id' => 100, 'hotel_id' => 1, 'business_date' => '2026-11-17',
         ]);
         DB::table('financial_posting_lines')->insert([
-            ['journal_id' => 100, 'debit_minor' => 10000, 'credit_minor' => 0],
-            ['journal_id' => 100, 'debit_minor' => 0, 'credit_minor' => 10000],
+            ['journal_id' => 100, 'account_code' => 'AR', 'debit_minor' => 10000, 'credit_minor' => 0],
+            ['journal_id' => 100, 'account_code' => 'ROOM_REV', 'debit_minor' => 0, 'credit_minor' => 10000],
+        ]);
+        DB::table('rooms')->insert(['id' => 1, 'hotel_id' => 1]);
+        DB::table('occupancy_verifications')->insert([
+            'hotel_id' => 1, 'room_id' => 1, 'inspection_date' => '2026-11-17',
+            'status' => 'verified', 'observed_occupancy' => 'occupied', 'discrepancy' => 'match',
         ]);
         DB::table('financial_day_closes')->insert([
             'hotel_id' => 1, 'business_date' => '2026-11-17',
@@ -104,6 +133,9 @@ final class NightAuditFinancialReportTest extends TestCase
         self::assertNull($data['kpis']['verifiedOccupiedRoomNights']);
         self::assertNull($data['kpis']['adrMinor']);
         self::assertNull($data['kpis']['revparMinor']);
+        self::assertTrue($data['kpis']['inspectionCoverageComplete']);
+        self::assertSame(100.0, $data['kpis']['inspectionOccupancyPercent']);
+        self::assertSame(10000, $data['kpis']['recognizedRoomRevenueMinor']);
     }
 
     public function test_mutated_ledger_after_close_is_explicitly_flagged(): void
