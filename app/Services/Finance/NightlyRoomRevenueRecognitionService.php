@@ -65,9 +65,11 @@ final class NightlyRoomRevenueRecognitionService
 
             $linked = DB::table('financial_folio_night_assessments')
                 ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)->first();
+            $approvedNet = $linked === null ? null
+                : (new FolioNightCorrectionService())->current($hotelId, $linked)['room_revenue_minor'];
             if ($linked !== null && ($linked->status !== 'approved'
                 || $linked->stay_date !== $stayDate
-                || (int) $linked->room_revenue_minor !== $amountMinor)) {
+                || $approvedNet !== $amountMinor)) {
                 throw ValidationException::withMessages([
                     'amount_minor' => 'Linked folio-night revenue must match its approved date and net revenue amount.',
                 ]);
