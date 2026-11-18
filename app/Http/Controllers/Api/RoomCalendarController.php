@@ -52,6 +52,14 @@ final class RoomCalendarController
             ->leftJoin('guests as guest', function ($join): void {
                 $join->on('guest.id', '=', 'rr.guest_id')->on('guest.hotel_id', '=', 'rr.hotel_id');
             })
+            ->leftJoin('group_reservation_members as gm', function ($join): void {
+                $join->on('gm.reservation_record_id', '=', 'rr.id')
+                    ->on('gm.hotel_id', '=', 'rr.hotel_id');
+            })
+            ->leftJoin('group_reservations as grp', function ($join): void {
+                $join->on('grp.id', '=', 'gm.group_reservation_id')
+                    ->on('grp.hotel_id', '=', 'gm.hotel_id');
+            })
             ->where('rr.hotel_id', $hotel->id)
             ->whereIn('rr.assigned_room_id', $roomIds)
             ->where('rr.check_in', '<', $input['end'])
@@ -63,6 +71,7 @@ final class RoomCalendarController
             ->orderBy('rr.check_in')->get([
                 'rr.id', 'rr.reference', 'rr.assigned_room_id', 'rr.check_in', 'rr.check_out', 'rr.lifecycle_state',
                 'guest.first_name as guest_first_name', 'guest.last_name as guest_last_name',
+                'grp.id as group_id', 'grp.reference as group_reference', 'grp.name as group_name',
             ]) : collect();
 
         $blocks = count($roomIds) ? DB::table('room_inventory_blocks')
@@ -121,6 +130,9 @@ final class RoomCalendarController
                     'roomId' => (string) $r->assigned_room_id,
                     'checkIn' => $r->check_in, 'checkOut' => $r->check_out,
                     'status' => $r->lifecycle_state,
+                    'groupId' => $r->group_id === null ? null : (string) $r->group_id,
+                    'groupReference' => $r->group_reference,
+                    'groupName' => $r->group_name,
                     'guestName' => $r->guest_first_name !== null
                         ? trim($r->guest_first_name.' '.($r->guest_last_name ?? '')) : null,
                 ])->values(),
