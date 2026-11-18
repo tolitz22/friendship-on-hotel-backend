@@ -65,6 +65,7 @@ final class OccupancyVerificationService
                 $join->on('r.id', '=', 'v.room_id')->on('r.hotel_id', '=', 'v.hotel_id');
             })->where('v.hotel_id', $hotel->id)->select('v.*', 'r.number as room_number');
         if (! $manager) $query->where('v.assigned_user_id', $actor);
+        if (isset($input['roomId'])) $query->where('v.room_id', $input['roomId']);
         if (isset($input['status'])) $query->where('v.status', $input['status']);
         if (isset($input['date'])) $query->where('v.inspection_date', $input['date']);
         $page = $query->orderByDesc('v.id')->paginate((int) ($input['per_page'] ?? 20));
