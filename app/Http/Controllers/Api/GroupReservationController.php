@@ -22,14 +22,25 @@ final class GroupReservationController
             ->where('hotel_id', $hotel->id)->orderByDesc('id')
             ->paginate(20, ['id', 'reference', 'name', 'contact_name', 'created_at'], 'page', (int) ($input['page'] ?? 1));
         $ids = $page->getCollection()->pluck('id');
-        $counts = DB::table('group_reservation_members')->where('hotel_id', $hotel->id)
-            ->whereIn('group_reservation_id', $ids)
-            ->selectRaw('group_reservation_id, COUNT(*) as total')
-            ->groupBy('group_reservation_id')->pluck('total', 'group_reservation_id');
+        // A group's travel dates belong to its linked reservations, not its
+        // creation timestamp. Aggregate for all groups on this page at once.
+        $stays = DB::table('group_reservation_members as member')
+            ->join('reservation_records as booking', function ($join): void {
+                $join->on('booking.id', '=', 'member.reservation_record_id')
+                    ->on('booking.hotel_id', '=', 'member.hotel_id');
+            })
+            ->where('member.hotel_id', $hotel->id)
+            ->whereIn('member.group_reservation_id', $ids)
+            ->select('member.group_reservation_id')
+            ->selectRaw('COUNT(*) as total, MIN(booking.check_in) as check_in, MAX(booking.check_out) as check_out')
+            ->groupBy('member.group_reservation_id')->get()->keyBy('group_reservation_id');
         return response()->json([
             'data' => $page->getCollection()->map(fn (object $row): array => [
                 'id' => (string) $row->id, 'reference' => $row->reference, 'name' => $row->name,
-                'contactName' => $row->contact_name, 'roomCount' => (int) ($counts[$row->id] ?? 0),
+                'contactName' => $row->contact_name,
+                'roomCount' => (int) ($stays->get($row->id)?->total ?? 0),
+                'checkIn' => $stays->get($row->id)?->check_in,
+                'checkOut' => $stays->get($row->id)?->check_out,
                 'createdAt' => (string) $row->created_at,
             ])->values(),
             'meta' => ['page' => $page->currentPage(), 'total' => $page->total(),
@@ -176,7 +187,8 @@ final class GroupReservationController
             ->where('gm.hotel_id', $hotelId)->where('gm.group_reservation_id', $groupId)
             ->orderBy('gm.position')
             ->get(['booking.id', 'booking.reference', 'booking.check_in', 'booking.check_out',
-                'booking.lifecycle_state', 'type.name as type_name', 'room.number as room_number',
+                'booking.lifecycle_state', 'booking.assigned_room_id',
+                'type.name as type_name', 'room.number as room_number',
                 'guest.first_name', 'guest.last_name']);
 
         // Consolidated display is informational only: charges, payments, taxes,
@@ -187,11 +199,14 @@ final class GroupReservationController
             'contactName' => $group->contact_name,
             'createdAt' => (string) $group->created_at,
             'roomCount' => $members->count(),
+            'checkIn' => $members->min('check_in'),
+            'checkOut' => $members->max('check_out'),
             'rooms' => $members->map(fn (object $row): array => [
                 'bookingId' => (string) $row->id, 'reference' => $row->reference,
                 'guestName' => $row->first_name === null ? null
                     : trim($row->first_name.' '.$row->last_name),
                 'roomTypeName' => $row->type_name, 'roomNumber' => $row->room_number,
+                'roomId' => $row->assigned_room_id === null ? null : (string) $row->assigned_room_id,
                 'checkIn' => (string) $row->check_in, 'checkOut' => (string) $row->check_out,
                 'status' => $row->lifecycle_state,
             ])->values(),
