@@ -221,6 +221,13 @@ final class FolioAccountingService
             }
 
             $folio = $this->findFolio($hotel, $bookingId, true);
+            // Once financial journals have been linked to a priced room night,
+            // cancellation must use an explicit append-only accounting reversal.
+            if (DB::table('financial_folio_night_assessments')
+                ->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->exists()) {
+                throw new HttpException(409, 'Accounting has been assessed for this folio; use reviewed financial reversals before cancellation.');
+            }
             if (DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->exists()) {
                 throw new HttpException(409, 'Payment evidence exists; a refund/reconciliation workflow is required.');
