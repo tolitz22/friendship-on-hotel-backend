@@ -177,11 +177,13 @@ final class CatalogEditController
             ? $hotel->rooms()->findOrFail($data['subjectId'])
             : $hotel->roomTypes()->findOrFail($data['subjectId']);
 
-        $page = DB::table('catalog_audit_logs')->where('hotel_id', $hotel->id)
-            ->where('subject_type', $data['subjectType'])
-            ->where('subject_id', $subject->id)
-            ->orderByDesc('id')
-            ->paginate((int) ($data['per_page'] ?? 20));
+        $page = DB::table('catalog_audit_logs')
+            ->leftJoin('users as audit_actor','audit_actor.id','=','catalog_audit_logs.actor_id')
+            ->where('catalog_audit_logs.hotel_id', $hotel->id)
+            ->where('catalog_audit_logs.subject_type', $data['subjectType'])
+            ->where('catalog_audit_logs.subject_id', $subject->id)
+            ->orderByDesc('catalog_audit_logs.id')
+            ->paginate((int) ($data['per_page'] ?? 20), ['catalog_audit_logs.*','audit_actor.name as actor_name']);
 
         return response()->json([
             'data' => $page->getCollection()->map(fn (object $row): array => [
@@ -189,6 +191,7 @@ final class CatalogEditController
                 'subjectType' => $row->subject_type,
                 'subjectId' => (string) $row->subject_id,
                 'actorId' => (string) $row->actor_id,
+                'actorName' => $row->actor_name,
                 'before' => json_decode($row->changes_before, true),
                 'after' => json_decode($row->changes_after, true),
                 'createdAt' => $row->created_at,
