@@ -431,7 +431,9 @@ final class FolioSettlementService
         }
         // Operational cashier status is presentation-only. NEVER include it in
         // signed financial facts: later shift reconciliation is not a folio edit.
-        $cashShiftContexts = DB::table('cashier_shift_receipts as receipt')
+        $cashShiftContexts = Schema::hasTable('cashier_shift_receipts')
+            && Schema::hasTable('cashier_shifts')
+            ? DB::table('cashier_shift_receipts as receipt')
             ->join('cashier_shifts as shift', function ($join): void {
                 $join->on('shift.id', '=', 'receipt.shift_id')
                     ->on('shift.hotel_id', '=', 'receipt.hotel_id');
@@ -443,7 +445,7 @@ final class FolioSettlementService
             ->get(['receipt.payment_id', 'shift.id as shift_id', 'shift.status',
                 'shift.cashier_id', 'cashier.name as cashier_name',
                 'shift.reviewed_by', 'reviewer.name as reviewer_name'])
-            ->keyBy('payment_id');
+            ->keyBy('payment_id') : collect();
         $paymentHandoff = array_values(array_map(function (array $payment) use ($cashShiftContexts): array {
             $shift = $cashShiftContexts->get((int) $payment['id']);
             $status = $payment['method'] === 'cash'
