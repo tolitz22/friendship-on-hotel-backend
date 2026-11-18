@@ -75,6 +75,13 @@ final class FinancialJournalPostingService
             }
 
             $date = CarbonImmutable::parse($clock->business_date)->toDateString();
+            // A clock restored or modified outside this service must never reopen
+            // an immutable financial day. Keep this check under the clock lock.
+            if (DB::table('financial_day_closes')->where('hotel_id', $hotelId)
+                ->where('business_date', $date)->exists()) {
+                throw ValidationException::withMessages(['business_date' => 'Financial business date has already been closed.']);
+            }
+
             $period = DB::table('financial_accounting_periods')
                 ->where('hotel_id', $hotelId)->where('status', 'open')
                 ->whereDate('starts_on', '<=', $date)->whereDate('ends_on', '>=', $date)
