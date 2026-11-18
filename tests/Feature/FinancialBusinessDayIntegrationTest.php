@@ -93,6 +93,14 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
             $table->text('review_note')->nullable();
             $table->timestamps();
         });
+        Schema::create('financial_folio_night_assessments', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->unsignedBigInteger('source_journal_id')->nullable();
+            $table->string('status');
+            $table->date('stay_date');
+            $table->bigInteger('room_revenue_minor');
+        });
         Schema::create('financial_room_revenue_recognitions', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('hotel_id');
@@ -117,7 +125,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['financial_tax_policies', 'financial_room_revenue_recognitions', 'night_audit_reviews', 'financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
+        foreach (['financial_folio_night_assessments', 'financial_tax_policies', 'financial_room_revenue_recognitions', 'night_audit_reviews', 'financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
             'financial_accounting_periods', 'financial_business_clocks'] as $table) {
             Schema::dropIfExists($table);
         }
