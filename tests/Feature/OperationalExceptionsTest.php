@@ -141,5 +141,3 @@ it('shows current inspection, occupancy and independent cashier review without e
     expect(collect($after['items'])->pluck('type'))->not->toContain('occupancy_investigation');
     expect($pending)->toBeGreaterThan(0);
 });
-
-});
