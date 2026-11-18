@@ -64,7 +64,7 @@ final class FolioSettlementIntegrationTest extends TestCase
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
             $t->unsignedBigInteger('payment_record_id');
             $t->bigInteger('amount_minor');$t->string('reason');$t->string('status');
-            $t->unsignedBigInteger('requested_by')->default(7);
+            $t->unsignedBigInteger('requested_by')->default(7);$t->unsignedBigInteger('reviewed_by')->nullable();
         });
         Schema::create('folio_refund_disbursement_evidence', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
