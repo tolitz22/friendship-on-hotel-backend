@@ -191,6 +191,31 @@ final class GroupReservationController
                 'type.name as type_name', 'room.number as room_number',
                 'guest.first_name', 'guest.last_name']);
 
+        // Operational indicators are derived from the existing authoritative
+        // readiness service and checkout-to-cleaning links, never guessed from
+        // booking status or the mere existence of a housekeeping task.
+        $property = Hotel::findOrFail($hotelId);
+        $assigned = $members->filter(fn (object $member): bool => $member->assigned_room_id !== null);
+        $advisoryReadyCount = $assigned->filter(fn (object $member): bool =>
+            app(\\App\\Domain\\Reservations\\RoomReadinessService::class)
+                ->show($property, (int) $member->assigned_room_id)['advisoryReady']
+        )->count();
+        $departedIds = $members->filter(fn (object $member): bool =>
+            $member->lifecycle_state === 'checked_out')->pluck('id')->all();
+        $linkedCleaning = $departedIds === [] ? collect() :
+            DB::table('reservation_turnover_links as turnover')
+                ->join('housekeeping_tasks as cleaning', function ($join): void {
+                    $join->on('cleaning.id', '=', 'turnover.housekeeping_task_id')
+                        ->on('cleaning.hotel_id', '=', 'turnover.hotel_id');
+                })
+                ->where('turnover.hotel_id', $hotelId)
+                ->whereIn('turnover.reservation_record_id', $departedIds)
+                ->orderByDesc('turnover.id')
+                ->get(['turnover.reservation_record_id', 'cleaning.status'])
+                ->unique('reservation_record_id');
+        $cleaned = $linkedCleaning->where('status', 'done')->count();
+        $pendingCleaning = $linkedCleaning->where('status', '!=', 'done')->count();
+
         // Consolidated display is informational only: charges, payments, taxes,
         // refunds and receipts remain in their own reservation folios.
         return [
@@ -199,6 +224,18 @@ final class GroupReservationController
             'contactName' => $group->contact_name,
             'createdAt' => (string) $group->created_at,
             'roomCount' => $members->count(),
+            'operations' => [
+                'assignedCount' => $assigned->count(),
+                'readinessAdvisoryReadyCount' => $advisoryReadyCount,
+                'readinessCheckedCount' => $assigned->count(),
+                'checkedInOrOutCount' => $members->filter(fn (object $member): bool =>
+                    in_array($member->lifecycle_state, ['checked_in', 'checked_out'], true))->count(),
+                'checkedOutCount' => count($departedIds),
+                'checkoutCleaningCompleteCount' => $cleaned,
+                'checkoutCleaningPendingCount' => $pendingCleaning,
+                'checkoutCleaningNoTaskCount' => count($departedIds) - $linkedCleaning->count(),
+                'readinessIsAdvisoryOnly' => true,
+            ],
             'checkIn' => $members->min('check_in'),
             'checkOut' => $members->max('check_out'),
             'rooms' => $members->map(fn (object $row): array => [
