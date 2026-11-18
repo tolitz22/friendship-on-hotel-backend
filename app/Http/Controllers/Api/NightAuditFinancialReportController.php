@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -134,8 +135,12 @@ final class NightAuditFinancialReportController
 
         // Use the submitted date, not the date the shift was first opened.
         // A flagged shift is never reported as verified collections.
+        $zone = $hotel->timezone ?: 'Asia/Manila';
+        $shiftFrom = CarbonImmutable::parse($date, $zone)->startOfDay()->utc();
+        $shiftUntil = CarbonImmutable::parse($date, $zone)->addDay()->startOfDay()->utc();
         $shifts = DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
-            ->whereDate('submitted_at', $date)
+            ->where('submitted_at', '>=', $shiftFrom->toDateTimeString())
+            ->where('submitted_at', '<', $shiftUntil->toDateTimeString())
             ->get(['status', 'expected_cash_minor', 'counted_cash_minor', 'variance_minor']);
         $cashier = [
             'submittedCount' => $shifts->count(),
