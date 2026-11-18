@@ -119,6 +119,8 @@ it('manager can void an unverified error, leaving immutable audit history and re
         'original_status' => 'pending_review',
     ]);
     expect($accounting->summary($hotel, $booking)['pendingReviewPaymentsMinor'])->toBe(0);
+    expect(app(\App\Domain\Reservations\FolioSettlementService::class)
+        ->statement($hotel, $booking)['paymentEvidenceIndependentlyReviewed'])->toBeTrue();
     expect($accounting->paymentSafety($hotel, $booking, 'bank_transfer', 840000)['recentMatchingPaymentIds'])->toBe([]);
 });
 
@@ -180,4 +182,52 @@ it('exposes payment history but restricts voiding to a different hotel administr
         'requestKey' => 'manager-void-request-0001',
         'reason' => 'Incorrect transfer reference, no actual bank receipt.',
     ])->assertCreated()->assertJsonPath('data.status', 'voided');
+});
+
+it('blocks voiding once independent financial verification has started', function (): void {
+    [$hotel, $booking, $folio, $cashier, $manager] = paymentControlFixture();
+    $accounting = app(FolioAccountingService::class);
+    $payment = $accounting->recordPayment($hotel, $booking, $cashier->id,
+        bankPaymentInput('bank-reviewed-before-void', 'BANK-REVIEWED-BEFORE-VOID'));
+    $accounting->review($hotel, $booking, (int) $payment['id'], $manager->id, [
+        'decision' => 'confirm', 'note' => 'Supporting statement was inspected.',
+    ]);
+    config()->set('financial_accounting.enable_verified_settlement', true);
+    app(\App\Domain\Reservations\FolioSettlementService::class)->prepareVerification(
+        $hotel, $booking, (int) $payment['id'], $manager->id,
+        'bank_statement', 'BANK-VERIFICATION-BLOCK-VOID'
+    );
+    try {
+        $accounting->voidPayment($hotel, $booking, (int) $payment['id'],
+            $manager->id, 'void-after-verification-1',
+            'This previously reviewed deposit must use finance correction instead.');
+        test()->fail('Started verification must block ordinary voiding.');
+    } catch (HttpException $e) {
+        expect($e->getStatusCode())->toBe(409);
+    }
+    $this->assertDatabaseHas('folio_payment_records', [
+        'id' => $payment['id'], 'status' => 'staff_confirmed',
+    ]);
+    expect(DB::table('folio_payment_voids')->count())->toBe(0);
+});
+
+it('allows independent void of rejected mistaken cash evidence before drawer closure', function (): void {
+    [$hotel, $booking, $folio, $cashier, $manager] = paymentControlFixture();
+    $shifts = app(CashierShiftService::class);
+    $open = $shifts->open($hotel, $cashier->id, 0);
+    $received = $shifts->receive($hotel, $cashier->id, (int) $open['id'], $booking, [
+        'requestKey' => 'cash-pending-then-rejected', 'reference' => 'CASH-REJECTED-ERR',
+        'amountMinor' => 840000,
+    ]);
+    app(FolioAccountingService::class)->review($hotel, $booking,
+        (int) $received['paymentId'], $manager->id, [
+            'decision' => 'reject', 'note' => 'No second cash was received.',
+        ]);
+    $result = app(FolioAccountingService::class)->voidPayment($hotel, $booking,
+        (int) $received['paymentId'], $manager->id,
+        'void-rejected-cash-evidence',
+        'Duplicate mistaken record without any additional physical money received.');
+    expect($result['status'])->toBe('voided');
+    $closed = $shifts->close($hotel, $cashier->id, (int) $open['id'], 0, 'No extra cash entered.');
+    expect($closed['expectedCashMinor'])->toBe(0);
 });
