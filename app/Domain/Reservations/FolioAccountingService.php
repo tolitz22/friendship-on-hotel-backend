@@ -186,8 +186,8 @@ final class FolioAccountingService
             $payment = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->where('id', $paymentId)->lockForUpdate()->first();
             abort_unless($payment !== null, 404);
-            if (! in_array($payment->status, ['pending_review', 'staff_confirmed'], true)) {
-                throw new HttpException(409, 'Only active, unallocated payment evidence may be voided.');
+            if (! in_array($payment->status, ['pending_review', 'staff_confirmed', 'rejected'], true)) {
+                throw new HttpException(409, 'Only unallocated, unsigned payment evidence may be voided.');
             }
             if ((int) $payment->recorded_by === $actor) {
                 throw new HttpException(403, 'Another hotel administrator must authorize voiding this payment.');
