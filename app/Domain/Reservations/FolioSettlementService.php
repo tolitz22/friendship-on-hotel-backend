@@ -21,6 +21,11 @@ final class FolioSettlementService
 {
     private function lockedFolio(Hotel $hotel, int $bookingId): object
     {
+        if (!config('financial_accounting.enable_verified_settlement', false)) {
+            throw ValidationException::withMessages([
+                'activation' => 'Verified settlement writes require the staged finance activation setting.',
+            ]);
+        }
         app(ReadinessWriteGuard::class)->lockHotel($hotel);
         return app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
     }
@@ -233,11 +238,18 @@ final class FolioSettlementService
             })
             ->where('p.hotel_id', $hotel->id)->where('p.folio_id', $folio->id)
             ->orderBy('p.id')->get(['p.id', 'p.method', 'p.reference',
-                'p.amount_minor', 'p.status', 'v.status as verification_status'])
+                'p.amount_minor', 'p.status', 'v.status as verification_status',
+                'v.id as verification_id', 'v.prepared_by as verification_prepared_by',
+                'v.evidence_kind as verification_evidence_kind',
+                'v.evidence_reference as verification_evidence_reference'])
             ->map(fn ($r) => [
                 'id' => (string) $r->id, 'method' => $r->method,
                 'reference' => $r->reference, 'amountMinor' => (int) $r->amount_minor,
                 'status' => $r->status, 'verificationStatus' => $r->verification_status,
+                'verificationId' => $r->verification_id === null ? null : (string) $r->verification_id,
+                'verificationPreparedBy' => $r->verification_prepared_by === null ? null : (string) $r->verification_prepared_by,
+                'evidenceKind' => $r->verification_evidence_kind,
+                'evidenceReference' => $r->verification_evidence_reference,
             ])->all();
         $allocations = DB::table('folio_settlement_allocations')
             ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
@@ -299,7 +311,8 @@ final class FolioSettlementService
             'signedAt' => $signed?->signed_at,
             'signedBy' => $signed === null ? null : (string) $signed->approved_by,
             'isTaxInvoice' => false, 'bankOrGatewayApiVerified' => false,
-            'paymentEvidenceIndependentlyReviewed' => true,
+            'paymentEvidenceIndependentlyReviewed' => $pending === 0,
+            'settlementWorkflowEnabled' => (bool) config('financial_accounting.enable_verified_settlement', false),
         ];
     }
 
