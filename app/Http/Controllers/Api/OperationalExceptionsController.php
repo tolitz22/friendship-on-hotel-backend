@@ -101,6 +101,31 @@ final class OperationalExceptionsController
                 (string) $payment->created_at);
         }
 
+        $maintenance = $this->bounded(DB::table('maintenance_work_orders as work')
+            ->join('rooms as room', function ($join): void {
+                $join->on('room.id', '=', 'work.room_id')
+                    ->on('room.hotel_id', '=', 'work.hotel_id');
+            })
+            ->leftJoin('users as technician', 'technician.id', '=', 'work.assigned_user_id')
+            ->where('work.hotel_id', $hotel->id)->where('work.affects_room', true)
+            ->whereIn('work.status', ['open', 'in_progress'])
+            ->orderBy('work.id')->limit(self::MAX_SOURCE + 1)
+            ->get(['work.id','work.room_id','work.title','work.priority','work.created_at',
+                'room.number as room_number','technician.name as technician_name']), 'room-impacting maintenance');
+        foreach ($maintenance as $row) {
+            $items[] = [
+                'id' => 'maintenance:'.$row->id,
+                'type' => 'maintenance_blocker',
+                'severity' => in_array($row->priority, ['high','urgent'], true) ? 'critical' : 'attention',
+                'bookingId' => null, 'roomId' => (string) $row->room_id,
+                'roomNumber' => (string) $row->room_number, 'ownerName' => $row->technician_name,
+                'reference' => 'Room '.$row->room_number,
+                'reason' => 'Unresolved room-impacting maintenance: '.$row->title,
+                'suggestion' => 'Review the work order and maintain readiness safeguards until resolved.',
+                'recordDate' => (string) $row->created_at,
+            ];
+        }
+
         // Operational follow-up queues do not determine fraud or change records.
         // Fetch only incomplete, hotel-scoped work and preserve accurate totals.
         $inspections = $this->bounded(DB::table('room_readiness_inspections as inspection')
@@ -210,7 +235,7 @@ final class OperationalExceptionsController
             ->get(['ev.id', 'ev.actor_id', 'audit_actor.name as actor_name', 'ev.event_type', 'ev.created_at',
                 'booking.id as booking_id', 'booking.reference']), 'reservation activity');
 
-        if (count($items) > 3500) {
+        if (count($items) > 4000) {
             throw new HttpException(422, 'Too many exception records for synchronous review. No partial totals returned.');
         }
 
