@@ -491,4 +491,26 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         self::assertSame(0, DB::table('financial_posting_journals')->count());
     }
 
+    public function test_reversal_is_append_only_and_does_not_duplicate_recognition(): void
+    {
+        $this->seedHotel(1);
+        $posting = new FinancialJournalPostingService();
+        $source = $posting->post(1, 'defer-reversal', 'folio_deferred', 'booking-reversal',
+            'Deferred room revenue', [
+                ['account_code' => 'AR', 'debit_minor' => 10000, 'credit_minor' => 0],
+                ['account_code' => 'DEFERRED_ROOM_REV', 'debit_minor' => 0, 'credit_minor' => 10000],
+            ]);
+        $service = new NightlyRoomRevenueRecognitionService();
+        $earned = $service->recognize(1, $source, '2026-11-18', 10000, 7);
+        $reversal = $service->reverse(1, $earned, 7, 'Correct room revenue classification');
+        self::assertSame($reversal,
+            $service->reverse(1, $earned, 7, 'Correct room revenue classification'));
+        self::assertSame(3, DB::table('financial_posting_journals')->count());
+        self::assertSame($earned, (int) DB::table('financial_posting_journals')
+            ->where('id', $reversal)->value('reverses_journal_id'));
+        self::assertSame(10000, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $reversal)->where('account_code', 'ROOM_REV')->value('debit_minor'));
+        self::assertSame(1, DB::table('financial_room_revenue_recognitions')->count());
+    }
+
 }
