@@ -46,8 +46,11 @@ final class KeycardAuthorizationService
             'providerReference' => $row->provider_reference,
             'physicalCardEncoded' => false,
             'requestedBy' => (string) $row->requested_by,
+            'requestedByName' => $row->requested_by_name ?? null,
             'reviewedBy' => $row->reviewed_by === null ? null : (string) $row->reviewed_by,
+            'reviewedByName' => $row->reviewed_by_name ?? null,
             'revokedBy' => $row->revoked_by === null ? null : (string) $row->revoked_by,
+            'revokedByName' => $row->revoked_by_name ?? null,
             'reason' => $row->request_reason,
             'reviewNote' => $row->review_note,
             'revocationNote' => $row->revocation_note,
@@ -94,13 +97,19 @@ final class KeycardAuthorizationService
 
     public function listing(Hotel $hotel, int $actor, bool $manager, array $filters): array
     {
-        $query = DB::table('keycard_authorizations')->where('hotel_id', $hotel->id);
+        $query = DB::table('keycard_authorizations')
+            ->leftJoin('users as requester', 'requester.id', '=', 'keycard_authorizations.requested_by')
+            ->leftJoin('users as reviewer', 'reviewer.id', '=', 'keycard_authorizations.reviewed_by')
+            ->leftJoin('users as revoker', 'revoker.id', '=', 'keycard_authorizations.revoked_by')
+            ->where('keycard_authorizations.hotel_id', $hotel->id)
+            ->select('keycard_authorizations.*', 'requester.name as requested_by_name',
+                'reviewer.name as reviewed_by_name', 'revoker.name as revoked_by_name');
         if (! $manager) {
             $query->where('requested_by', $actor);
         }
         if (isset($filters['status'])) $query->where('status', $filters['status']);
         if (isset($filters['bookingId'])) $query->where('reservation_record_id', $filters['bookingId']);
-        $page = $query->orderByDesc('id')->paginate((int) ($filters['per_page'] ?? 20));
+        $page = $query->orderByDesc('keycard_authorizations.id')->paginate((int) ($filters['per_page'] ?? 20));
         return ['data' => $page->getCollection()->map(fn (object $row): array => $this->present($row))->values(),
             'meta' => ['page' => $page->currentPage(), 'perPage' => $page->perPage(),
                 'total' => $page->total(), 'totalPages' => $page->lastPage()]];
