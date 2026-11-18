@@ -183,11 +183,15 @@ final class HousekeepingTaskController
         abort_unless(DB::table('housekeeping_tasks')->where('hotel_id',$hotel->id)->where('id',$task)->exists(),404);
         $input=$request->validate(['per_page'=>['sometimes','integer','min:1','max:50']]);
         $page=DB::table('housekeeping_task_events')
-            ->where('hotel_id',$hotel->id)->where('task_id',$task)
-            ->orderByDesc('id')->paginate((int)($input['per_page']??20));
+            ->leftJoin('users as audit_actor','audit_actor.id','=','housekeeping_task_events.actor_id')
+            ->where('housekeeping_task_events.hotel_id',$hotel->id)
+            ->where('housekeeping_task_events.task_id',$task)
+            ->orderByDesc('housekeeping_task_events.id')
+            ->paginate((int)($input['per_page']??20),['housekeeping_task_events.*','audit_actor.name as actor_name']);
         return response()->json([
             'data'=>$page->getCollection()->map(fn (object $row): array=>[
                 'id'=>(string)$row->id, 'actorId'=>(string)$row->actor_id,
+                'actorName'=>$row->actor_name,
                 'action'=>$row->action,
                 'before'=>$row->before_state?json_decode($row->before_state,true):null,
                 'after'=>json_decode($row->after_state,true),
