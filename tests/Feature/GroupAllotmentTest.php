@@ -112,6 +112,12 @@ it('converts an entire hold atomically into individual bookings with no double c
     $this->postJson($base.'/group-allotments/'.$hold.'/release')->assertStatus(409);
     $this->getJson($base.'/group-reservations/'.$groupId.'/financial-summary')
         ->assertOk()->assertJsonPath('meta.readOnly', true);
+    // Unassigned group rooms are visible by guest and group reference,
+    // but are never treated as occupied physical rooms.
+    $this->getJson($base.'/room-calendar?start='.$input['checkIn'].'&end='.$input['checkOut'])
+        ->assertOk()->assertJsonPath('data.unassignedGroupTotal', 2)
+        ->assertJsonPath('data.unassignedGroupBookings.0.guestName', 'One Group')
+        ->assertJsonPath('data.unassignedGroupBookings.0.groupId', (string) $groupId);
 });
 
 it('rejects mismatched and expired conversions without partial reservations', function (): void {
