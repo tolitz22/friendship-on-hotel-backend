@@ -76,3 +76,70 @@ it('reports assigned room overlaps as operational records without accusing staff
         ->assertJsonPath('data.items.0.type', 'assigned_room_overlap');
     expect($response->getContent())->not->toContain('employee theft');
 });
+
+it('shows current inspection, occupancy and independent cashier review without exposing resolved cases', function (): void {
+    $hotel = Hotel::create(['name' => 'Synthetic Action Hotel', 'timezone' => 'Asia/Manila']);
+    $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2]);
+    $room = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '201']);
+    $room2 = Room::create(['hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'number' => '202']);
+    $manager = User::create(['name' => 'Reviewer Manager', 'email' => 'ops-reviewer@example.test',
+        'password' => 'synthetic-password', 'is_active' => true]);
+    $worker = User::create(['name' => 'Observing Employee', 'email' => 'ops-observer@example.test',
+        'password' => 'synthetic-password', 'is_active' => true]);
+    HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $manager->id,
+        'role' => 'admin', 'is_active' => true]);
+    HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $worker->id,
+        'role' => 'front_desk', 'is_active' => true]);
+
+    DB::table('room_readiness_inspections')->insert([
+        'hotel_id' => $hotel->id, 'room_id' => $room->id,
+        'status' => 'submitted', 'cleaning_verified' => 1,
+        'safety_verified' => 1, 'amenities_verified' => 1,
+        'inspector_note' => 'Room cleaning checks complete.',
+        'inspected_by' => $worker->id, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $pending = DB::table('occupancy_verifications')->insertGetId([
+        'hotel_id' => $hotel->id, 'room_id' => $room->id,
+        'assigned_user_id' => $worker->id, 'created_by' => $manager->id,
+        'status' => 'submitted', 'inspection_date' => now('Asia/Manila')->toDateString(),
+        'observed_by' => $worker->id, 'discrepancy' => 'match',
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $flagged = DB::table('occupancy_verifications')->insertGetId([
+        'hotel_id' => $hotel->id, 'room_id' => $room2->id,
+        'assigned_user_id' => $worker->id, 'created_by' => $manager->id,
+        'status' => 'flagged', 'inspection_date' => now('Asia/Manila')->toDateString(),
+        'observed_by' => $worker->id, 'reviewed_by' => $manager->id,
+        'discrepancy' => 'unexpected_occupied', 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    DB::table('occupancy_investigations')->insert([
+        'hotel_id' => $hotel->id, 'verification_id' => $flagged,
+        'owner_id' => $manager->id, 'opened_by' => $manager->id,
+        'status' => 'open', 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    DB::table('cashier_shifts')->insert([
+        'hotel_id' => $hotel->id, 'cashier_id' => $worker->id,
+        'currency' => 'PHP', 'status' => 'submitted', 'opening_float_minor' => 0,
+        'opened_at' => now()->subHour(), 'submitted_at' => now(),
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $base = '/api/v1/hotels/'.$hotel->id.'/operational-exceptions';
+    $result = $this->getJson($base)->assertOk()->json('data');
+    expect($result['summary']['total'])->toBe(4);
+    expect(collect($result['items'])->pluck('type')->sort()->values()->all())->toBe([
+        'cashier_shift_review', 'occupancy_investigation', 'occupancy_review', 'room_inspection_review',
+    ]);
+    expect(collect($result['items'])->firstWhere('type', 'room_inspection_review')['ownerName'])->toBe($worker->name);
+    expect(collect($result['items'])->firstWhere('type', 'occupancy_investigation')['roomNumber'])->toBe('202');
+    expect(collect($result['items'])->firstWhere('type', 'cashier_shift_review')['ownerName'])->toBe($worker->name);
+    DB::table('occupancy_investigations')->where('verification_id', $flagged)->update([
+        'status' => 'closed', 'closed_by' => $worker->id, 'closed_at' => now(),
+    ]);
+    $after = $this->getJson($base)->assertOk()->json('data');
+    expect($after['summary']['total'])->toBe(3);
+    expect(collect($after['items'])->pluck('type'))->not->toContain('occupancy_investigation');
+    expect($pending)->toBeGreaterThan(0);
+});
+
+});
