@@ -121,7 +121,11 @@ it('converts an entire hold atomically into individual bookings with no double c
         ->assertOk()
         ->assertJsonPath('data.checkIn', $input['checkIn'])
         ->assertJsonPath('data.checkOut', $input['checkOut'])
-        ->assertJsonPath('data.rooms.0.roomId', null);
+        ->assertJsonPath('data.operations.assignedCount', 0)
+        ->assertJsonPath('data.operations.readinessCheckedCount', 0)
+        ->assertJsonPath('data.operations.checkedOutCount', 0)
+        ->assertJsonPath('data.operations.checkoutCleaningCompleteCount', 0)
+        ->assertJsonPath('data.operations.readinessIsAdvisoryOnly', true);
 
     // Unassigned group rooms are visible by guest and group reference,
     // but are never treated as occupied physical rooms.
@@ -146,6 +150,14 @@ it('converts an entire hold atomically into individual bookings with no double c
         ->assertJsonPath('data.bookings.0.guestName', 'One Group')
         ->assertJsonPath('data.unassignedGroupTotal', 1);
     $focused->assertJsonCount(1, 'data.rooms');
+    $this->getJson($base.'/group-reservations/'.$groupId)
+        ->assertOk()
+        ->assertJsonPath('data.operations.assignedCount', 1)
+        ->assertJsonPath('data.operations.readinessAdvisoryReadyCount', 0);
+    // A group filter is tenant-scoped; a fabricated group id cannot expose
+    // room lanes from another tenant or fall back to the hotel's full rack.
+    $this->getJson($base.'/room-calendar?start='.$input['checkIn']
+        .'&end='.$input['checkOut'].'&group_id=999999')->assertNotFound();
 
 });
 
