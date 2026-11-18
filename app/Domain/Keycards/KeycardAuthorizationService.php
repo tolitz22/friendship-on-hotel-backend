@@ -111,9 +111,14 @@ final class KeycardAuthorizationService
         $row = $this->entry($hotel, $id);
         abort_unless($manager || (int) $row->requested_by === $actor, 404);
         return DB::table('keycard_authorization_events')
-            ->where('hotel_id', $hotel->id)->where('authorization_id', $id)
-            ->orderBy('id')->get()->map(fn (object $event): array => [
+            ->leftJoin('users as audit_actor','audit_actor.id','=','keycard_authorization_events.actor_id')
+            ->where('keycard_authorization_events.hotel_id', $hotel->id)
+            ->where('keycard_authorization_events.authorization_id', $id)
+            ->orderBy('keycard_authorization_events.id')
+            ->get(['keycard_authorization_events.*','audit_actor.name as actor_name'])
+            ->map(fn (object $event): array => [
                 'id' => (string) $event->id, 'actorId' => (string) $event->actor_id,
+                'actorName' => $event->actor_name,
                 'event' => $event->event, 'details' => json_decode($event->details, true),
                 'createdAt' => $event->created_at,
             ])->all();
