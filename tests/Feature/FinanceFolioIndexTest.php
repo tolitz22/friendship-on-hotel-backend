@@ -19,6 +19,12 @@ final class FinanceFolioIndexTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        // Other feature suites may leave migrated versions of these tables.
+        // Replace only this test's fixture tables, in dependent-first order.
+        foreach (['folio_settlement_signoffs','folio_payment_records','folio_adjustments',
+            'folio_entries','reservation_folios','reservation_records','guests'] as $table) {
+            Schema::dropIfExists($table);
+        }
         Schema::create('guests', function (Blueprint $t): void {
             $t->id(); $t->unsignedBigInteger('hotel_id');
             $t->string('first_name'); $t->string('last_name');
