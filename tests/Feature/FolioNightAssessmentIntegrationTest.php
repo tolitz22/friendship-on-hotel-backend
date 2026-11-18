@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Services\Finance\FolioNightAssessmentService;
+use App\Services\Finance\FolioNightCorrectionService;
 use App\Services\Finance\FinancialJournalPostingService;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
@@ -16,6 +17,7 @@ final class FolioNightAssessmentIntegrationTest extends TestCase
 {
     private const TABLES = [
         'financial_room_revenue_recognitions',
+        'financial_folio_night_corrections',
         'financial_folio_night_assessments',
         'folio_payment_records',
         'folio_adjustments',
@@ -99,6 +101,18 @@ final class FolioNightAssessmentIntegrationTest extends TestCase
             $t->unsignedBigInteger('benefit_journal_id')->nullable();
             $t->unsignedBigInteger('vat_journal_id')->nullable();$t->timestamps();
             $t->unique(['hotel_id', 'folio_entry_id']);
+        });
+        Schema::create('financial_folio_night_corrections', function (Blueprint $t): void {
+            $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('assessment_id');
+            $t->string('benefit_kind');$t->bigInteger('eligible_gross_minor');
+            $t->string('evidence_reference')->nullable();
+            $t->bigInteger('folio_credit_minor');$t->bigInteger('vat_minor');
+            $t->bigInteger('room_revenue_minor');$t->bigInteger('payable_minor');
+            $t->string('reason');$t->string('status');
+            $t->unsignedBigInteger('prepared_by');$t->unsignedBigInteger('reviewed_by')->nullable();
+            $t->timestamp('reviewed_at')->nullable();
+            $t->unsignedBigInteger('journal_id')->nullable();
+            $t->unsignedBigInteger('folio_adjustment_id')->nullable();$t->timestamps();
         });
         Schema::create('financial_room_revenue_recognitions', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('source_journal_id');
@@ -254,4 +268,61 @@ final class FolioNightAssessmentIntegrationTest extends TestCase
         }
         self::assertSame(0, DB::table('financial_room_revenue_recognitions')->count());
     }
+    public function test_reviewed_correction_reverses_vat_and_updates_earned_revenue_without_new_room_charge(): void
+    {
+        $service = new FolioNightAssessmentService();
+        $draft = $service->prepare(1, 13, 9, 7);
+        $approved = $service->approve(1, (int) $draft['id'], 8);
+        $earned = $service->recognize(1, (int) $draft['id'], 8);
+
+        $corrections = new FolioNightCorrectionService();
+        $pending = $corrections->prepare(
+            1, (int) $draft['id'], 9, 'senior', 11200,
+            'verified-osca-reference', 'Apply qualifying guest room accommodation benefit'
+        );
+        try {
+            $corrections->approve(1, (int) $pending['id'], 9);
+            self::fail('Correction preparer cannot approve the correction.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('reviewer', $exception->errors());
+        }
+        $corrected = $corrections->approve(1, (int) $pending['id'], 10);
+        self::assertSame(3200, $corrected['deltaFolioCreditMinor']);
+        self::assertSame(-1200, $corrected['deltaVatMinor']);
+        self::assertSame(-2000, $corrected['deltaRevenueMinor']);
+        self::assertSame(3200, (int) DB::table('folio_adjustments')->value('amount_minor'));
+        self::assertSame('credit', DB::table('folio_adjustments')->value('kind'));
+        self::assertSame(1200, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $corrected['journalId'])
+            ->where('account_code', 'VAT_PAYABLE')->value('debit_minor'));
+        self::assertSame(2000, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $corrected['journalId'])
+            ->where('account_code', 'ROOM_REV')->value('debit_minor'));
+        self::assertSame(3200, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $corrected['journalId'])
+            ->where('account_code', 'AR')->value('credit_minor'));
+        self::assertSame($earned, $service->recognize(1, (int) $draft['id'], 8));
+        self::assertSame(1, DB::table('folio_entries')->count());
+        self::assertSame(1, DB::table('folio_adjustments')->count());
+    }
+
+    public function test_correction_before_earned_night_revises_deferred_amount(): void
+    {
+        $service = new FolioNightAssessmentService();
+        $draft = $service->prepare(1, 13, 9, 7);
+        $service->approve(1, (int) $draft['id'], 8);
+        $correction = (new FolioNightCorrectionService())->prepare(
+            1, (int) $draft['id'], 9, 'pwd', 11200,
+            'verified-pwd-reference', 'Correct verified eligible room portion'
+        );
+        $review = (new FolioNightCorrectionService())->approve(1, (int) $correction['id'], 10);
+        self::assertSame(2000, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $review['journalId'])
+            ->where('account_code', 'DEFERRED_ROOM_REV')->value('debit_minor'));
+        $earned = $service->recognize(1, (int) $draft['id'], 10);
+        self::assertSame(8000, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $earned)->where('account_code', 'ROOM_REV')
+            ->value('credit_minor'));
+    }
+
 }
