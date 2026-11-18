@@ -79,6 +79,13 @@ final class FolioSettlementIntegrationTest extends TestCase
         Schema::create('financial_folio_night_assessments', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
             $t->string('status');
+            $t->unsignedBigInteger('folio_entry_id')->nullable();
+            $t->date('stay_date')->nullable();
+            $t->bigInteger('gross_minor')->default(0);
+            $t->bigInteger('vat_minor')->default(0);
+            $t->bigInteger('room_revenue_minor')->default(0);
+            $t->bigInteger('folio_credit_minor')->default(0);
+            $t->string('benefit_kind')->nullable();
         });
         Schema::create('cashier_shifts', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->string('status');
