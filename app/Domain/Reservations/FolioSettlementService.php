@@ -402,7 +402,8 @@ final class FolioSettlementService
         // Do not compare presentation-only fields such as "signed" or dates.
         $facts = [
             'charges' => $charges, 'adjustments' => $adjustments,
-            'payments' => $payments, 'allocations' => $allocations,
+            'payments' => $payments, 'cashShiftContexts' => $paymentHandoff,
+            'allocations' => $allocations,
             'refunds' => $refunds, 'taxAllocations' => $taxAllocations,
             'netRecordedChargesMinor' => $net,
             'verifiedPaymentsMinor' => $verified,
@@ -428,6 +429,36 @@ final class FolioSettlementService
                 $blockers[] = 'Signed statement does not match the original immutable financial snapshot.';
             }
         }
+        // Operational cashier status is presentation-only. NEVER include it in
+        // signed financial facts: later shift reconciliation is not a folio edit.
+        $cashShiftContexts = DB::table('cashier_shift_receipts as receipt')
+            ->join('cashier_shifts as shift', function ($join): void {
+                $join->on('shift.id', '=', 'receipt.shift_id')
+                    ->on('shift.hotel_id', '=', 'receipt.hotel_id');
+            })
+            ->leftJoin('users as cashier', 'cashier.id', '=', 'shift.cashier_id')
+            ->leftJoin('users as reviewer', 'reviewer.id', '=', 'shift.reviewed_by')
+            ->where('receipt.hotel_id', $hotel->id)
+            ->where('receipt.reservation_record_id', $bookingId)
+            ->get(['receipt.payment_id', 'shift.id as shift_id', 'shift.status',
+                'shift.cashier_id', 'cashier.name as cashier_name',
+                'shift.reviewed_by', 'reviewer.name as reviewer_name'])
+            ->keyBy('payment_id');
+        $paymentHandoff = array_values(array_map(function (array $payment) use ($cashShiftContexts): array {
+            $shift = $cashShiftContexts->get((int) $payment['id']);
+            $status = $payment['method'] === 'cash'
+                ? ($shift?->status ?? 'unlinked') : 'not_applicable';
+            return [
+                'paymentId' => $payment['id'],
+                'cashShiftId' => $shift === null ? null : (string) $shift->shift_id,
+                'cashShiftStatus' => $status,
+                'cashierName' => $shift?->cashier_name,
+                'reconciledByName' => $shift?->reviewer_name,
+                'reconciledBy' => $shift?->reviewed_by === null
+                    ? null : (string) $shift->reviewed_by,
+            ];
+        }, $payments));
+
         return [
             'hotelId' => (string) $hotel->id,
             'bookingId' => (string) $bookingId,
