@@ -11,4 +11,10 @@ return [
      * Never enable on production merely to make tests pass.
      */
     'enable_live_folio_tax' => (bool) env('FINANCE_ENABLE_LIVE_FOLIO_TAX', false),
+    /*
+     * Phase 61 settlement signing and checkout lock are opt-in until
+     * historical payments and folios have been reviewed in staging.
+     * Existing signed folios remain immutable even after rollback.
+     */
+    'enable_verified_settlement' => (bool) env('FINANCE_ENABLE_VERIFIED_SETTLEMENT', false),
 ];
