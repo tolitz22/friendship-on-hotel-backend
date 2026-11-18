@@ -203,3 +203,36 @@ it('links an actual priced folio cash payment once and requires review before ba
         ->orderBy('id')->pluck('event')->all())
         ->toBe(['opened','cash_received','submitted','reconciled']);
 });
+
+it('shows only the signed-in cashier\'s open shift even when a manager can list every employee', function (): void {
+    $fx = cashier52Hotel();
+    $base = '/api/v1/hotels/'.$fx['hotel']->id;
+    Sanctum::actingAs($fx['cashier'], ['hotel:read', 'booking:write']);
+    $cashierShift = $this->postJson($base.'/cashier-shifts', [
+        'openingFloatMinor' => 7500,
+    ])->assertCreated()->json('data.id');
+    $this->getJson($base.'/cashier-shifts/current')->assertOk()
+        ->assertJsonPath('data.id', $cashierShift)
+        ->assertJsonPath('data.cashierId', (string) $fx['cashier']->id);
+
+    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
+    $this->getJson($base.'/cashier-shifts')->assertOk()->assertJsonCount(1, 'data');
+    $this->getJson($base.'/cashier-shifts/current')->assertOk()
+        ->assertJsonPath('data', null);
+    $managerShift = $this->postJson($base.'/cashier-shifts', [
+        'openingFloatMinor' => 3000,
+    ])->assertCreated()->json('data.id');
+    $this->getJson($base.'/cashier-shifts/current')->assertOk()
+        ->assertJsonPath('data.id', $managerShift)
+        ->assertJsonPath('data.cashierId', (string) $fx['manager']->id);
+    $this->getJson($base.'/cashier-shifts')->assertOk()->assertJsonCount(2, 'data');
+
+    Sanctum::actingAs($fx['cashier'], ['hotel:read', 'booking:write']);
+    $this->getJson($base.'/cashier-shifts/current')->assertOk()
+        ->assertJsonPath('data.id', $cashierShift);
+    $this->getJson($base.'/cashier-shifts/'.$managerShift)->assertNotFound();
+
+    $housekeeper = cashier52User($fx['hotel'], 'housekeeping');
+    Sanctum::actingAs($housekeeper, ['hotel:read']);
+    $this->getJson($base.'/cashier-shifts/current')->assertForbidden();
+});
