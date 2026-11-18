@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\FrontDeskReservationController;
 use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
 use App\Http\Controllers\Api\FolioSettlementController;
+use App\Http\Controllers\Api\FinanceFolioIndexController;
 use App\Http\Controllers\Api\FolioRefundDisbursementController;
 use App\Http\Controllers\Api\FinancePolicyController;
 use App\Http\Controllers\Api\FinanceWebhookController;
@@ -93,6 +94,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
+            Route::get('/finance/folios', FinanceFolioIndexController::class)->middleware('hotel.permission:finance.read');
             Route::get('/finance/night-audit-reconciliation', NightAuditFinancialReportController::class)
                 ->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/settlement-statement', [FolioSettlementController::class, 'statement'])
