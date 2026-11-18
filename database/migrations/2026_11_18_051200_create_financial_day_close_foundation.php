@@ -29,8 +29,8 @@ return new class extends Migration
             $table->timestamp('closed_at')->nullable();
             $table->foreignId('closed_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamps();
-            $table->unique(['hotel_id', 'starts_on']);
-            $table->index(['hotel_id', 'status', 'ends_on']);
+            $table->unique(['hotel_id', 'starts_on'], 'fin_period_hotel_start_uq');
+            $table->index(['hotel_id', 'status', 'ends_on'], 'fin_period_hotel_status_end_idx');
         });
 
         Schema::create('financial_posting_journals', function (Blueprint $table): void {
@@ -47,8 +47,8 @@ return new class extends Migration
             $table->foreignId('posted_by')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('posted_at');
             $table->timestamps();
-            $table->unique(['hotel_id', 'idempotency_key']);
-            $table->index(['hotel_id', 'business_date', 'posted_at']);
+            $table->unique(['hotel_id', 'idempotency_key'], 'fin_journal_hotel_idem_uq');
+            $table->index(['hotel_id', 'business_date', 'posted_at'], 'fin_journal_hotel_date_posted_idx');
         });
 
         Schema::create('financial_posting_lines', function (Blueprint $table): void {
@@ -59,8 +59,8 @@ return new class extends Migration
             $table->bigInteger('debit_minor')->default(0);
             $table->bigInteger('credit_minor')->default(0);
             $table->string('description', 255)->nullable();
-            $table->unique(['journal_id', 'line_number']);
-            $table->index(['account_code', 'journal_id']);
+            $table->unique(['journal_id', 'line_number'], 'fin_line_journal_number_uq');
+            $table->index(['account_code', 'journal_id'], 'fin_line_account_journal_idx');
         });
 
         Schema::create('financial_day_closes', function (Blueprint $table): void {
@@ -72,7 +72,7 @@ return new class extends Migration
             $table->timestamp('closed_at');
             $table->json('reconciliation_snapshot');
             $table->timestamps();
-            $table->unique(['hotel_id', 'business_date']);
+            $table->unique(['hotel_id', 'business_date'], 'fin_close_hotel_date_uq');
         });
     }
 
