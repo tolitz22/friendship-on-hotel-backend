@@ -63,7 +63,10 @@ it('consumes capacity, replays idempotently, and frees capacity on release', fun
     $this->postJson($base.'/group-allotments', [
         ...$payload, 'idempotencyKey' => 'different-allotment-02',
     ])->assertStatus(409);
+    $expiryBeforeRelease = DB::table('group_allotments')->where('id', $id)->value('expires_at');
     $this->postJson($base.'/group-allotments/'.$id.'/release')->assertOk();
+    expect((string) DB::table('group_allotments')->where('id', $id)->value('expires_at'))
+        ->toBe((string) $expiryBeforeRelease);
     $this->getJson($base.'/room-type-availability'.$query)->assertOk()
         ->assertJsonPath('data.nights.0.remaining', 2);
     $this->postJson($base.'/group-allotments/'.$id.'/release')->assertStatus(409);
@@ -92,9 +95,12 @@ it('converts an entire hold atomically into individual bookings with no double c
         'checkOut' => $input['checkOut'],
         'rooms' => array_map(fn ($id) => ['guestId' => $id, 'roomTypeId' => $type->id], $guests),
     ];
+    $expiryBeforeConversion = DB::table('group_allotments')->where('id', $hold)->value('expires_at');
     $created = $this->postJson($base.'/group-reservations', $group)->assertCreated()
         ->assertJsonPath('data.roomCount', 2);
     $groupId = $created->json('data.id');
+    expect((string) DB::table('group_allotments')->where('id', $hold)->value('expires_at'))
+        ->toBe((string) $expiryBeforeConversion);
     $this->assertDatabaseHas('group_allotments', [
         'id' => $hold, 'status' => 'converted', 'converted_group_id' => $groupId,
     ]);
