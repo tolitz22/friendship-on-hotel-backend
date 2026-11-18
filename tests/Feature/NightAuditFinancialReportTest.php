@@ -60,6 +60,7 @@ final class NightAuditFinancialReportTest extends TestCase
             $table->id();
             $table->unsignedBigInteger('hotel_id');
             $table->date('business_date');
+            $table->string('source_type');
         });
         Schema::create('financial_posting_lines', function (Blueprint $table): void {
             $table->id();
@@ -102,6 +103,7 @@ final class NightAuditFinancialReportTest extends TestCase
         ]);
         DB::table('financial_posting_journals')->insert([
             'id' => 100, 'hotel_id' => 1, 'business_date' => '2026-11-17',
+            'source_type' => 'nightly_revenue',
         ]);
         DB::table('financial_posting_lines')->insert([
             ['journal_id' => 100, 'account_code' => 'AR', 'debit_minor' => 10000, 'credit_minor' => 0],
@@ -171,7 +173,8 @@ final class NightAuditFinancialReportTest extends TestCase
         $data = $this->report();
         self::assertSame(1, $data['cashier']['flaggedCount']);
         self::assertSame(-1000, $data['cashier']['varianceMinor']);
-        self::assertFalse($data['financialJournalReconciled']);
+        self::assertTrue($data['financialJournalReconciled']);
+        self::assertFalse($data['allReportChecksClear']);
     }
 
     public function test_vat_posting_and_room_revenue_reversal_are_net_account_movements(): void
@@ -180,6 +183,7 @@ final class NightAuditFinancialReportTest extends TestCase
         // Add a balanced VAT journal while preserving matching close totals.
         DB::table('financial_posting_journals')->insert([
             'id' => 101, 'hotel_id' => 1, 'business_date' => '2026-11-17',
+            'source_type' => 'folio_tax_correction',
         ]);
         DB::table('financial_posting_lines')->insert([
             ['journal_id'=>101,'account_code'=>'ROOM_REV','debit_minor'=>1000,'credit_minor'=>0],
