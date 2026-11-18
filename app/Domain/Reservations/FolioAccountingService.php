@@ -201,6 +201,18 @@ final class FolioAccountingService
             if ((int) $payment->recorded_by === $actor) {
                 throw new HttpException(403, 'Another hotel administrator must authorize voiding this payment.');
             }
+            // A day-close journal cannot be reopened by changing a payment
+            // evidence status. A documented correction process is required.
+            if (Schema::hasTable('financial_day_closes')) {
+                $businessDate = \Carbon\CarbonImmutable::parse(
+                    (string) $payment->created_at, config('app.timezone', 'UTC')
+                )->setTimezone($hotel->timezone ?: 'Asia/Manila')->toDateString();
+                if (DB::table('financial_day_closes')->where('hotel_id', $hotel->id)
+                    ->where('business_date', '>=', $businessDate)->exists()) {
+                    throw new HttpException(409,
+                        'Financial business day is already closed. Use a reviewed correction journal.');
+                }
+            }
             foreach (['folio_settlement_verifications', 'folio_settlement_allocations',
                 'folio_refund_requests'] as $table) {
                 if (DB::table($table)->where('hotel_id', $hotel->id)
