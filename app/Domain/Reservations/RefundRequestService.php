@@ -52,8 +52,14 @@ final class RefundRequestService
             $reserved = DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)
                 ->where('payment_record_id', $payment->id)
                 ->whereIn('status', ['requested', 'approved'])->sum('amount_minor');
-            if ((int) $reserved > (int) $payment->amount_minor ||
-                (int) $input['amountMinor'] > (int) $payment->amount_minor - (int) $reserved) {
+            $allocated = config('financial_accounting.enable_verified_settlement', false)
+                ? (int) DB::table('folio_settlement_allocations')
+                    ->where('hotel_id', $hotel->id)
+                    ->where('payment_record_id', $payment->id)->sum('amount_minor')
+                : 0;
+            if ($allocated > (int) $payment->amount_minor
+                || (int) $reserved > (int) $payment->amount_minor - $allocated
+                || (int) $input['amountMinor'] > (int) $payment->amount_minor - $allocated - (int) $reserved) {
                 throw new HttpException(409, 'Refund review amounts exceed recorded payment evidence.');
             }
 
