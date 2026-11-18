@@ -119,6 +119,7 @@ final class OperationalExceptionsController
                 'id' => 'room_inspection:'.$row->id,
                 'type' => 'room_inspection_review', 'severity' => 'attention',
                 'bookingId' => null, 'roomId' => (string) $row->room_id,
+                'roomNumber' => (string) $row->room_number,
                 'reference' => 'Room '.$row->room_number,
                 'ownerName' => $row->inspector_name,
                 'reason' => 'Room inspection is waiting for a different authorized manager to review it.',
@@ -185,7 +186,7 @@ final class OperationalExceptionsController
             $items[] = [
                 'id' => 'cashier_shift:'.$row->id,
                 'type' => 'cashier_shift_review', 'severity' => 'review',
-                'bookingId' => null, 'roomId' => null,
+                'bookingId' => null, 'roomId' => null, 'roomNumber' => null,
                 'reference' => 'Cashier shift '.$row->id,
                 'ownerName' => $row->cashier_name,
                 'reason' => 'Cashier has submitted a physical cash count for independent reconciliation.',
@@ -262,7 +263,7 @@ final class OperationalExceptionsController
         return [
             'id' => $type.':'.$bookingId.':'.substr(hash('sha256', $reason.$suggestion.$recordDate), 0, 12),
             'type' => $type, 'severity' => $severity,
-            'bookingId' => (string) $bookingId, 'roomId' => null,
+            'bookingId' => (string) $bookingId, 'roomId' => null, 'roomNumber' => null,
             'ownerName' => null, 'reference' => $reference,
             'reason' => $reason, 'suggestion' => $suggestion, 'recordDate' => $recordDate,
         ];
