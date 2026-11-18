@@ -6,6 +6,7 @@ namespace App\Services\Finance;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 
 /**
@@ -170,6 +171,16 @@ final class FolioNightAssessmentService
 
     public function recognize(int $hotelId, int $assessmentId, int $actorId): int
     {
+        if (Schema::hasTable('folio_settlement_signoffs')
+            && DB::table('financial_folio_night_assessments as a')
+                ->join('folio_settlement_signoffs as s', 's.folio_id', '=', 'a.folio_id')
+                ->where('a.hotel_id', $hotelId)->where('s.hotel_id', $hotelId)
+                ->where('a.id', $assessmentId)->exists()) {
+            throw ValidationException::withMessages([
+                'folio' => 'Recognition must finish before final guest settlement sign-off.',
+            ]);
+        }
+
         if (!config('financial_accounting.enable_live_folio_tax', false)) {
             throw ValidationException::withMessages([
                 'activation' => 'Live folio tax accounting is not activated for this environment.',
@@ -240,6 +251,13 @@ final class FolioNightAssessmentService
                 'f.currency', 'f.reservation_record_id', 'r.lifecycle_state',
                 'r.check_in', 'r.check_out');
         $entry = $lock ? $query->lockForUpdate()->first() : $query->first();
+        if ($entry !== null && Schema::hasTable('folio_settlement_signoffs')
+            && DB::table('folio_settlement_signoffs')
+                ->where('hotel_id', $hotelId)->where('folio_id', $entry->folio_id)->exists()) {
+            throw ValidationException::withMessages([
+                'folio' => 'A signed guest folio cannot accept new tax assessment or adjustments.',
+            ]);
+        }
         if ($entry === null || $entry->currency !== 'PHP'
             || in_array($entry->lifecycle_state, ['cancelled'], true)
             || $entry->stay_date < $entry->check_in || $entry->stay_date >= $entry->check_out) {
