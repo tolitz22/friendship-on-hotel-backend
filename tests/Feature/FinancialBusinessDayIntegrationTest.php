@@ -204,4 +204,52 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         self::assertSame('2026-11-18', DB::table('financial_business_clocks')->where('hotel_id', 2)->value('business_date'));
         self::assertSame(1, DB::table('financial_posting_journals')->where('hotel_id', 2)->count());
     }
+    public function test_replaying_a_posting_key_with_a_different_payload_is_rejected(): void
+    {
+        $this->seedHotel(1);
+        $original = $this->postJournal(1, 'same-key');
+
+        try {
+            (new FinancialJournalPostingService())->post(
+                1, 'same-key', 'folio', 'same-key', 'Room charge',
+                [
+                    ['account_code' => 'AR', 'debit_minor' => 13000, 'credit_minor' => 0],
+                    ['account_code' => 'ROOM_REV', 'debit_minor' => 0, 'credit_minor' => 13000],
+                ],
+            );
+            self::fail('Idempotency keys must reject conflicting amounts.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('idempotency_key', $exception->errors());
+        }
+
+        self::assertSame(1, DB::table('financial_posting_journals')->count());
+        self::assertSame(12500, (int) DB::table('financial_posting_lines')
+            ->where('journal_id', $original)->where('account_code', 'AR')->value('debit_minor'));
+    }
+
+    public function test_reversal_cannot_target_another_hotel_journal(): void
+    {
+        $this->seedHotel(1);
+        $this->seedHotel(2);
+        $original = $this->postJournal(1, 'original');
+
+        try {
+            (new FinancialJournalPostingService())->post(
+                2, 'foreign-reversal', 'folio', 'foreign-reversal', 'Reverse charge',
+                [
+                    ['account_code' => 'AR', 'debit_minor' => 0, 'credit_minor' => 12500],
+                    ['account_code' => 'ROOM_REV', 'debit_minor' => 12500, 'credit_minor' => 0],
+                ],
+                null,
+                $original,
+            );
+            self::fail('A journal from another hotel cannot be reversed.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('reverses_journal_id', $exception->errors());
+        }
+
+        self::assertSame(0, DB::table('financial_posting_journals')->where('hotel_id', 2)->count());
+        self::assertSame(1, DB::table('financial_posting_journals')->where('hotel_id', 1)->count());
+    }
+
 }
