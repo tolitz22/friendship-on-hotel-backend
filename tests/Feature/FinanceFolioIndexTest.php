@@ -19,8 +19,13 @@ final class FinanceFolioIndexTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        Schema::create('guests', function (Blueprint $t): void {
+            $t->id(); $t->unsignedBigInteger('hotel_id');
+            $t->string('first_name'); $t->string('last_name');
+        });
         Schema::create('reservation_records', function (Blueprint $t): void {
-            $t->id(); $t->unsignedBigInteger('hotel_id'); $t->string('reference');
+            $t->id(); $t->unsignedBigInteger('hotel_id'); $t->unsignedBigInteger('guest_id')->nullable();
+            $t->string('reference');
             $t->date('check_in'); $t->date('check_out'); $t->string('lifecycle_state');
         });
         Schema::create('reservation_folios', function (Blueprint $t): void {
@@ -47,7 +52,7 @@ final class FinanceFolioIndexTest extends TestCase
     protected function tearDown(): void
     {
         foreach (['folio_settlement_signoffs', 'folio_payment_records', 'folio_adjustments',
-            'folio_entries', 'reservation_folios', 'reservation_records'] as $name) {
+            'folio_entries', 'reservation_folios', 'reservation_records', 'guests'] as $name) {
             Schema::dropIfExists($name);
         }
         parent::tearDown();
@@ -96,6 +101,23 @@ final class FinanceFolioIndexTest extends TestCase
         self::assertSame(4000, $result['data'][0]['pendingReviewPaymentsMinor']);
         self::assertSame(0, $result['data'][0]['staffConfirmedPaymentsMinor']);
         self::assertTrue($result['meta']['paymentEvidenceNotIndependentlyVerified']);
+    }
+
+    public function test_guest_name_search_is_restricted_to_the_selected_hotel(): void
+    {
+        DB::table('guests')->insert([
+            ['id' => 1, 'hotel_id' => 1, 'first_name' => 'Maria', 'last_name' => 'Santos'],
+            ['id' => 2, 'hotel_id' => 2, 'first_name' => 'Maria', 'last_name' => 'Santos'],
+        ]);
+        $this->seedFolio(1, 11, 101, 'ONE-A');
+        $this->seedFolio(2, 12, 102, 'TWO-A');
+        DB::table('reservation_records')->where('id', 11)->update(['guest_id' => 1]);
+        DB::table('reservation_records')->where('id', 12)->update(['guest_id' => 2]);
+
+        $result = $this->index(1, ['search' => 'Maria Santos']);
+        self::assertSame(1, $result['meta']['total']);
+        self::assertSame('11', $result['data'][0]['bookingId']);
+        self::assertSame('Maria Santos', $result['data'][0]['guestName']);
     }
 
     public function test_search_and_pagination_do_not_leak_other_hotel_accounts(): void
