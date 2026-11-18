@@ -126,7 +126,7 @@ final class FinancialBusinessDayController
                 $pendingCorrection = DB::table('financial_folio_night_corrections as c')
                     ->join('financial_folio_night_assessments as a', 'a.id', '=', 'c.assessment_id')
                     ->where('c.hotel_id', $hotel->id)->where('a.hotel_id', $hotel->id)
-                    ->where('a.stay_date', $date)->where('c.status', 'pending')->exists();
+                    ->where('c.status', 'pending')->exists();
                 if ($pendingCorrection) {
                     $blockers[] = 'A tax or benefit correction still requires a second review.';
                 }
@@ -165,6 +165,7 @@ final class FinancialBusinessDayController
             'blockers' => $blockers,
             'canClose' => $blockers === [],
             'readinessIsAdvisory' => true,
+            'folioTaxAccountingEnabled' => (bool) config('financial_accounting.enable_live_folio_tax', false),
         ]]);
     }
 
