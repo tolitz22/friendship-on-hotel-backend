@@ -31,4 +31,17 @@ final class FinancialBusinessDayCloseServiceTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         (new FinancialBusinessDayCloseService())->close($hotelId, $businessDate, $actorId);
     }
+    public function test_iso_business_date_validation_accepts_real_calendar_dates(): void
+    {
+        $validator = new \\ReflectionMethod(FinancialBusinessDayCloseService::class, 'isValidDate');
+        $service = new FinancialBusinessDayCloseService();
+
+        self::assertTrue($validator->invoke($service, '2026-11-18'));
+        self::assertTrue($validator->invoke($service, '2024-02-29'));
+        self::assertFalse($validator->invoke($service, '2025-02-29'));
+        self::assertFalse($validator->invoke($service, '2026-13-18'));
+        self::assertFalse($validator->invoke($service, '2026-11-18T00:00:00'));
+        self::assertFalse($validator->invoke($service, '2026-11-18\\n'));
+    }
+
 }
