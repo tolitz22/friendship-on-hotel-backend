@@ -134,17 +134,17 @@ final class FolioAccountingService
         $folio = $this->findFolio($hotel, $bookingId);
         $records = DB::table('folio_payment_records as payment')
             ->leftJoin('users as staff', 'staff.id', '=', 'payment.recorded_by')
-            ->leftJoin('folio_payment_duplicate_overrides as override', function ($join): void {
-                $join->on('override.payment_record_id', '=', 'payment.id')
-                    ->on('override.hotel_id', '=', 'payment.hotel_id');
+            ->leftJoin('folio_payment_duplicate_overrides as dup_override', function ($join): void {
+                $join->on('dup_override.payment_record_id', '=', 'payment.id')
+                    ->on('dup_override.hotel_id', '=', 'payment.hotel_id');
             })
-            ->leftJoin('users as approver', 'approver.id', '=', 'override.approved_by')
+            ->leftJoin('users as approver', 'approver.id', '=', 'dup_override.approved_by')
             ->where('payment.hotel_id', $hotel->id)->where('payment.folio_id', $folio->id)
             ->orderByDesc('payment.id')->limit(40)
             ->get(['payment.id', 'payment.reference', 'payment.method',
                 'payment.amount_minor', 'payment.status', 'payment.created_at',
                 'staff.name as recorded_by_name',
-                'override.reason as override_reason',
+                'dup_override.reason as override_reason',
                 'approver.name as override_approved_by_name']);
         $recentMatches = $records->filter(fn (object $p): bool =>
             $method !== null && $amountMinor !== null
