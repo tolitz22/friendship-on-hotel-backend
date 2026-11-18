@@ -17,6 +17,7 @@ use Tests\TestCase;
 final class FolioSettlementIntegrationTest extends TestCase
 {
     private const TABLES = [
+        'cashier_shift_receipts', 'cashier_shifts',
         'folio_refund_disbursement_evidence',
         'folio_settlement_signoffs', 'folio_settlement_allocations',
         'folio_settlement_verifications', 'financial_folio_night_assessments',
@@ -78,6 +79,13 @@ final class FolioSettlementIntegrationTest extends TestCase
         Schema::create('financial_folio_night_assessments', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
             $t->string('status');
+        });
+        Schema::create('cashier_shifts', function (Blueprint $t): void {
+            $t->id();$t->unsignedBigInteger('hotel_id');$t->string('status');
+        });
+        Schema::create('cashier_shift_receipts', function (Blueprint $t): void {
+            $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('shift_id');
+            $t->unsignedBigInteger('payment_id');$t->bigInteger('amount_minor');
         });
         Schema::create('folio_settlement_verifications', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('folio_id');
@@ -355,6 +363,63 @@ final class FolioSettlementIntegrationTest extends TestCase
             self::assertArrayHasKey('activation', $exception->errors());
         }
         self::assertSame(0, DB::table('folio_settlement_verifications')->count());
+    }
+
+    public function test_duplicate_bank_evidence_and_net_folio_overallocation_are_rejected(): void
+    {
+        $service = new FolioSettlementService();
+        $hotel = $this->hotel();
+        $first = $this->paymentEvidence(15000);
+        $second = $this->paymentEvidence(10000);
+        $draft = $service->prepareVerification($hotel, 11, $first, 7,
+            'bank_statement', 'BANK-DUPLICATE-TEST');
+        try {
+            $service->prepareVerification($hotel, 11, $second, 7,
+                'bank_statement', 'BANK-DUPLICATE-TEST');
+            self::fail('The same bank proof cannot verify two different payments.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('evidence', $exception->errors());
+        }
+        $service->reviewVerification($hotel, 11, (int) $draft['id'], 8,
+            'verify', 'Bank transaction independently matched.');
+        try {
+            $service->allocate($hotel, 11, $first, 8,
+                'allocation-exceeds-net', 'guest', 'guest-11', 13000, null);
+            self::fail('No allocation may exceed net folio charges.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('amountMinor', $exception->errors());
+        }
+        self::assertSame(0, DB::table('folio_settlement_allocations')->count());
+    }
+
+    public function test_cash_confirmation_requires_an_independently_reconciled_shift(): void
+    {
+        $service = new FolioSettlementService();
+        $hotel = $this->hotel();
+        $payment = $this->paymentEvidence();
+        DB::table('folio_payment_records')->where('id', $payment)->update([
+            'method' => 'cash', 'reference' => 'CASH-REGISTER-11200',
+        ]);
+        DB::table('cashier_shifts')->insert([
+            'id' => 10, 'hotel_id' => 1, 'status' => 'submitted',
+        ]);
+        DB::table('cashier_shift_receipts')->insert([
+            'hotel_id' => 1, 'shift_id' => 10,
+            'payment_id' => $payment, 'amount_minor' => 11200,
+        ]);
+        $pending = $service->prepareVerification($hotel, 11, $payment, 7,
+            'cash_shift', 'shift-10');
+        try {
+            $service->reviewVerification($hotel, 11, (int) $pending['id'], 8,
+                'verify', 'Submitted shift must not pass review.');
+            self::fail('Cash requires a reconciled shift.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('payment', $exception->errors());
+        }
+        DB::table('cashier_shifts')->where('id', 10)->update(['status' => 'reconciled']);
+        $reviewed = $service->reviewVerification($hotel, 11, (int) $pending['id'], 8,
+            'verify', 'Cash drawer shift has been independently reconciled.');
+        self::assertSame('verified', $reviewed['status']);
     }
 
 }
