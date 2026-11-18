@@ -231,3 +231,38 @@ it('allows independent void of rejected mistaken cash evidence before drawer clo
     $closed = $shifts->close($hotel, $cashier->id, (int) $open['id'], 0, 'No extra cash entered.');
     expect($closed['expectedCashMinor'])->toBe(0);
 });
+
+it('stops accidental second cash receipts across staff and records a manager-authorized exception', function (): void {
+    [$hotel, $booking, $folio, $cashier, $manager] = paymentControlFixture();
+    $base = '/api/v1/hotels/'.$hotel->id;
+    Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $cashierShift = $this->postJson($base.'/cashier-shifts', [
+        'openingFloatMinor' => 0,
+    ])->assertCreated()->json('data.id');
+    $receipt = $base.'/cashier-shifts/'.$cashierShift.'/bookings/'.$booking.'/cash-receipts';
+    $this->postJson($receipt, [
+        'requestKey' => 'first-real-cash-receipt-1',
+        'reference' => 'CASH-EXACT-ONE',
+        'amountMinor' => 840000,
+    ])->assertCreated();
+    $this->postJson($receipt, [
+        'requestKey' => 'second-accidental-cash-2',
+        'reference' => 'CASH-EXACT-TWO', 'amountMinor' => 840000,
+        'duplicateOverrideReason' => 'Guest made a second cash payment, independently checked.',
+    ])->assertStatus(409);
+    expect(DB::table('cashier_shift_receipts')->where('hotel_id', $hotel->id)->count())->toBe(1);
+
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $managerShift = $this->postJson($base.'/cashier-shifts', [
+        'openingFloatMinor' => 0,
+    ])->assertCreated()->json('data.id');
+    $this->postJson($base.'/cashier-shifts/'.$managerShift.'/bookings/'.$booking.'/cash-receipts', [
+        'requestKey' => 'second-genuine-cash-receipt-2',
+        'reference' => 'CASH-EXACT-THREE', 'amountMinor' => 840000,
+        'duplicateOverrideReason' => 'Second distinct cash tender was counted in the manager drawer.',
+    ])->assertCreated();
+    expect(DB::table('cashier_shift_receipts')->where('hotel_id', $hotel->id)->count())->toBe(2);
+    $this->assertDatabaseHas('folio_payment_duplicate_overrides', [
+        'hotel_id' => $hotel->id, 'approved_by' => $manager->id,
+    ]);
+});
