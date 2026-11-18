@@ -121,6 +121,9 @@ final class RoomCalendarController
             ->where('b.check_in', '<', $input['end'])
             ->where('b.check_out', '>', $input['start'])
             ->whereIn('b.lifecycle_state', ['confirmed', 'checked_in']);
+        if (isset($input['group_id'])) {
+            $unassignedGroupQuery->where('member.group_reservation_id', $input['group_id']);
+        }
         $unassignedGroupTotal = (clone $unassignedGroupQuery)->count();
         $unassignedGroupRows = $unassignedGroupQuery->orderBy('b.check_in')
             ->orderBy('b.id')->limit(50)->get([
