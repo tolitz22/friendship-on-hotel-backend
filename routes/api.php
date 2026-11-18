@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\FrontDeskReservationController;
 use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
 use App\Http\Controllers\Api\FolioSettlementController;
+use App\Http\Controllers\Api\FolioRefundDisbursementController;
 use App\Http\Controllers\Api\FinancePolicyController;
 use App\Http\Controllers\Api\FinanceWebhookController;
 use App\Http\Controllers\Api\PayMongoSandboxController;
@@ -197,6 +198,12 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('booking')->whereNumber('verification')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/payment-records/{payment}/allocations', [FolioSettlementController::class, 'allocations'])
                     ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:20,1');
+                Route::get('/bookings/{booking}/refund-disbursements', [FolioRefundDisbursementController::class, 'index'])
+                    ->whereNumber('booking');
+                Route::post('/bookings/{booking}/refund-requests/{refund}/disbursement-evidence', [FolioRefundDisbursementController::class, 'record'])
+                    ->whereNumber('booking')->whereNumber('refund')->middleware('throttle:10,1');
+                Route::post('/bookings/{booking}/refund-disbursements/{evidence}/review', [FolioRefundDisbursementController::class, 'review'])
+                    ->whereNumber('booking')->whereNumber('evidence')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/settlement-signoff', [FolioSettlementController::class, 'signoff'])
                     ->whereNumber('booking')->middleware('throttle:5,1');
                 Route::get('/finance/tax-policies', [FinancialTaxPolicyController::class, 'index']);
