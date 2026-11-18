@@ -32,19 +32,86 @@ final class FinancialBusinessDayController
             ->where('hotel_id', $hotel->id)->where('business_date', $date)
             ->first(['status', 'reviewed_by', 'reviewed_at']);
 
+        $blockers = [];
+        if ($clock->status !== 'open') {
+            $blockers[] = 'Financial business clock is not open.';
+        }
+        if ($review === null || $review->status !== 'reviewed') {
+            $blockers[] = 'A cleared manager night-audit review is required.';
+        }
+        if (DB::table('financial_day_closes')->where('hotel_id', $hotel->id)
+            ->where('business_date', $date)->exists()) {
+            $blockers[] = 'This business date has already been closed.';
+        }
+
+        $nextDate = CarbonImmutable::parse($date)->addDay()->toDateString();
+        foreach ([$date => 'Current', $nextDate => 'Next'] as $periodDate => $label) {
+            $periods = DB::table('financial_accounting_periods')
+                ->where('hotel_id', $hotel->id)->where('status', 'open')
+                ->whereDate('starts_on', '<=', $periodDate)
+                ->whereDate('ends_on', '>=', $periodDate)->count();
+            if ($periods !== 1) {
+                $blockers[] = $label.' business date must have exactly one open accounting period.';
+            }
+        }
+
+        $journals = DB::table('financial_posting_journals')
+            ->where('hotel_id', $hotel->id)->where('business_date', $date)
+            ->get(['id', 'accounting_period_id']);
+        $periodId = DB::table('financial_accounting_periods')
+            ->where('hotel_id', $hotel->id)->where('status', 'open')
+            ->whereDate('starts_on', '<=', $date)->whereDate('ends_on', '>=', $date)
+            ->value('id');
+        if ($journals->contains(fn ($journal) => (int) $journal->accounting_period_id !== (int) $periodId)) {
+            $blockers[] = 'One or more journals reference the wrong accounting period.';
+        }
+
+        $invalidJournals = 0;
+        foreach ($journals->chunk(500) as $chunk) {
+            $totals = [];
+            foreach (DB::table('financial_posting_lines')->whereIn('journal_id', $chunk->pluck('id'))
+                ->get(['journal_id', 'debit_minor', 'credit_minor']) as $line) {
+                $id = (int) $line->journal_id;
+                $totals[$id] ??= [0, 0, 0, false];
+                $debit = (int) $line->debit_minor;
+                $credit = (int) $line->credit_minor;
+                $invalid = $debit < 0 || $credit < 0 || ($debit > 0) === ($credit > 0)
+                    || $debit > PHP_INT_MAX - $totals[$id][0]
+                    || $credit > PHP_INT_MAX - $totals[$id][1];
+                if ($invalid) {
+                    $totals[$id][3] = true;
+                    continue;
+                }
+                $totals[$id][0] += $debit;
+                $totals[$id][1] += $credit;
+                $totals[$id][2]++;
+            }
+            foreach ($chunk as $journal) {
+                $total = $totals[(int) $journal->id] ?? [0, 0, 0, true];
+                if ($total[3] || $total[2] < 2 || $total[0] !== $total[1]) {
+                    $invalidJournals++;
+                }
+            }
+        }
+        if ($invalidJournals > 0) {
+            $blockers[] = $invalidJournals.' journal(s) have invalid or unbalanced lines.';
+        }
+
         return response()->json(['data' => [
             'businessDate' => $date,
+            'nextBusinessDate' => $nextDate,
             'status' => $clock->status,
             'version' => (int) $clock->version,
+            'journalCount' => $journals->count(),
+            'invalidJournalCount' => $invalidJournals,
             'nightAuditReview' => $review === null ? null : [
                 'status' => $review->status,
                 'reviewedBy' => (string) $review->reviewed_by,
                 'reviewedAt' => $review->reviewed_at,
             ],
-            'canClose' => $clock->status === 'open'
-                && $review !== null && $review->status === 'reviewed'
-                && !DB::table('financial_day_closes')->where('hotel_id', $hotel->id)
-                    ->where('business_date', $date)->exists(),
+            'blockers' => $blockers,
+            'canClose' => $blockers === [],
+            'readinessIsAdvisory' => true,
         ]]);
     }
 
