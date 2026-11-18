@@ -6,6 +6,7 @@ namespace App\Domain\Reservations;
 
 use App\Models\Hotel;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
 /**
@@ -82,10 +83,21 @@ final class FolioAccountingService
         ];
     }
 
+    public function assertNotSigned(Hotel $hotel, object $folio): void
+    {
+        if (Schema::hasTable('folio_settlement_signoffs')
+            && DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->exists()) {
+            throw new HttpException(409, 'Folio has an immutable settlement sign-off. Use reviewed post-checkout corrections.');
+        }
+    }
+
     public function adjust(Hotel $hotel, int $bookingId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $bookingId, $actor, $input): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = $this->findFolio($hotel, $bookingId, true);
+            $this->assertNotSigned($hotel, $folio);
             $fingerprint = $this->fingerprint([
                 $bookingId, $input['kind'], (int) $input['amountMinor'], trim($input['reason']),
             ]);
@@ -116,7 +128,9 @@ final class FolioAccountingService
     public function recordPayment(Hotel $hotel, int $bookingId, int $actor, array $input): array
     {
         return DB::transaction(function () use ($hotel, $bookingId, $actor, $input): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = $this->findFolio($hotel, $bookingId, true);
+            $this->assertNotSigned($hotel, $folio);
             $reference = trim($input['reference']);
             $fingerprint = $this->fingerprint([
                 $bookingId, $input['method'], $reference, (int) $input['amountMinor'],
@@ -150,6 +164,7 @@ final class FolioAccountingService
             // Serialize cash evidence confirmation with drawer closure and reconciliation.
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = $this->findFolio($hotel, $bookingId, true);
+            $this->assertNotSigned($hotel, $folio);
             $payment = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->where('id', $paymentId)->lockForUpdate()->first();
             abort_unless($payment !== null, 404);
