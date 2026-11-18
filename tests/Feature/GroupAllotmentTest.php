@@ -112,12 +112,41 @@ it('converts an entire hold atomically into individual bookings with no double c
     $this->postJson($base.'/group-allotments/'.$hold.'/release')->assertStatus(409);
     $this->getJson($base.'/group-reservations/'.$groupId.'/financial-summary')
         ->assertOk()->assertJsonPath('meta.readOnly', true);
+    // The group list must show travel dates, never substitute creation date.
+    $this->getJson($base.'/group-reservations')
+        ->assertOk()
+        ->assertJsonPath('data.0.checkIn', $input['checkIn'])
+        ->assertJsonPath('data.0.checkOut', $input['checkOut']);
+    $this->getJson($base.'/group-reservations/'.$groupId)
+        ->assertOk()
+        ->assertJsonPath('data.checkIn', $input['checkIn'])
+        ->assertJsonPath('data.checkOut', $input['checkOut'])
+        ->assertJsonPath('data.rooms.0.roomId', null);
+
     // Unassigned group rooms are visible by guest and group reference,
     // but are never treated as occupied physical rooms.
     $this->getJson($base.'/room-calendar?start='.$input['checkIn'].'&end='.$input['checkOut'])
         ->assertOk()->assertJsonPath('data.unassignedGroupTotal', 2)
         ->assertJsonPath('data.unassignedGroupBookings.0.guestName', 'One Group')
         ->assertJsonPath('data.unassignedGroupBookings.0.groupId', (string) $groupId);
+    // Assigned room lanes remain visible through group-specific focus, along
+    // with guest identity and group reference, independent of rack pagination.
+    $firstRoom = DB::table('rooms')->where('hotel_id', $hotel->id)
+        ->orderBy('id')->value('id');
+    $firstBooking = DB::table('group_reservation_members')
+        ->where('hotel_id', $hotel->id)->where('group_reservation_id', $groupId)
+        ->orderBy('position')->value('reservation_record_id');
+    DB::table('reservation_records')->where('hotel_id', $hotel->id)
+        ->where('id', $firstBooking)->update(['assigned_room_id' => $firstRoom]);
+    $focused = $this->getJson($base.'/room-calendar?start='.$input['checkIn']
+        .'&end='.$input['checkOut'].'&group_id='.$groupId)->assertOk()
+        ->assertJsonPath('data.focusedGroupId', (string) $groupId)
+        ->assertJsonPath('data.bookings.0.groupId', (string) $groupId)
+        ->assertJsonPath('data.bookings.0.groupName', 'Conference booking')
+        ->assertJsonPath('data.bookings.0.guestName', 'One Group')
+        ->assertJsonPath('data.unassignedGroupTotal', 1);
+    $focused->assertJsonCount(1, 'data.rooms');
+
 });
 
 it('rejects mismatched and expired conversions without partial reservations', function (): void {
