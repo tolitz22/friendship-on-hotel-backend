@@ -24,6 +24,9 @@ final class OccupancyCoverageReportService
                     ->where('v.hotel_id', '=', $hotel->id)
                     ->where('v.inspection_date', '=', $date);
             })
+            ->leftJoin('users as assigned_employee','assigned_employee.id','=','v.assigned_user_id')
+            ->leftJoin('users as observer_employee','observer_employee.id','=','v.observed_by')
+            ->leftJoin('users as reviewer_employee','reviewer_employee.id','=','v.reviewed_by')
             ->where('r.hotel_id', $hotel->id);
 
         $totals = (clone $scope)->selectRaw(
@@ -57,6 +60,9 @@ final class OccupancyCoverageReportService
                 'v.expected_occupancy', 'v.observed_occupancy',
                 'v.assigned_user_id', 'v.observed_by', 'v.reviewed_by',
                 'v.observed_at', 'v.reviewed_at',
+                'assigned_employee.name as assigned_name',
+                'observer_employee.name as observer_name',
+                'reviewer_employee.name as reviewer_name',
             ])->paginate((int) ($filters['per_page'] ?? 25));
 
         $roomCount = (int) $totals->room_count;
@@ -77,8 +83,11 @@ final class OccupancyCoverageReportService
                 'expectedOccupancy' => $row->expected_occupancy,
                 'observedOccupancy' => $row->observed_occupancy,
                 'assignedUserId' => $row->assigned_user_id === null ? null : (string) $row->assigned_user_id,
+                'assignedName' => $row->assigned_name,
                 'observedBy' => $row->observed_by === null ? null : (string) $row->observed_by,
+                'observerName' => $row->observer_name,
                 'reviewedBy' => $row->reviewed_by === null ? null : (string) $row->reviewed_by,
+                'reviewerName' => $row->reviewer_name,
                 'observedAt' => $row->observed_at,
                 'reviewedAt' => $row->reviewed_at,
             ])->values(),
@@ -93,6 +102,8 @@ final class OccupancyCoverageReportService
                 'verified' => $verified,
                 'flagged' => $flagged,
                 'observed' => $submitted + $verified + $flagged,
+                'reviewed' => $verified + $flagged,
+                'unresolved' => $missing + $assigned + $submitted + $flagged,
                 'checked' => $roomCount - $missing,
                 'unexpectedOccupied' => (int) $totals->unexpected_occupied_count,
                 'expectedOccupiedVacant' => (int) $totals->expected_occupied_vacant_count,
@@ -101,6 +112,7 @@ final class OccupancyCoverageReportService
                 'coveragePercent' => $roomCount === 0 ? 0 : round(($roomCount - $missing) * 100 / $roomCount, 1),
                 'observationPercent' => $roomCount === 0 ? 0 : round(($submitted + $verified + $flagged) * 100 / $roomCount, 1),
                 'historicalSnapshotOnly' => true,
+                'roomCatalogAsOfReportRun' => true,
             ],
             'meta' => [
                 'page' => $page->currentPage(), 'perPage' => $page->perPage(),
