@@ -12,6 +12,21 @@ use Illuminate\Support\Facades\DB;
 
 final class FolioNightAssessmentController
 {
+    public function nights(Hotel $hotel, string $booking): JsonResponse
+    {
+        $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+            ->where('reservation_record_id', (int) $booking)->first();
+        abort_unless($folio !== null, 404);
+        $entries = DB::table('folio_entries')->where('hotel_id', $hotel->id)
+            ->where('folio_id', $folio->id)->where('entry_type', 'room_night')
+            ->orderBy('stay_date')->get(['id', 'stay_date', 'amount_minor']);
+        return response()->json(['data' => $entries->map(fn ($entry) => [
+            'id' => (string) $entry->id,
+            'stayDate' => $entry->stay_date,
+            'amountMinor' => (int) $entry->amount_minor,
+        ])->values()]);
+    }
+
     public function index(Hotel $hotel, string $booking, FolioNightAssessmentService $service): JsonResponse
     {
         $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
