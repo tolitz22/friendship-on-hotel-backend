@@ -97,7 +97,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         ]);
     }
 
-    private function post(int $hotelId, string $key = 'charge-1'): int
+    private function postJournal(int $hotelId, string $key = 'charge-1'): int
     {
         return (new FinancialJournalPostingService())->post(
             $hotelId, $key, 'folio', $key, 'Room charge',
@@ -111,7 +111,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
     public function test_close_rolls_date_and_persists_a_balanced_snapshot(): void
     {
         $this->seedHotel(1);
-        $journalId = $this->post(1);
+        $journalId = $this->postJournal(1);
 
         $result = (new FinancialBusinessDayCloseService())->close(1, '2026-11-18', 7);
 
@@ -125,16 +125,16 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         self::assertSame('2026-11-18', DB::table('financial_posting_journals')->where('id', $journalId)->value('business_date'));
 
         // A repeated delivery of the same posting key is safe after day close.
-        self::assertSame($journalId, $this->post(1));
+        self::assertSame($journalId, $this->postJournal(1));
         self::assertSame(1, DB::table('financial_posting_journals')->count());
-        $this->post(1, 'charge-2');
+        $this->postJournal(1, 'charge-2');
         self::assertSame('2026-11-19', DB::table('financial_posting_journals')->where('id', '!=', $journalId)->value('business_date'));
     }
 
     public function test_failed_reconciliation_rolls_back_close_and_clock(): void
     {
         $this->seedHotel(1);
-        $journalId = $this->post(1);
+        $journalId = $this->postJournal(1);
         DB::table('financial_posting_lines')->where('journal_id', $journalId)
             ->where('account_code', 'ROOM_REV')->update(['credit_minor' => 12499]);
 
@@ -192,7 +192,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
             'business_date' => '2026-11-18',
         ]);
         try {
-            $this->post(1, 'late-post');
+            $this->postJournal(1, 'late-post');
             self::fail('A closed financial date must stay immutable.');
         } catch (ValidationException $exception) {
             self::assertArrayHasKey('business_date', $exception->errors());
@@ -200,7 +200,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
 
         self::assertSame(0, DB::table('financial_posting_journals')->where('hotel_id', 1)->count());
         self::assertSame(1, DB::table('financial_day_closes')->where('hotel_id', 1)->count());
-        $this->post(2, 'independent-post');
+        $this->postJournal(2, 'independent-post');
         self::assertSame('2026-11-18', DB::table('financial_business_clocks')->where('hotel_id', 2)->value('business_date'));
         self::assertSame(1, DB::table('financial_posting_journals')->where('hotel_id', 2)->count());
     }
