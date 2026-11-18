@@ -170,6 +170,11 @@ final class FolioNightAssessmentService
 
     public function recognize(int $hotelId, int $assessmentId, int $actorId): int
     {
+        if (!config('financial_accounting.enable_live_folio_tax', false)) {
+            throw ValidationException::withMessages([
+                'activation' => 'Live folio tax accounting is not activated for this environment.',
+            ]);
+        }
         $assessment = DB::table('financial_folio_night_assessments')
             ->where('hotel_id', $hotelId)->where('id', $assessmentId)->first();
         if ($assessment === null || $assessment->status !== 'approved' || $assessment->source_journal_id === null) {
@@ -208,6 +213,11 @@ final class FolioNightAssessmentService
 
     private function lockClock(int $hotelId): object
     {
+        if (!config('financial_accounting.enable_live_folio_tax', false)) {
+            throw ValidationException::withMessages([
+                'activation' => 'Live folio tax accounting requires approved deployment and finance activation.',
+            ]);
+        }
         $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotelId)
             ->lockForUpdate()->first();
         if ($clock === null || $clock->status !== 'open'
