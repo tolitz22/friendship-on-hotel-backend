@@ -152,6 +152,7 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('throttle:20,1');
 
             Route::get('/cashier-shifts', [CashierShiftController::class, 'index'])->middleware('hotel.permission:cashier.read');
+            Route::get('/cashier-shifts/current', [CashierShiftController::class, 'current'])->middleware('hotel.permission:cashier.read');
             Route::get('/cashier-shifts/{shift}', [CashierShiftController::class, 'show'])->whereNumber('shift')->middleware('hotel.permission:cashier.read');
             Route::get('/cashier-shifts/{shift}/history', [CashierShiftController::class, 'history'])->whereNumber('shift')->middleware('hotel.permission:cashier.read');
             Route::post('/cashier-shifts', [CashierShiftController::class, 'open'])->middleware('hotel.permission:cashier.write')->middleware('throttle:20,1');
