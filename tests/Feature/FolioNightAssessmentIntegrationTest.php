@@ -120,7 +120,7 @@ final class FolioNightAssessmentIntegrationTest extends TestCase
             $t->id();$t->unsignedBigInteger('hotel_id');$t->unsignedBigInteger('source_journal_id');
             $t->unsignedBigInteger('recognition_journal_id');
             $t->date('stay_date');$t->bigInteger('amount_minor');$t->timestamp('created_at');
-            $t->unique(['hotel_id', 'source_journal_id', 'stay_date']);
+            $t->unique(['hotel_id', 'source_journal_id', 'stay_date'], 'room_rev_source_night_once');
         });
 
         $this->seedFolio();
