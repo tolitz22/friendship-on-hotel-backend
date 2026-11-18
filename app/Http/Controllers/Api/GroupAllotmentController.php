@@ -122,7 +122,7 @@ final class GroupAllotmentController
             'createdByName' => $row->creator_name,
             'releasedByName' => $row->releaser_name,
             'status' => $row->status === 'held'
-                && \Carbon\CarbonImmutable::parse($row->expires_at, 'UTC')->isPast()
+                && \Carbon\Carbon::parse($row->expires_at, 'UTC')->lessThanOrEqualTo(now())
                 ? 'expired' : $row->status,
             'convertedGroupId' => $row->converted_group_id === null ? null : (string) $row->converted_group_id,
         ];
