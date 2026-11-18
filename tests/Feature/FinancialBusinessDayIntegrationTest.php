@@ -27,6 +27,15 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
     {
         parent::setUp();
 
+        // The finance integration contract creates its own minimal schema.
+        // Drop stale fixtures in dependency order before recreating tables.
+        foreach (['financial_folio_night_assessments','financial_tax_policies',
+            'financial_room_revenue_recognitions','night_audit_reviews','financial_posting_lines',
+            'financial_posting_journals','financial_day_closes',
+            'financial_accounting_periods','financial_business_clocks'] as $table) {
+            Schema::dropIfExists($table);
+        }
+
         Schema::create('night_audit_reviews', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('hotel_id');
