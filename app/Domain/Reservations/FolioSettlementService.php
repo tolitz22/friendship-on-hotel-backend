@@ -446,12 +446,28 @@ final class FolioSettlementService
                 'shift.cashier_id', 'cashier.name as cashier_name',
                 'shift.reviewed_by', 'reviewer.name as reviewer_name'])
             ->keyBy('payment_id') : collect();
-        $paymentHandoff = array_values(array_map(function (array $payment) use ($cashShiftContexts): array {
+        $paymentActors = DB::table('folio_payment_records as payment')
+            ->leftJoin('users as recorder', 'recorder.id', '=', 'payment.recorded_by')
+            ->leftJoin('folio_settlement_verifications as verification', function ($join): void {
+                $join->on('verification.payment_record_id', '=', 'payment.id')
+                    ->on('verification.hotel_id', '=', 'payment.hotel_id');
+            })
+            ->leftJoin('users as preparer', 'preparer.id', '=', 'verification.prepared_by')
+            ->where('payment.hotel_id', $hotel->id)
+            ->where('payment.folio_id', $folio->id)
+            ->get(['payment.id', 'payment.recorded_by', 'recorder.name as recorder_name',
+                'preparer.name as preparer_name'])
+            ->keyBy('id');
+        $paymentHandoff = array_values(array_map(function (array $payment) use ($cashShiftContexts, $paymentActors): array {
             $shift = $cashShiftContexts->get((int) $payment['id']);
+            $actors = $paymentActors->get((int) $payment['id']);
             $status = $payment['method'] === 'cash'
                 ? ($shift?->status ?? 'unlinked') : 'not_applicable';
             return [
                 'paymentId' => $payment['id'],
+                'recordedBy' => $actors === null ? null : (string) $actors->recorded_by,
+                'recordedByName' => $actors?->recorder_name,
+                'verificationPreparedByName' => $actors?->preparer_name,
                 'cashShiftId' => $shift === null ? null : (string) $shift->shift_id,
                 'cashShiftStatus' => $status,
                 'cashierName' => $shift?->cashier_name,
