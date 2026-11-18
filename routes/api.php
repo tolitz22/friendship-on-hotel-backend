@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\ReservationRecordController;
 use App\Http\Controllers\Api\ReservationHistoryController;
 use App\Http\Controllers\Api\ReservationTurnoverController;
 use App\Http\Controllers\Api\ReservationBookingController;
+use App\Http\Controllers\Api\GroupReservationController;
 use App\Http\Controllers\Api\FrontDeskReservationController;
 use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
@@ -131,6 +132,12 @@ Route::prefix('v1')->group(function (): void {
             // sensitive mutations remain inside the administrator group.
             Route::get('/inventory-blocks', [RoomInventoryController::class, 'blocks'])
                 ->middleware('hotel.permission:booking.assign_room');
+            Route::get('/group-reservations', [GroupReservationController::class, 'index'])
+                ->middleware('hotel.permission:reservation.read');
+            Route::get('/group-reservations/{group}', [GroupReservationController::class, 'show'])
+                ->whereNumber('group')->middleware('hotel.permission:reservation.read');
+            Route::post('/group-reservations', [GroupReservationController::class, 'store'])
+                ->middleware('hotel.permission:booking.create')->middleware('throttle:10,1');
             Route::post('/bookings', [ReservationBookingController::class, 'store'])
                 ->middleware('hotel.permission:booking.create');
             Route::get('/bookings/{booking}/room-choices', [RoomInventoryController::class, 'assignmentOptions'])
