@@ -231,11 +231,13 @@ final class ManagerApprovalService
             abort(404);
         }
         return DB::table('manager_approval_events')
-            ->where('hotel_id', $hotel->id)->where('approval_request_id', $id)
+            ->leftJoin('users as audit_actor','audit_actor.id','=','manager_approval_events.actor_id')
+            ->where('manager_approval_events.hotel_id', $hotel->id)->where('manager_approval_events.approval_request_id', $id)
             ->orderBy('id')->get()->map(fn (object $row): array => [
                 'id' => (string) $row->id,
                 'event' => $row->event,
                 'actorId' => (string) $row->actor_id,
+                'actorName' => $row->actor_name,
                 'details' => $row->details ? json_decode($row->details, true) : null,
                 'createdAt' => $row->created_at,
             ])->all();
