@@ -55,6 +55,14 @@ final class NightlyRoomRevenueRecognitionService
                 ]);
             }
 
+            // Never recognize deferred revenue after its source has been reversed.
+            if (DB::table('financial_posting_journals')
+                ->where('hotel_id', $hotelId)->where('reverses_journal_id', $sourceJournalId)->exists()) {
+                throw ValidationException::withMessages([
+                    'source_journal_id' => 'Deferred-revenue source has already been reversed.',
+                ]);
+            }
+
             $existing = DB::table('financial_room_revenue_recognitions')
                 ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)
                 ->where('stay_date', $stayDate)->first();
