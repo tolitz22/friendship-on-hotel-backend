@@ -35,6 +35,7 @@ final class FolioNightAssessmentIntegrationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+        config()->set('financial_accounting.enable_live_folio_tax', true);
 
         Schema::create('financial_business_clocks', function (Blueprint $t): void {
             $t->id();$t->unsignedBigInteger('hotel_id')->unique();
