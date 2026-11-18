@@ -36,6 +36,7 @@ use App\Http\Controllers\Api\NightAuditPreviewController;
 use App\Http\Controllers\Api\NightAuditReviewController;
 use App\Http\Controllers\Api\FinancialBusinessDayController;
 use App\Http\Controllers\Api\FinancialTaxPolicyController;
+use App\Http\Controllers\Api\FolioNightAssessmentController;
 use App\Http\Controllers\Api\GuestStayHistoryController;
 use App\Http\Controllers\Api\ReservationSpecialRequestController;
 use App\Http\Controllers\Api\ReservationScenarioController;
@@ -170,6 +171,14 @@ Route::prefix('v1')->group(function (): void {
 
             Route::middleware('hotel.admin')->group(function (): void {
                 // Tax preview is explicitly nonposting; approval does not touch guest balances.
+                Route::get('/bookings/{booking}/folio-night-assessments', [FolioNightAssessmentController::class, 'index'])
+                    ->whereNumber('booking');
+                Route::post('/bookings/{booking}/folio-night-assessments', [FolioNightAssessmentController::class, 'prepare'])
+                    ->whereNumber('booking')->middleware('throttle:10,1');
+                Route::post('/bookings/{booking}/folio-night-assessments/{assessment}/approve', [FolioNightAssessmentController::class, 'approve'])
+                    ->whereNumber('booking')->whereNumber('assessment')->middleware('throttle:10,1');
+                Route::post('/bookings/{booking}/folio-night-assessments/{assessment}/recognize', [FolioNightAssessmentController::class, 'recognize'])
+                    ->whereNumber('booking')->whereNumber('assessment')->middleware('throttle:10,1');
                 Route::get('/finance/tax-policies', [FinancialTaxPolicyController::class, 'index']);
                 Route::post('/finance/tax-policies', [FinancialTaxPolicyController::class, 'draft'])
                     ->middleware('throttle:10,1');
