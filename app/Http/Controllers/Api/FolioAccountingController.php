@@ -39,6 +39,31 @@ final class FolioAccountingController
         return response()->json(['data' => $result], $result['replayed'] ? 200 : 201);
     }
 
+    public function paymentSafety(Request $request, Hotel $hotel, string $booking,
+        FolioAccountingService $accounting): JsonResponse
+    {
+        $input = $request->validate([
+            'method' => ['sometimes', 'in:cash,bank_transfer'],
+            'amountMinor' => ['sometimes', 'integer', 'min:1', 'max:100000000000'],
+        ]);
+        return response()->json(['data' => $accounting->paymentSafety($hotel, (int) $booking,
+            $input['method'] ?? null,
+            isset($input['amountMinor']) ? (int) $input['amountMinor'] : null)]);
+    }
+
+    public function voidPayment(Request $request, Hotel $hotel, string $booking,
+        string $payment, FolioAccountingService $accounting): JsonResponse
+    {
+        $data = $request->validate([
+            'requestKey' => ['required', 'string', 'min:8', 'max:100'],
+            'reason' => ['required', 'string', 'min:12', 'max:500'],
+        ]);
+        $result = $accounting->voidPayment($hotel, (int) $booking,
+            (int) $payment, (int) $request->user()->id,
+            $data['requestKey'], trim($data['reason']));
+        return response()->json(['data' => $result], $result['replayed'] ? 200 : 201);
+    }
+
     public function recordPayment(Request $request, Hotel $hotel, string $booking, FolioAccountingService $accounting): JsonResponse
     {
         $data = $request->validate([
@@ -46,7 +71,11 @@ final class FolioAccountingController
             'method' => ['required', 'in:cash,bank_transfer'],
             'reference' => ['required', 'string', 'min:3', 'max:120'],
             'amountMinor' => ['required', 'integer', 'min:1', 'max:100000000000'],
+            'duplicateOverrideReason' => ['sometimes', 'string', 'min:12', 'max:500'],
         ]);
+        $data['duplicateOverrideAuthorized'] = $request->user()->tokenCan('hotel:write')
+            && $request->user()->memberships()->where('hotel_id', $hotel->id)
+                ->where('role', 'admin')->where('is_active', true)->exists();
         if ($data['method'] === 'cash') {
             return response()->json(['message' => 'Cash must be recorded within an open cashier shift using the cash-receipts endpoint.'], 409);
         }
