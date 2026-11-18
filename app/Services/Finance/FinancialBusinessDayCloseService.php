@@ -104,7 +104,7 @@ final class FinancialBusinessDayCloseService
                 $pendingCorrections = DB::table('financial_folio_night_corrections as c')
                     ->join('financial_folio_night_assessments as a', 'a.id', '=', 'c.assessment_id')
                     ->where('c.hotel_id', $hotelId)->where('a.hotel_id', $hotelId)
-                    ->where('a.stay_date', $expectedBusinessDate)->where('c.status', 'pending')
+                    ->where('c.status', 'pending')
                     ->exists();
                 if ($pendingCorrections) {
                     throw ValidationException::withMessages([
