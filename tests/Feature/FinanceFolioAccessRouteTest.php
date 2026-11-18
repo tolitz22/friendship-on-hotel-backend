@@ -31,7 +31,7 @@ final class FinanceFolioAccessRouteTest extends TestCase
         self::assertContains('hotel.member', $middleware);
         self::assertContains('hotel.permission:cashier.read', $middleware);
         self::assertContains('auth:sanctum', $middleware);
-        self::assertSame([], $route->parameterNames());
+        self::assertSame(['hotel'], $route->parameterNames());
     }
 
     public function test_financial_write_routes_require_hotel_administrator(): void
