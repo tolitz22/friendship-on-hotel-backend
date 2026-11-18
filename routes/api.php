@@ -99,6 +99,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
+            Route::get('/bookings/{booking}/payment-safety', [FolioAccountingController::class, 'paymentSafety'])
+                ->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/finance/folios', FinanceFolioIndexController::class)->middleware('hotel.permission:finance.read');
             Route::get('/finance/night-audit-reconciliation', NightAuditFinancialReportController::class)
                 ->middleware('hotel.permission:finance.read');
@@ -292,6 +294,8 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/bookings/{booking}/folio-adjustments', [FolioAccountingController::class, 'adjust'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/payment-records', [FolioAccountingController::class, 'recordPayment'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/payment-records/{payment}/review', [FolioAccountingController::class, 'reviewPayment'])->whereNumber('booking')->whereNumber('payment');
+                Route::post('/bookings/{booking}/payment-records/{payment}/void', [FolioAccountingController::class, 'voidPayment'])
+                    ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:10,1');
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
