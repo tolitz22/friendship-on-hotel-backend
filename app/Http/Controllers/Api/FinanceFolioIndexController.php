@@ -51,10 +51,10 @@ final class FinanceFolioIndexController
             ->whereIn('folio_id', $rows->pluck('folio_id')->all())
             ->pluck('folio_id')->map(fn ($id) => (string) $id)->flip();
 
-        $data = $rows->map(function (object $row) use ($accounting, $signedFolioIds): array {
+        $data = $rows->map(function (object $row) use ($accounting, $signedFolioIds, $hotel): array {
             // Summary uses the same posted ledger data used by settlement.
             $summary = $accounting->summaryFor((object) [
-                'id' => $row->folio_id, 'hotel_id' => null,
+                'id' => $row->folio_id, 'hotel_id' => $hotel->id,
             ]);
             return [
                 'bookingId' => (string) $row->booking_id,
