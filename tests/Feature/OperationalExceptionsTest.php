@@ -133,11 +133,21 @@ it('shows current inspection, occupancy and independent cashier review without e
     expect(collect($result['items'])->firstWhere('type', 'room_inspection_review')['ownerName'])->toBe($worker->name);
     expect(collect($result['items'])->firstWhere('type', 'occupancy_investigation')['roomNumber'])->toBe('202');
     expect(collect($result['items'])->firstWhere('type', 'cashier_shift_review')['ownerName'])->toBe($worker->name);
+    DB::table('cashier_shifts')->insert([
+        'hotel_id' => $hotel->id, 'cashier_id' => $worker->id,
+        'currency' => 'PHP', 'status' => 'flagged', 'opening_float_minor' => 0,
+        'opened_at' => now()->subHours(2), 'submitted_at' => now(),
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+    $withFlag = $this->getJson($base)->assertOk()->json('data');
+    expect($withFlag['summary']['total'])->toBe(5);
+    expect($withFlag['summary']['critical'])->toBe(2);
+    expect(collect($withFlag['items'])->pluck('type'))->toContain('cashier_shift_discrepancy');
     DB::table('occupancy_investigations')->where('verification_id', $flagged)->update([
         'status' => 'closed', 'closed_by' => $worker->id, 'closed_at' => now(),
     ]);
     $after = $this->getJson($base)->assertOk()->json('data');
-    expect($after['summary']['total'])->toBe(3);
+    expect($after['summary']['total'])->toBe(4);
     expect(collect($after['items'])->pluck('type'))->not->toContain('occupancy_investigation');
     expect($pending)->toBeGreaterThan(0);
 });
