@@ -367,6 +367,37 @@ final class FolioSettlementService
         }
         $signed = DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)
             ->where('folio_id', $folio->id)->first();
+
+        // Compare the CURRENT financial facts with the immutable snapshot.
+        // Do not compare presentation-only fields such as "signed" or dates.
+        $facts = [
+            'charges' => $charges, 'adjustments' => $adjustments,
+            'payments' => $payments, 'allocations' => $allocations,
+            'refunds' => $refunds, 'taxAllocations' => $taxAllocations,
+            'netRecordedChargesMinor' => $net,
+            'verifiedPaymentsMinor' => $verified,
+            'verifiedAllocatedMinor' => $allocated,
+            'verifiedRefundsMinor' => $verifiedRefunds,
+        ];
+        $integrity = true;
+        if ($signed !== null) {
+            $saved = json_decode($signed->statement_snapshot, true);
+            if (!is_array($saved)
+                || !hash_equals($signed->snapshot_sha256,
+                    hash('sha256', $signed->statement_snapshot))) {
+                $integrity = false;
+            } else {
+                foreach ($facts as $field => $value) {
+                    if (!array_key_exists($field, $saved) || $saved[$field] !== $value) {
+                        $integrity = false;
+                        break;
+                    }
+                }
+            }
+            if (!$integrity) {
+                $blockers[] = 'Signed statement does not match the original immutable financial snapshot.';
+            }
+        }
         return [
             'hotelId' => (string) $hotel->id,
             'bookingId' => (string) $bookingId,
@@ -385,6 +416,8 @@ final class FolioSettlementService
             'remainingMinor' => $net - $allocated,
             'blockers' => $blockers, 'canSignOff' => $blockers === [],
             'signed' => $signed !== null,
+            'signedSnapshotIntegrity' => $integrity,
+            'signedSnapshotSha256' => $signed?->snapshot_sha256,
             'signedAt' => $signed?->signed_at,
             'signedBy' => $signed === null ? null : (string) $signed->approved_by,
             'isTaxInvoice' => false, 'bankOrGatewayApiVerified' => false,
