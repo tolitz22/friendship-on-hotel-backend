@@ -113,7 +113,10 @@ final class FinancialBusinessDayController
                     || !DB::table('financial_room_revenue_recognitions')
                         ->where('hotel_id', $hotel->id)
                         ->where('source_journal_id', $item->source_journal_id)
-                        ->where('stay_date', $date)->exists()) {
+                        ->where('stay_date', $date)
+                        ->whereNotIn('recognition_journal_id', DB::table('financial_posting_journals')
+                            ->where('hotel_id', $hotel->id)->whereNotNull('reverses_journal_id')
+                            ->select('reverses_journal_id'))->exists()) {
                     $blockers[] = 'An approved room night has not yet been recognized as earned.';
                     break;
                 }
