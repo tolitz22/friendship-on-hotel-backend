@@ -296,12 +296,18 @@ final class FolioSettlementService
             })
             ->where('r.hotel_id', $hotel->id)->where('r.folio_id', $folio->id)
             ->orderBy('r.id')->get(['r.id', 'r.payment_record_id', 'r.amount_minor',
-                'r.reason', 'r.status', 'd.id as evidence_id',
-                'd.status as evidence_status', 'd.external_reference'])
+                'r.reason', 'r.status', 'r.requested_by', 'r.reviewed_by',
+                'd.id as evidence_id', 'd.status as evidence_status',
+                'd.external_reference', 'd.recorded_by as evidence_recorded_by',
+                'd.reviewed_by as evidence_reviewed_by'])
             ->map(fn ($r) => [
                 'id' => (string) $r->id, 'paymentId' => (string) $r->payment_record_id,
                 'amountMinor' => (int) $r->amount_minor, 'reason' => $r->reason,
                 'status' => $r->status,
+                'requestedBy' => (string) $r->requested_by,
+                'reviewedBy' => $r->reviewed_by === null ? null : (string) $r->reviewed_by,
+                'evidenceRecordedBy' => $r->evidence_recorded_by === null ? null : (string) $r->evidence_recorded_by,
+                'evidenceReviewedBy' => $r->evidence_reviewed_by === null ? null : (string) $r->evidence_reviewed_by,
                 'evidenceId' => $r->evidence_id === null ? null : (string) $r->evidence_id,
                 'evidenceStatus' => $r->evidence_status,
                 'externalReference' => $r->external_reference,
