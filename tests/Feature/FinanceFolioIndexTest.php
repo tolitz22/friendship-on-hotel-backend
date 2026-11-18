@@ -97,6 +97,7 @@ final class FinanceFolioIndexTest extends TestCase
         $result = $this->index(1);
         self::assertSame(1, $result['meta']['total']);
         self::assertSame('11', $result['data'][0]['bookingId']);
+        self::assertSame('PHP', $result['data'][0]['currency']);
         self::assertSame(14000, $result['data'][0]['netRecordedChargesMinor']);
         self::assertSame(4000, $result['data'][0]['pendingReviewPaymentsMinor']);
         self::assertSame(0, $result['data'][0]['staffConfirmedPaymentsMinor']);
