@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\SpaSessionController;
 use App\Http\Controllers\Api\CatalogEditController;
 use App\Http\Controllers\Api\GuestController;
 use App\Http\Controllers\Api\HousekeepingTaskController;
+use App\Http\Controllers\Api\HousekeepingHandoffController;
 use App\Http\Controllers\Api\MaintenanceWorkOrderController;
 use App\Http\Controllers\Api\PropertyCatalogSummaryController;
 use App\Http\Controllers\Api\HealthController;
@@ -112,6 +113,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-policy-readiness', ReservationPolicyReadinessController::class);
             Route::patch('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'update'])->whereNumber('task');
             Route::patch('/maintenance-work-orders/{order}', [MaintenanceWorkOrderController::class, 'update'])->whereNumber('order');
+            Route::get('/housekeeping/handoff', HousekeepingHandoffController::class)
+                ->middleware('hotel.admin');
             Route::get('/housekeeping-tasks', [HousekeepingTaskController::class, 'index']);
             Route::get('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'show'])->whereNumber('task');
             Route::get('/housekeeping-tasks/{task}/history', [HousekeepingTaskController::class, 'history'])->whereNumber('task');
