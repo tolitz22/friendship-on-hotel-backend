@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Reservations\FolioAccountingService;
+use App\Domain\Reservations\FolioSettlementService;
+use Illuminate\Http\Request;
 use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -15,6 +17,30 @@ use Illuminate\Support\Facades\DB;
  */
 final class GroupFinanceController
 {
+    public function allocate(Request $request, Hotel $hotel, string $group, string $booking,
+        string $payment, FolioSettlementService $settlement): JsonResponse
+    {
+        $input = $request->validate([
+            'requestKey' => ['required', 'string', 'min:8', 'max:100'],
+            'amountMinor' => ['required', 'integer', 'min:1', 'max:100000000000'],
+            'folioEntryId' => ['nullable', 'integer', 'min:1'],
+        ]);
+        $record = DB::table('group_reservations')->where('hotel_id', $hotel->id)
+            ->where('id', $group)->first();
+        abort_unless($record !== null, 404);
+        abort_unless(DB::table('group_reservation_members')->where('hotel_id', $hotel->id)
+            ->where('group_reservation_id', $group)
+            ->where('reservation_record_id', $booking)->exists(), 404);
+
+        // Existing service locks the folio, requires independently verified
+        // payment evidence, caps allocations and honors settlement signoffs.
+        $result = $settlement->allocate($hotel, (int) $booking, (int) $payment,
+            (int) $request->user()->id, $input['requestKey'], 'group',
+            $record->reference, (int) $input['amountMinor'],
+            isset($input['folioEntryId']) ? (int) $input['folioEntryId'] : null);
+        return response()->json(['data' => $result], $result['replayed'] ? 200 : 201);
+    }
+
     public function __invoke(Hotel $hotel, string $group, FolioAccountingService $accounting): JsonResponse
     {
         abort_unless(DB::table('group_reservations')->where('hotel_id', $hotel->id)
