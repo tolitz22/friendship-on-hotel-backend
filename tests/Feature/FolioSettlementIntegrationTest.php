@@ -16,6 +16,9 @@ use Tests\TestCase;
 
 final class FolioSettlementIntegrationTest extends TestCase
 {
+    private ?string $previousConnection = null;
+    private bool $isolatedSqlite = false;
+
     private const TABLES = [
         'cashier_shift_receipts', 'cashier_shifts',
         'folio_refund_disbursement_evidence',
@@ -28,6 +31,28 @@ final class FolioSettlementIntegrationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // This legacy service-contract fixture deliberately uses a miniature
+        // schema. Never write it over the application's migrated tables.
+        // SQLite uses a private connection and separate in-memory database.
+        // MySQL/PostgreSQL must run in the disposable per-file CI database
+        // supplied by scripts/run-isolated-db-tests.sh.
+        $this->previousConnection = DB::getDefaultConnection();
+        if (DB::connection()->getDriverName() === 'sqlite') {
+            $name = 'finance_settlement_contract';
+            $settings = config('database.connections.'.$this->previousConnection);
+            config()->set('database.connections.'.$name, array_merge($settings, [
+                'database' => ':memory:',
+            ]));
+            DB::purge($name);
+            DB::setDefaultConnection($name);
+            $this->isolatedSqlite = true;
+        } elseif (Schema::hasTable('hotels')) {
+            throw new \RuntimeException(
+                'FolioSettlementIntegrationTest requires a disposable, empty MySQL/PostgreSQL test database; do not run against migrated application tables.'
+            );
+        }
+
         config()->set('financial_accounting.enable_verified_settlement', true);
         config()->set('financial_accounting.enable_live_folio_tax', false);
         Schema::create('hotels', function (Blueprint $t): void {
@@ -138,6 +163,14 @@ final class FolioSettlementIntegrationTest extends TestCase
     {
         foreach (self::TABLES as $table) {
             Schema::dropIfExists($table);
+        }
+        if ($this->previousConnection !== null) {
+            $previous = $this->previousConnection;
+            if ($this->isolatedSqlite) {
+                DB::disconnect('finance_settlement_contract');
+                DB::setDefaultConnection($previous);
+                DB::purge('finance_settlement_contract');
+            }
         }
         parent::tearDown();
     }
