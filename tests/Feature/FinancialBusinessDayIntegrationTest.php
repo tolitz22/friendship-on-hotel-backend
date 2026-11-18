@@ -114,7 +114,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
             $table->id();
             $table->unsignedBigInteger('hotel_id');
             $table->unsignedBigInteger('source_journal_id');
-            $table->unsignedBigInteger('recognition_journal_id')->unique();
+            $table->unsignedBigInteger('recognition_journal_id')->unique('room_rev_recognition_unique');
             $table->date('stay_date');
             $table->bigInteger('amount_minor');
             $table->timestamp('created_at');
