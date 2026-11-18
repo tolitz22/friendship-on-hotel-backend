@@ -96,3 +96,12 @@ it('rejects foreign hotel guest IDs without creating partial group members', fun
     expect(DB::table('group_reservations')->where('hotel_id', $hotel->id)->count())->toBe(0);
     expect(DB::table('reservation_records')->where('hotel_id', $hotel->id)->count())->toBe(0);
 });
+
+it('requires receptionist booking-write authority before creating a group', function (): void {
+    [$hotel, $type, $guests, $staff] = groupFixture();
+    Sanctum::actingAs($staff, ['hotel:read']);
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/group-reservations',
+        groupPayload($type, $guests))->assertForbidden();
+    expect(DB::table('group_reservations')->where('hotel_id', $hotel->id)->count())->toBe(0);
+    expect(DB::table('reservation_records')->where('hotel_id', $hotel->id)->count())->toBe(0);
+});
