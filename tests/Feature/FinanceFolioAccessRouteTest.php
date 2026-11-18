@@ -22,6 +22,18 @@ final class FinanceFolioAccessRouteTest extends TestCase
         self::assertContains('active.user', $middleware);
     }
 
+    public function test_current_staff_cashier_shift_lookup_requires_cashier_read_permission(): void
+    {
+        $route = Route::getRoutes()->match(
+            Request::create('/api/v1/hotels/1/cashier-shifts/current', 'GET')
+        );
+        $middleware = $route->gatherMiddleware();
+        self::assertContains('hotel.member', $middleware);
+        self::assertContains('hotel.permission:cashier.read', $middleware);
+        self::assertContains('auth:sanctum', $middleware);
+        self::assertSame([], $route->parameterNames());
+    }
+
     public function test_financial_write_routes_require_hotel_administrator(): void
     {
         foreach ([
