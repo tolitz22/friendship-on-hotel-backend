@@ -89,6 +89,27 @@ final class GroupFinanceController
                 ->where('alloc.payer_reference', (string) DB::table('group_reservations')
                     ->where('hotel_id', $hotel->id)->where('id', $group)->value('reference'))
                 ->where('verify.status', 'verified')->sum('alloc.amount_minor');
+            $eligiblePayments = DB::table('folio_payment_records as pay')
+                ->join('folio_settlement_verifications as verify', function ($join): void {
+                    $join->on('verify.payment_record_id', '=', 'pay.id')
+                        ->on('verify.folio_id', '=', 'pay.folio_id')
+                        ->on('verify.hotel_id', '=', 'pay.hotel_id');
+                })
+                ->where('pay.hotel_id', $hotel->id)->where('pay.folio_id', $row->folio_id)
+                ->where('pay.status', 'staff_confirmed')->where('verify.status', 'verified')
+                ->orderBy('pay.id')->get(['pay.id', 'pay.reference', 'pay.amount_minor'])
+                ->map(function (object $payment) use ($hotel): array {
+                    $allocated = (int) DB::table('folio_settlement_allocations')
+                        ->where('hotel_id', $hotel->id)
+                        ->where('payment_record_id', $payment->id)->sum('amount_minor');
+                    $reservedRefunds = (int) DB::table('folio_refund_requests')
+                        ->where('hotel_id', $hotel->id)
+                        ->where('payment_record_id', $payment->id)
+                        ->whereIn('status', ['requested', 'approved'])->sum('amount_minor');
+                    return ['paymentId' => (string) $payment->id,
+                        'reference' => (string) $payment->reference,
+                        'remainingMinor' => max(0, (int) $payment->amount_minor - $allocated - $reservedRefunds)];
+                })->values();
             $signed = DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $row->folio_id)->exists();
 
@@ -115,6 +136,7 @@ final class GroupFinanceController
                 'verifiedGroupPayerAllocatedMinor' => $groupAllocated,
                 'unallocatedNetChargesMinor' => $net - $verifiedAllocated,
                 'signed' => $signed,
+                'eligiblePayments' => $eligiblePayments,
             ];
         }
 
