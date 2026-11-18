@@ -233,7 +233,7 @@ final class ManagerApprovalService
         return DB::table('manager_approval_events')
             ->leftJoin('users as audit_actor','audit_actor.id','=','manager_approval_events.actor_id')
             ->where('manager_approval_events.hotel_id', $hotel->id)->where('manager_approval_events.approval_request_id', $id)
-            ->orderBy('id')->get()->map(fn (object $row): array => [
+            ->orderBy('manager_approval_events.id')->get(['manager_approval_events.*','audit_actor.name as actor_name'])->map(fn (object $row): array => [
                 'id' => (string) $row->id,
                 'event' => $row->event,
                 'actorId' => (string) $row->actor_id,
