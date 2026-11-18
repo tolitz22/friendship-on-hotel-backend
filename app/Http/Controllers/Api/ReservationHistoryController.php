@@ -21,10 +21,11 @@ final class ReservationHistoryController
             ->where('hotel_id', $hotel->id)->where('id', $booking)->exists(), 404);
 
         $page = DB::table('reservation_booking_events')
-            ->where('hotel_id', $hotel->id)
-            ->where('reservation_record_id', $booking)
-            ->orderByDesc('id')
-            ->paginate((int) ($input['per_page'] ?? 20));
+            ->leftJoin('users as audit_actor','audit_actor.id','=','reservation_booking_events.actor_id')
+            ->where('reservation_booking_events.hotel_id', $hotel->id)
+            ->where('reservation_booking_events.reservation_record_id', $booking)
+            ->orderByDesc('reservation_booking_events.id')
+            ->paginate((int) ($input['per_page'] ?? 20), ['reservation_booking_events.*','audit_actor.name as actor_name']);
 
         return response()->json([
             'data' => $page->getCollection()->map(fn (object $event): array => [
@@ -34,6 +35,7 @@ final class ReservationHistoryController
                 'oldState' => $event->old_state,
                 'newState' => $event->new_state,
                 'actorId' => (string) $event->actor_id,
+                'actorName' => $event->actor_name,
                 'createdAt' => $event->created_at,
             ])->values(),
             'meta' => [
