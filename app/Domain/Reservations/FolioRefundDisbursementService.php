@@ -65,6 +65,13 @@ final class FolioRefundDisbursementService
                 || (int) $refund->amount_minor > (int) $payment->amount_minor - $allocated - $otherRefunds) {
                 throw ValidationException::withMessages(['refund' => 'Refund exceeds unallocated verified deposit.']);
             }
+            if (DB::table('folio_refund_disbursement_evidence')
+                ->where('hotel_id', $hotel->id)->where('external_reference', trim($reference))
+                ->exists()) {
+                throw ValidationException::withMessages([
+                    'reference' => 'This bank refund reference was already recorded for another request.',
+                ]);
+            }
             $id = DB::table('folio_refund_disbursement_evidence')->insertGetId([
                 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
                 'refund_request_id' => $refundId, 'payment_record_id' => $payment->id,
