@@ -317,4 +317,44 @@ final class FolioSettlementIntegrationTest extends TestCase
         self::assertSame(0, DB::table('folio_refund_disbursement_evidence')->count());
     }
 
+    public function test_signed_statement_detects_out_of_band_tampering(): void
+    {
+        $service = new FolioSettlementService();
+        $hotel = $this->hotel();
+        $paymentId = $this->paymentEvidence();
+        $v = $service->prepareVerification($hotel, 11, $paymentId, 7,
+            'bank_statement', 'statement-integrity-evidence');
+        $service->reviewVerification($hotel, 11, (int) $v['id'], 8,
+            'verify', 'Independently reconciled bank evidence.');
+        $service->allocate($hotel, 11, $paymentId, 8, 'signed-integrity-key',
+            'guest', 'guest-11', 11200, 13);
+        $service->signoff($hotel, 11, 8);
+        self::assertTrue($service->statement($hotel, 11)['signedSnapshotIntegrity']);
+
+        // Simulate an illicit direct SQL edit bypassing all application guards.
+        DB::table('folio_entries')->where('id', 13)->update(['amount_minor' => 11300]);
+        $tampered = $service->statement($hotel, 11);
+        self::assertTrue($tampered['signed']);
+        self::assertFalse($tampered['signedSnapshotIntegrity']);
+        self::assertFalse($tampered['canSignOff']);
+        self::assertNotEmpty($tampered['blockers']);
+    }
+
+    public function test_settlement_mutations_are_disabled_by_default(): void
+    {
+        $hotel = $this->hotel();
+        $paymentId = $this->paymentEvidence();
+        config()->set('financial_accounting.enable_verified_settlement', false);
+        $service = new FolioSettlementService();
+        self::assertFalse($service->statement($hotel, 11)['settlementWorkflowEnabled']);
+        try {
+            $service->prepareVerification($hotel, 11, $paymentId, 7,
+                'bank_statement', 'documentary-match-disabled');
+            self::fail('Settlement writes must remain disabled until explicitly activated.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('activation', $exception->errors());
+        }
+        self::assertSame(0, DB::table('folio_settlement_verifications')->count());
+    }
+
 }
