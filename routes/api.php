@@ -35,6 +35,7 @@ use App\Http\Controllers\Api\RoomInventoryStatusController;
 use App\Http\Controllers\Api\NightAuditPreviewController;
 use App\Http\Controllers\Api\NightAuditReviewController;
 use App\Http\Controllers\Api\FinancialBusinessDayController;
+use App\Http\Controllers\Api\FinancialTaxPolicyController;
 use App\Http\Controllers\Api\GuestStayHistoryController;
 use App\Http\Controllers\Api\ReservationSpecialRequestController;
 use App\Http\Controllers\Api\ReservationScenarioController;
@@ -168,6 +169,13 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('hotel.permission:keycard.request')->middleware('throttle:20,1');
 
             Route::middleware('hotel.admin')->group(function (): void {
+                // Tax preview is explicitly nonposting; approval does not touch guest balances.
+                Route::get('/finance/tax-policies', [FinancialTaxPolicyController::class, 'index']);
+                Route::post('/finance/tax-policies', [FinancialTaxPolicyController::class, 'draft'])
+                    ->middleware('throttle:10,1');
+                Route::post('/finance/tax-policies/{policy}/approve', [FinancialTaxPolicyController::class, 'approve'])
+                    ->whereNumber('policy')->middleware('throttle:5,1');
+                Route::get('/finance/tax-preview', [FinancialTaxPolicyController::class, 'preview']);
                 Route::get('/finance/business-day', [FinancialBusinessDayController::class, 'show']);
                 Route::post('/finance/business-day/close', [FinancialBusinessDayController::class, 'close'])
                     ->middleware('throttle:5,1');
