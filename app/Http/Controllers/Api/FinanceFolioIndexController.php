@@ -1,0 +1,85 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Http\Controllers\Api;
+
+use App\Domain\Reservations\FolioAccountingService;
+use App\Models\Hotel;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+
+/**
+ * Read-only, tenant-scoped cashier work queue. Never computes a final payable
+ * amount or presents staff-confirmed funds as independently verified money.
+ * Financial mutations remain in the existing auditable domain services.
+ */
+final class FinanceFolioIndexController
+{
+    public function __invoke(Request $request, Hotel $hotel, FolioAccountingService $accounting): JsonResponse
+    {
+        $input = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1', 'max:100000'],
+            'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'search' => ['sometimes', 'string', 'max:120'],
+        ]);
+        $page = (int) ($input['page'] ?? 1);
+        $perPage = (int) ($input['per_page'] ?? 20);
+        $search = trim((string) ($input['search'] ?? ''));
+
+        $query = DB::table('reservation_folios as f')
+            ->join('reservation_records as b', function ($join): void {
+                $join->on('b.id', '=', 'f.reservation_record_id')
+                    ->on('b.hotel_id', '=', 'f.hotel_id');
+            })
+            ->where('f.hotel_id', $hotel->id);
+        if ($search !== '') {
+            $query->where(function ($builder) use ($search): void {
+                $builder->where('b.reference', 'like', '%'.addcslashes($search, '%_\\').'%');
+                if (ctype_digit($search)) {
+                    $builder->orWhere('b.id', (int) $search);
+                }
+            });
+        }
+        $total = (clone $query)->count();
+        $rows = $query->orderByDesc('b.id')->forPage($page, $perPage)
+            ->get(['f.id as folio_id', 'f.currency', 'b.id as booking_id',
+                'b.reference', 'b.check_in', 'b.check_out', 'b.lifecycle_state']);
+        $signedFolioIds = DB::table('folio_settlement_signoffs')
+            ->where('hotel_id', $hotel->id)
+            ->whereIn('folio_id', $rows->pluck('folio_id')->all())
+            ->pluck('folio_id')->map(fn ($id) => (string) $id)->flip();
+
+        $data = $rows->map(function (object $row) use ($accounting, $signedFolioIds): array {
+            // Summary uses the same posted ledger data used by settlement.
+            $summary = $accounting->summaryFor((object) [
+                'id' => $row->folio_id, 'hotel_id' => null,
+            ]);
+            return [
+                'bookingId' => (string) $row->booking_id,
+                'folioId' => (string) $row->folio_id,
+                'reference' => (string) $row->reference,
+                'checkIn' => (string) $row->check_in,
+                'checkOut' => (string) $row->check_out,
+                'status' => (string) $row->lifecycle_state,
+                'currency' => (string) $row->currency,
+                'netRecordedChargesMinor' => $summary['netRecordedChargesMinor'],
+                'staffConfirmedPaymentsMinor' => $summary['staffConfirmedPaymentsMinor'],
+                'pendingReviewPaymentsMinor' => $summary['pendingReviewPaymentsMinor'],
+                'signed' => $signedFolioIds->has((string) $row->folio_id),
+                'provisionalOnly' => true,
+            ];
+        })->values();
+
+        return response()->json([
+            'data' => $data,
+            'meta' => [
+                'page' => $page, 'perPage' => $perPage, 'total' => $total,
+                'totalPages' => (int) ceil($total / $perPage),
+                'amountsProvisional' => true,
+                'paymentEvidenceNotIndependentlyVerified' => true,
+            ],
+        ]);
+    }
+}
