@@ -213,13 +213,15 @@ final class RoomReadinessService
     {
         $this->room($hotel, $roomId);
         $result = DB::table('room_readiness_events')
-            ->where('hotel_id', $hotel->id)->where('room_id', $roomId)
-            ->orderByDesc('id')->paginate(20, ['*'], 'page', $page);
+            ->leftJoin('users as audit_actor', 'audit_actor.id', '=', 'room_readiness_events.actor_id')
+            ->where('room_readiness_events.hotel_id', $hotel->id)->where('room_readiness_events.room_id', $roomId)
+            ->orderByDesc('room_readiness_events.id')->paginate(20, ['room_readiness_events.*', 'audit_actor.name as actor_name'], 'page', $page);
         return [
             'data' => $result->getCollection()->map(fn (object $event): array => [
                 'id' => (string) $event->id,
                 'inspectionId' => (string) $event->inspection_id,
                 'actorId' => (string) $event->actor_id,
+                'actorName' => $event->actor_name,
                 'action' => $event->action,
                 'details' => json_decode($event->details_json, true, flags: JSON_THROW_ON_ERROR),
                 'createdAt' => $event->created_at,
