@@ -118,7 +118,7 @@ final class GroupAllotmentController
             'name' => $row->name, 'roomTypeId' => (string) $row->room_type_id,
             'roomTypeName' => $row->room_type_name, 'quantity' => (int) $row->quantity,
             'checkIn' => $row->check_in, 'checkOut' => $row->check_out,
-            'expiresAt' => \Carbon\CarbonImmutable::parse($row->expires_at, 'UTC')->toIso8601String(),
+            'expiresAt' => \Carbon\CarbonImmutable::parse($row->expires_at, config('app.timezone', 'UTC'))->toIso8601String(),
             'createdByName' => $row->creator_name,
             'releasedByName' => $row->releaser_name,
             'status' => $row->status === 'held'
