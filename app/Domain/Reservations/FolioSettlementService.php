@@ -192,6 +192,12 @@ final class FolioSettlementService
                 return ['id' => (string) $existing->id, 'replayed' => true];
             }
             $statement = $this->statement($hotel, $bookingId);
+            if ($statement['status'] !== 'checked_in'
+                || now($hotel->timezone ?: 'Asia/Manila')->toDateString() < $statement['checkOut']) {
+                throw ValidationException::withMessages([
+                    'booking' => 'A registered in-house guest at or after scheduled departure is required for checkout sign-off.',
+                ]);
+            }
             if (!$statement['canSignOff']) {
                 throw ValidationException::withMessages(['settlement' => implode(' ', $statement['blockers'])]);
             }
@@ -224,6 +230,23 @@ final class FolioSettlementService
                 'description' => $r->description, 'stayDate' => $r->stay_date,
                 'amountMinor' => (int) $r->amount_minor,
             ])->all();
+        $taxAllocations = [];
+        if (Schema::hasTable('financial_folio_night_assessments')) {
+            $taxAllocations = DB::table('financial_folio_night_assessments')
+                ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
+                ->orderBy('stay_date')->get(['folio_entry_id', 'stay_date', 'status',
+                    'gross_minor', 'vat_minor', 'room_revenue_minor',
+                    'folio_credit_minor', 'benefit_kind'])
+                ->map(fn ($r) => [
+                    'folioEntryId' => (string) $r->folio_entry_id,
+                    'stayDate' => $r->stay_date, 'status' => $r->status,
+                    'grossMinor' => (int) $r->gross_minor,
+                    'vatMinor' => (int) $r->vat_minor,
+                    'roomRevenueMinor' => (int) $r->room_revenue_minor,
+                    'folioCreditMinor' => (int) $r->folio_credit_minor,
+                    'benefitKind' => $r->benefit_kind,
+                ])->all();
+        }
         $adjustments = DB::table('folio_adjustments')
             ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
             ->orderBy('id')->get(['id', 'kind', 'reason', 'amount_minor'])
@@ -281,6 +304,16 @@ final class FolioSettlementService
         if ($pending > 0) $blockers[] = 'Unverified or rejected payment evidence remains.';
         if ($net !== $allocated) $blockers[] = 'Verified payment allocations do not equal recorded charges.';
         if ($allocated > $verified) $blockers[] = 'Allocated funds exceed verified payment evidence.';
+        if (config('financial_accounting.enable_live_folio_tax', false)) {
+            $assessedEntries = array_column($taxAllocations, 'folioEntryId');
+            foreach ($charges as $charge) {
+                if ($charge['type'] === 'room_night'
+                    && !in_array($charge['id'], $assessedEntries, true)) {
+                    $blockers[] = 'Room-night tax allocations must be completed before settlement.';
+                    break;
+                }
+            }
+        }
         if (DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)
             ->where('folio_id', $folio->id)->whereIn('status', ['requested', 'approved'])->exists()) {
             $blockers[] = 'Refund requests require separate confirmed-disbursement reconciliation.';
@@ -300,6 +333,7 @@ final class FolioSettlementService
             'checkIn' => $booking->check_in, 'checkOut' => $booking->check_out,
             'status' => $booking->lifecycle_state, 'currency' => $folio->currency,
             'charges' => $charges, 'adjustments' => $adjustments,
+            'taxAllocations' => $taxAllocations,
             'payments' => $payments, 'allocations' => $allocations,
             'netRecordedChargesMinor' => $net,
             'verifiedPaymentsMinor' => $verified,
