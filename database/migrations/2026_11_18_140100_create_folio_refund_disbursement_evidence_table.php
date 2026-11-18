@@ -24,7 +24,6 @@ return new class extends Migration {
             $table->timestamp('reviewed_at')->nullable();
             $table->timestamps();
             $table->unique(['hotel_id','refund_request_id'], 'folio_refund_disburse_once');
-            $table->unique(['hotel_id','external_reference'], 'folio_refund_external_ref_unique');
             $table->index(['hotel_id','folio_id','status'], 'folio_refund_disburse_lookup');
         });
     }
