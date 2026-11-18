@@ -236,6 +236,7 @@ final class FolioAccountingService
             }
 
             $folio = $this->findFolio($hotel, $bookingId, true);
+            $this->assertNotSigned($hotel, $folio);
             // Once financial journals have been linked to a priced room night,
             // cancellation must use an explicit append-only accounting reversal.
             if (DB::table('financial_folio_night_assessments')
