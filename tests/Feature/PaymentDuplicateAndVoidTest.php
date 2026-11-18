@@ -266,3 +266,42 @@ it('stops accidental second cash receipts across staff and records a manager-aut
         'hotel_id' => $hotel->id, 'approved_by' => $manager->id,
     ]);
 });
+
+it('reports the correct cash shift for a guest payment through open, submitted and reconciled states', function (): void {
+    [$hotel, $booking, $folio, $cashier, $manager] = paymentControlFixture();
+    $shifts = app(CashierShiftService::class);
+    $accounting = app(FolioAccountingService::class);
+    $settlement = app(\App\Domain\Reservations\FolioSettlementService::class);
+    $opened = $shifts->open($hotel, $cashier->id, 0);
+    $cash = $shifts->receive($hotel, $cashier->id, (int) $opened['id'], $booking, [
+        'requestKey' => 'payment-linked-shift-state-1',
+        'reference' => 'CASH-SHIFT-STATE',
+        'amountMinor' => 840000,
+    ]);
+    $paymentId = (string) $cash['paymentId'];
+    $handoff = collect($settlement->statement($hotel, $booking)['cashShiftContexts'])
+        ->firstWhere('paymentId', $paymentId);
+    expect($handoff['cashShiftId'])->toBe((string) $opened['id'])
+        ->and($handoff['cashShiftStatus'])->toBe('open')
+        ->and($handoff['cashierName'])->toBe('Cashier');
+
+    $accounting->review($hotel, $booking, (int) $paymentId, $manager->id, [
+        'decision' => 'confirm', 'note' => 'Reviewed actual receipt evidence.',
+    ]);
+    $shifts->close($hotel, $cashier->id, (int) $opened['id'],
+        840000, 'Counted physical cash after guest payment.');
+    $submitted = collect($settlement->statement($hotel, $booking)['cashShiftContexts'])
+        ->firstWhere('paymentId', $paymentId);
+    expect($submitted['cashShiftStatus'])->toBe('submitted');
+
+    $shifts->reconcile($hotel, $manager->id, (int) $opened['id'],
+        'reconcile', 'Reviewed the physical cash and receipt records.');
+    $reviewed = collect($settlement->statement($hotel, $booking)['cashShiftContexts'])
+        ->firstWhere('paymentId', $paymentId);
+    expect($reviewed['cashShiftStatus'])->toBe('reconciled')
+        ->and($reviewed['reconciledByName'])->toBe('Independent Manager')
+        ->and($reviewed['recordedByName'])->toBe('Cashier');
+
+    // Shift state is presentation metadata only, not an altered guest bill.
+    expect($settlement->statement($hotel, $booking)['verifiedAllocatedMinor'])->toBe(0);
+});
