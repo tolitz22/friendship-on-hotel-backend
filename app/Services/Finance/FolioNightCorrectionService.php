@@ -114,7 +114,7 @@ final class FolioNightCorrectionService
             }
             $lines = [];
             foreach ([
-                'AR' => -$deltaCredit,
+                'AR' => $deltaCredit,
                 'VAT_PAYABLE' => $deltaVat,
                 ($earned === null ? 'DEFERRED_ROOM_REV' : 'ROOM_REV') => $deltaRevenue,
             ] as $account => $creditNet) {
