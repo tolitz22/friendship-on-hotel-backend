@@ -109,7 +109,14 @@ final class OccupancyInvestigationService
         return DB::transaction(function () use ($hotel, $actor, $verificationId, $input): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $this->requireManager($hotel, $actor);
-            $record = $this->base($hotel, $verificationId)->lockForUpdate()->first();
+            // Lock the core investigation row, not the nullable employee-name
+            // joins. PostgreSQL prohibits FOR UPDATE on nullable outer joins.
+            // The hotel and verification constraints remain enforced.
+            $locked = DB::table('occupancy_investigations')
+                ->where('hotel_id', $hotel->id)->where('verification_id', $verificationId)
+                ->lockForUpdate()->first();
+            abort_unless($locked, 404);
+            $record = $this->base($hotel, $verificationId)->first();
             abort_unless($record, 404);
             if ($record->status !== 'open') {
                 throw new HttpException(409, 'This investigation is closed. Its history cannot be rewritten.');
