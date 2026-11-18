@@ -51,6 +51,11 @@ final class CashierShiftService
         $amount = (int) $shift->opening_float_minor;
         $unconfirmed = 0;
         foreach ($receipts as $receipt) {
+            // Keep voided receipts in the immutable shift history, but never
+            // treat a manager-voided mistake as physically received cash.
+            if ($receipt->status === 'voided') {
+                continue;
+            }
             $amount = $this->checkedAdd($amount, (int) $receipt->amount_minor);
             if ($receipt->status !== 'staff_confirmed') {
                 $unconfirmed++;
@@ -58,7 +63,7 @@ final class CashierShiftService
         }
         return [
             'expectedCashMinor' => $amount,
-            'receiptCount' => $receipts->count(),
+            'receiptCount' => $receipts->where('status', '!=', 'voided')->count(),
             'unconfirmedReceiptCount' => $unconfirmed,
             'receipts' => $receipts->map(fn (object $p): array => [
                 'id' => (string) $p->id,
@@ -171,6 +176,9 @@ final class CashierShiftService
             $payment = app(FolioAccountingService::class)->recordPayment($hotel, $bookingId, $actor, [
                 'requestKey' => $data['requestKey'], 'method' => 'cash',
                 'reference' => $data['reference'], 'amountMinor' => $data['amountMinor'],
+                'duplicateOverrideAuthorized' => $data['duplicateOverrideAuthorized'] ?? false,
+                ...(! empty($data['duplicateOverrideReason'])
+                    ? ['duplicateOverrideReason' => $data['duplicateOverrideReason']] : []),
             ]);
             $record = DB::table('folio_payment_records')
                 ->where('hotel_id', $hotel->id)->where('id', (int) $payment['id'])->first();
