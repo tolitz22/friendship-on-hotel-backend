@@ -104,6 +104,7 @@ final class OperationalExceptionsController
         // Audit trail is a separate neutral activity feed. A modification alone
         // must never be called suspicious or classified as fraud.
         $activity = $this->bounded(DB::table('reservation_booking_events as ev')
+            ->leftJoin('users as audit_actor','audit_actor.id','=','ev.actor_id')
             ->join('reservation_records as booking', function ($join): void {
                 $join->on('booking.id', '=', 'ev.reservation_record_id')
                     ->on('booking.hotel_id', '=', 'ev.hotel_id');
@@ -112,7 +113,7 @@ final class OperationalExceptionsController
             ->where('ev.created_at', '>=', now($hotel->timezone ?: 'Asia/Manila')->subDays($days)->utc())
             ->orderByDesc('ev.id')
             ->limit(self::MAX_SOURCE + 1)
-            ->get(['ev.id', 'ev.actor_id', 'ev.event_type', 'ev.created_at',
+            ->get(['ev.id', 'ev.actor_id', 'audit_actor.name as actor_name', 'ev.event_type', 'ev.created_at',
                 'booking.id as booking_id', 'booking.reference']), 'reservation activity');
 
         if (count($items) > 2000) {
@@ -136,6 +137,7 @@ final class OperationalExceptionsController
                     'bookingId' => (string) $row->booking_id,
                     'reference' => $row->reference,
                     'actorId' => (string) $row->actor_id,
+                    'actorName' => $row->actor_name,
                     'eventType' => $row->event_type,
                     'createdAt' => (string) $row->created_at,
                 ])->values(),
