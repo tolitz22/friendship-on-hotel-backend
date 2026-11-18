@@ -23,9 +23,13 @@ final class FinancialTaxPolicyService
     public function draft(int $hotelId, string $classification, string $priceMode,
         int $rateBps, string $from, ?string $until, string $note): int
     {
-        $this->validatePolicy($hotelId, $classification, $priceMode, $rateBps, $from, $until);
+        try {
+            $this->validatePolicy($hotelId, $classification, $priceMode, $rateBps, $from, $until);
+        } catch (InvalidArgumentException $exception) {
+            throw ValidationException::withMessages(['policy' => $exception->getMessage()]);
+        }
         if (mb_strlen(trim($note)) < 15 || mb_strlen($note) > 2000) {
-            throw new InvalidArgumentException('Provide a substantive tax policy review note.');
+            throw ValidationException::withMessages(['reviewNote' => 'Provide a substantive tax policy review note.']);
         }
 
         return (int) DB::table('financial_tax_policies')->insertGetId([
