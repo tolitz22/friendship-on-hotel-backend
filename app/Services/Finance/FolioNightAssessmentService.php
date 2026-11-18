@@ -175,9 +175,27 @@ final class FolioNightAssessmentService
         if ($assessment === null || $assessment->status !== 'approved' || $assessment->source_journal_id === null) {
             throw ValidationException::withMessages(['assessment' => 'An approved folio-night assessment is required.']);
         }
+        $existing = DB::table('financial_room_revenue_recognitions')
+            ->where('hotel_id', $hotelId)
+            ->where('source_journal_id', $assessment->source_journal_id)
+            ->where('stay_date', $assessment->stay_date)->first();
+        if ($existing !== null) {
+            if (DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
+                ->where('reverses_journal_id', $existing->recognition_journal_id)->exists()) {
+                throw ValidationException::withMessages([
+                    'recognition' => 'Reversed revenue recognition requires manual reconciliation.',
+                ]);
+            }
+            return (int) $existing->recognition_journal_id;
+        }
+        if (DB::table('financial_folio_night_corrections')->where('hotel_id', $hotelId)
+            ->where('assessment_id', $assessmentId)->where('status', 'pending')->exists()) {
+            throw ValidationException::withMessages(['correction' => 'Approve or resolve the pending correction first.']);
+        }
+        $current = (new FolioNightCorrectionService())->current($hotelId, $assessment);
         return (new NightlyRoomRevenueRecognitionService())->recognize(
             $hotelId, (int) $assessment->source_journal_id,
-            $assessment->stay_date, (int) $assessment->room_revenue_minor, $actorId
+            $assessment->stay_date, $current['room_revenue_minor'], $actorId
         );
     }
 
