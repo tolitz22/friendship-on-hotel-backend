@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace Tests\Feature;
 
 use App\Services\Finance\FolioNightAssessmentService;
+use App\Services\Finance\FinancialBusinessDayCloseService;
 use App\Services\Finance\FolioNightCorrectionService;
 use App\Services\Finance\FinancialJournalPostingService;
 use Illuminate\Database\Schema\Blueprint;
@@ -324,6 +325,42 @@ final class FolioNightAssessmentIntegrationTest extends TestCase
         self::assertSame(8000, (int) DB::table('financial_posting_lines')
             ->where('journal_id', $earned)->where('account_code', 'ROOM_REV')
             ->value('credit_minor'));
+    }
+
+    public function test_financial_close_rejects_missing_assessments_and_pending_corrections(): void
+    {
+        $close = new FinancialBusinessDayCloseService();
+        try {
+            $close->close(1, '2026-11-18', 7);
+            self::fail('An unassessed room-night must prevent day close when accounting is active.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('folio_assessments', $exception->errors());
+        }
+
+        $service = new FolioNightAssessmentService();
+        $draft = $service->prepare(1, 13, 9, 7);
+        $service->approve(1, (int) $draft['id'], 8);
+        try {
+            $close->close(1, '2026-11-18', 7);
+            self::fail('Earned revenue must exist before day close.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('revenue_recognition', $exception->errors());
+        }
+
+        $service->recognize(1, (int) $draft['id'], 8);
+        (new FolioNightCorrectionService())->prepare(
+            1, (int) $draft['id'], 9, 'senior', 11200,
+            'verified-osca-reference', 'Review a verified eligible guest adjustment'
+        );
+        try {
+            $close->close(1, '2026-11-18', 7);
+            self::fail('Unreviewed correction must prevent final close.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('folio_corrections', $exception->errors());
+        }
+        self::assertSame('2026-11-18',
+            DB::table('financial_business_clocks')->where('hotel_id', 1)->value('business_date'));
+        self::assertSame(0, DB::table('financial_day_closes')->count());
     }
 
 }
