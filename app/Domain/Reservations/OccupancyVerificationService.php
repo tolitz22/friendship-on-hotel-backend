@@ -89,7 +89,7 @@ final class OccupancyVerificationService
         return DB::table('occupancy_verification_events')
             ->leftJoin('users as audit_actor','audit_actor.id','=','occupancy_verification_events.actor_id')
             ->where('occupancy_verification_events.hotel_id', $hotel->id)->where('occupancy_verification_events.verification_id', $id)
-            ->orderBy('id')->get()->map(fn (object $row): array => [
+            ->orderBy('occupancy_verification_events.id')->get(['occupancy_verification_events.*','audit_actor.name as actor_name'])->map(fn (object $row): array => [
                 'id' => (string) $row->id, 'actorId' => (string) $row->actor_id,
                 'actorName' => $row->actor_name,
                 'event' => $row->event, 'details' => json_decode($row->details, true),
