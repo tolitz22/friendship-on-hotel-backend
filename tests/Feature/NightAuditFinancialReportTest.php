@@ -90,7 +90,7 @@ final class NightAuditFinancialReportTest extends TestCase
         return (new NightAuditFinancialReportController())($request, $hotel)->getData(true)['data'];
     }
 
-    private function seed(): void
+    private function seedNightAuditFixture(): void
     {
         $audit = json_encode([
             'scheduledRoomNights' => 3, 'pricedRoomNights' => 3,
@@ -126,7 +126,7 @@ final class NightAuditFinancialReportTest extends TestCase
 
     public function test_reconciles_closed_journals_without_misrepresenting_occupancy(): void
     {
-        $this->seed();
+        $this->seedNightAuditFixture();
         $data = $this->report();
         self::assertTrue($data['financialJournalReconciled']);
         self::assertSame([], $data['blockers']);
@@ -142,7 +142,7 @@ final class NightAuditFinancialReportTest extends TestCase
 
     public function test_mutated_ledger_after_close_is_explicitly_flagged(): void
     {
-        $this->seed();
+        $this->seedNightAuditFixture();
         DB::table('financial_posting_lines')->where('journal_id', 100)
             ->where('credit_minor', 10000)->update(['credit_minor' => 9000]);
         $data = $this->report();
@@ -153,7 +153,7 @@ final class NightAuditFinancialReportTest extends TestCase
 
     public function test_a_second_hotel_never_reads_the_first_hotels_reconciliation(): void
     {
-        $this->seed();
+        $this->seedNightAuditFixture();
         $data = $this->report(2);
         self::assertSame('2', $data['hotelId']);
         self::assertSame('missing', $data['nightAudit']['status']);
@@ -163,7 +163,7 @@ final class NightAuditFinancialReportTest extends TestCase
 
     public function test_legacy_booking_journal_does_not_count_as_earned_revenue(): void
     {
-        $this->seed();
+        $this->seedNightAuditFixture();
         DB::table('financial_posting_journals')->where('id', 100)
             ->update(['source_type' => 'folio']);
         $data = $this->report();
@@ -173,7 +173,7 @@ final class NightAuditFinancialReportTest extends TestCase
 
     public function test_cashier_discrepancies_are_visible_and_block_clean_reconciliation(): void
     {
-        $this->seed();
+        $this->seedNightAuditFixture();
         DB::table('cashier_shifts')->insert([
             'hotel_id' => 1, 'status' => 'flagged',
             'submitted_at' => '2026-11-17 08:00:00',
@@ -189,7 +189,7 @@ final class NightAuditFinancialReportTest extends TestCase
 
     public function test_vat_posting_and_room_revenue_reversal_are_net_account_movements(): void
     {
-        $this->seed();
+        $this->seedNightAuditFixture();
         // Add a balanced VAT journal while preserving matching close totals.
         DB::table('financial_posting_journals')->insert([
             'id' => 101, 'hotel_id' => 1, 'business_date' => '2026-11-17',
@@ -213,7 +213,7 @@ final class NightAuditFinancialReportTest extends TestCase
 
     public function test_tampered_audit_snapshot_is_not_trusted(): void
     {
-        $this->seed();
+        $this->seedNightAuditFixture();
         DB::table('night_audit_reviews')->where('hotel_id', 1)
             ->update(['snapshot_json' => '{"roomCount":999}']);
         $data = $this->report();
