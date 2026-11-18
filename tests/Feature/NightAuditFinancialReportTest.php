@@ -136,7 +136,7 @@ final class NightAuditFinancialReportTest extends TestCase
         self::assertNull($data['kpis']['adrMinor']);
         self::assertNull($data['kpis']['revparMinor']);
         self::assertTrue($data['kpis']['inspectionCoverageComplete']);
-        self::assertSame(100.0, $data['kpis']['inspectionOccupancyPercent']);
+        self::assertEquals(100.0, $data['kpis']['inspectionOccupancyPercent']);
         self::assertSame(10000, $data['kpis']['recognizedRoomRevenueMinor']);
     }
 
