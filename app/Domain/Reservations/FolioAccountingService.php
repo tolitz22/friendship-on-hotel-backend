@@ -258,6 +258,9 @@ final class FolioAccountingService
                 if (! hash_equals($previous->payload_sha256, $fingerprint)) {
                     throw new HttpException(409, 'Payment key is already used for different details.');
                 }
+                if ((int) $previous->recorded_by !== $actor) {
+                    throw new HttpException(409, 'Payment request key belongs to a different staff account.');
+                }
                 return ['id' => (string) $previous->id, 'status' => $previous->status, 'replayed' => true];
             }
             if (DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
