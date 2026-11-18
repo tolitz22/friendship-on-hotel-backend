@@ -53,12 +53,18 @@ final class OperationalExceptionsController
         }
 
         // Only active, assigned stays. Checkout day is exclusive.
-        $stays = $this->bounded(DB::table('reservation_records')
-            ->where('hotel_id', $hotel->id)->whereNotNull('assigned_room_id')
-            ->whereIn('lifecycle_state', ['confirmed', 'checked_in'])
-            ->where('check_in', '<', $through)->where('check_out', '>', $today)
-            ->orderBy('assigned_room_id')->orderBy('check_in')->orderBy('id')
-            ->limit(self::MAX_SOURCE + 1)->get(['id', 'reference', 'assigned_room_id', 'check_in', 'check_out']), 'assigned stays');
+        $stays = $this->bounded(DB::table('reservation_records as stay')
+            ->join('rooms as room', function ($join): void {
+                $join->on('room.id', '=', 'stay.assigned_room_id')
+                    ->on('room.hotel_id', '=', 'stay.hotel_id');
+            })
+            ->where('stay.hotel_id', $hotel->id)->whereNotNull('stay.assigned_room_id')
+            ->whereIn('stay.lifecycle_state', ['confirmed', 'checked_in'])
+            ->where('stay.check_in', '<', $through)->where('stay.check_out', '>', $today)
+            ->orderBy('stay.assigned_room_id')->orderBy('stay.check_in')->orderBy('stay.id')
+            ->limit(self::MAX_SOURCE + 1)
+            ->get(['stay.id', 'stay.reference', 'stay.assigned_room_id', 'stay.check_in',
+                'stay.check_out', 'room.number as room_number']), 'assigned stays');
         $byRoom = $stays->groupBy('assigned_room_id');
         foreach ($byRoom as $roomId => $roomStays) {
             $ordered = $roomStays->values();
@@ -70,11 +76,14 @@ final class OperationalExceptionsController
                         break;
                     }
                     if ($first->check_in < $second->check_out) {
-                        $items[] = $this->signal('assigned_room_overlap', 'critical',
+                        $signal = $this->signal('assigned_room_overlap', 'critical',
                             $second->id, $second->reference,
-                            'Two active reservations overlap on assigned room #'.$roomId.'.',
+                            'Two active reservations overlap in room '.$second->room_number.'.',
                             'Inspect '.$first->reference.' and '.$second->reference.' before changing assignments.',
                             (string) max($today, $second->check_in));
+                        $signal['roomId'] = (string) $roomId;
+                        $signal['roomNumber'] = (string) $second->room_number;
+                        $items[] = $signal;
                     }
                 }
             }
