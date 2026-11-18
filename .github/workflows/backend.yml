@@ -40,6 +40,22 @@ jobs:
           APP_KEY: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
           DB_CONNECTION: sqlite
           DB_DATABASE: ":memory:"
+      - name: Phase 62.5 critical guest operations acceptance
+        run: |
+          php artisan test \
+            tests/Feature/Phase625OperationalBoundaryTest.php \
+            tests/Feature/Phase43RealWorkflowAcceptanceTest.php \
+            tests/Feature/CashierShiftPhase52Test.php \
+            tests/Feature/RoomReadinessPhase35Test.php \
+            tests/Feature/OccupancyVerificationPhase53Test.php \
+            tests/Feature/OccupancyCoverageReportPhase55Test.php \
+            tests/Feature/FinancialBusinessDayIntegrationTest.php \
+            tests/Feature/NightAuditFinancialReportTest.php
+        env:
+          APP_ENV: testing
+          APP_KEY: "base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          DB_CONNECTION: sqlite
+          DB_DATABASE: ":memory:"
       - name: Feature tests
         run: php artisan test
         env:
