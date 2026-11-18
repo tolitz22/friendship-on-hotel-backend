@@ -35,6 +35,15 @@ final class RoomInventoryService
             ->where('check_out', '>', $stay->arrival)
             ->get(['room_id', 'check_in', 'check_out']);
 
+        // Only live, unexpired group holds consume room-type inventory.
+        // No physical room is preassigned by an allotment.
+        $allotments = DB::table('group_allotments')
+            ->where('hotel_id', $hotel->id)->where('room_type_id', $typeId)
+            ->where('status', 'held')->where('expires_at', '>', now())
+            ->where('check_in', '<', $stay->departure)
+            ->where('check_out', '>', $stay->arrival)
+            ->get(['quantity', 'check_in', 'check_out']);
+
         $days = [];
         $arrival = new \DateTimeImmutable($stay->arrival);
         for ($i = 0; $i < $stay->nights(); $i++) {
@@ -43,13 +52,16 @@ final class RoomInventoryService
             // Multiple overlapping blocks for the same physical room consume one room.
             $blocked = $blocks->filter(fn (object $b): bool => $b->check_in <= $day && $day < $b->check_out)
                 ->pluck('room_id')->unique()->count();
+            $held = $allotments->filter(fn (object $h): bool => $h->check_in <= $day && $day < $h->check_out)
+                ->sum('quantity');
             $days[] = [
                 'date' => $day,
                 'physicalRooms' => $capacity,
                 'reserved' => $booked,
                 'blocked' => $blocked,
-                'remaining' => max(0, $capacity - $booked - $blocked),
-                'overcommitted' => ($booked + $blocked) > $capacity,
+                'groupHeld' => (int) $held,
+                'remaining' => max(0, $capacity - $booked - $blocked - $held),
+                'overcommitted' => ($booked + $blocked + $held) > $capacity,
             ];
         }
 
