@@ -57,7 +57,9 @@ final class CashierShiftController
             'requestKey' => ['required','string','min:8','max:100'],
             'reference' => ['required','string','min:3','max:120','regex:/\\S/u'],
             'amountMinor' => ['required','integer','min:1','max:100000000000'],
+            'duplicateOverrideReason' => ['sometimes','string','min:12','max:500'],
         ]);
+        $data['duplicateOverrideAuthorized'] = $this->manager($request, $hotel);
         $result = $service->receive($hotel, (int) $request->user()->id,
             (int) $shift, (int) $booking, $data);
         return response()->json(['data' => $result], $result['replayed'] ? 200 : 201);
