@@ -37,6 +37,7 @@ use App\Http\Controllers\Api\NightAuditReviewController;
 use App\Http\Controllers\Api\FinancialBusinessDayController;
 use App\Http\Controllers\Api\FinancialTaxPolicyController;
 use App\Http\Controllers\Api\FolioNightAssessmentController;
+use App\Http\Controllers\Api\FolioNightCorrectionController;
 use App\Http\Controllers\Api\GuestStayHistoryController;
 use App\Http\Controllers\Api\ReservationSpecialRequestController;
 use App\Http\Controllers\Api\ReservationScenarioController;
@@ -179,6 +180,12 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('booking')->whereNumber('assessment')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/folio-night-assessments/{assessment}/recognize', [FolioNightAssessmentController::class, 'recognize'])
                     ->whereNumber('booking')->whereNumber('assessment')->middleware('throttle:10,1');
+                Route::get('/bookings/{booking}/folio-night-assessments/{assessment}/corrections', [FolioNightCorrectionController::class, 'index'])
+                    ->whereNumber('booking')->whereNumber('assessment');
+                Route::post('/bookings/{booking}/folio-night-assessments/{assessment}/corrections', [FolioNightCorrectionController::class, 'prepare'])
+                    ->whereNumber('booking')->whereNumber('assessment')->middleware('throttle:10,1');
+                Route::post('/bookings/{booking}/folio-night-assessments/{assessment}/corrections/{correction}/approve', [FolioNightCorrectionController::class, 'approve'])
+                    ->whereNumber('booking')->whereNumber('assessment')->whereNumber('correction')->middleware('throttle:5,1');
                 Route::get('/finance/tax-policies', [FinancialTaxPolicyController::class, 'index']);
                 Route::post('/finance/tax-policies', [FinancialTaxPolicyController::class, 'draft'])
                     ->middleware('throttle:10,1');
