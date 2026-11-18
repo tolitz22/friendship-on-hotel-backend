@@ -69,13 +69,16 @@ final class ReadinessEnforcementPolicyService
     public function history(Hotel $hotel, int $page): array
     {
         $result = DB::table('hotel_readiness_policy_events')
-            ->where('hotel_id', $hotel->id)->orderByDesc('id')
-            ->paginate(20, ['*'], 'page', $page);
+            ->leftJoin('users as audit_actor', 'audit_actor.id', '=', 'hotel_readiness_policy_events.actor_id')
+            ->where('hotel_readiness_policy_events.hotel_id', $hotel->id)
+            ->orderByDesc('hotel_readiness_policy_events.id')
+            ->paginate(20, ['hotel_readiness_policy_events.*', 'audit_actor.name as actor_name'], 'page', $page);
 
         return [
             'data' => $result->getCollection()->map(fn (object $row): array => [
                 'id' => (string) $row->id,
                 'actorId' => (string) $row->actor_id,
+                'actorName' => $row->actor_name,
                 'previousEnabled' => (bool) $row->previous_enabled,
                 'nextEnabled' => (bool) $row->next_enabled,
                 'revision' => (int) $row->revision,
