@@ -6,6 +6,9 @@ namespace Tests\Feature;
 
 use App\Services\Finance\FinancialBusinessDayCloseService;
 use App\Services\Finance\FinancialJournalPostingService;
+use App\Http\Controllers\Api\FinancialBusinessDayController;
+use App\Models\Hotel;
+use Illuminate\Http\Request;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -22,6 +25,15 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
     {
         parent::setUp();
 
+        Schema::create('night_audit_reviews', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->date('business_date');
+            $table->string('status');
+            $table->unsignedBigInteger('reviewed_by');
+            $table->timestamp('reviewed_at');
+            $table->unique(['hotel_id', 'business_date']);
+        });
         Schema::create('financial_business_clocks', function (Blueprint $table): void {
             $table->id();
             $table->unsignedBigInteger('hotel_id')->unique();
@@ -79,7 +91,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
 
     protected function tearDown(): void
     {
-        foreach (['financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
+        foreach (['night_audit_reviews', 'financial_posting_lines', 'financial_posting_journals', 'financial_day_closes',
             'financial_accounting_periods', 'financial_business_clocks'] as $table) {
             Schema::dropIfExists($table);
         }
@@ -250,6 +262,48 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
 
         self::assertSame(0, DB::table('financial_posting_journals')->where('hotel_id', 2)->count());
         self::assertSame(1, DB::table('financial_posting_journals')->where('hotel_id', 1)->count());
+    }
+
+    public function test_admin_close_endpoint_requires_cleared_night_audit_review(): void
+    {
+        $this->seedHotel(1);
+        $hotel = new Hotel();
+        $hotel->id = 1;
+        $controller = new FinancialBusinessDayController();
+        $service = new FinancialBusinessDayCloseService();
+        $request = Request::create('/api/v1/hotels/1/finance/business-day/close', 'POST', [
+            'businessDate' => '2026-11-18',
+            'acknowledged' => true,
+        ]);
+        $request->setUserResolver(static fn () => (object) ['id' => 7]);
+
+        self::assertFalse($controller->show($hotel)->getData(true)['data']['canClose']);
+
+        try {
+            $controller->close($request, $hotel, $service);
+            self::fail('Missing review must block close.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('businessDate', $exception->errors());
+        }
+
+        DB::table('night_audit_reviews')->insert([
+            'hotel_id' => 1, 'business_date' => '2026-11-18', 'status' => 'flagged',
+            'reviewed_by' => 7, 'reviewed_at' => now(),
+        ]);
+        try {
+            $controller->close($request, $hotel, $service);
+            self::fail('Flagged review must block close.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('businessDate', $exception->errors());
+        }
+
+        DB::table('night_audit_reviews')->where('hotel_id', 1)->update(['status' => 'reviewed']);
+        self::assertTrue($controller->show($hotel)->getData(true)['data']['canClose']);
+
+        $result = $controller->close($request, $hotel, $service)->getData(true)['data'];
+        self::assertSame('2026-11-19', $result['nextBusinessDate']);
+        self::assertSame(1, DB::table('financial_day_closes')->where('hotel_id', 1)->count());
+        self::assertFalse($controller->show($hotel)->getData(true)['data']['canClose']);
     }
 
 }
