@@ -473,6 +473,7 @@ final class FolioSettlementService
                 'recordedByName' => $actors?->recorder_name,
                 'verificationPreparedByName' => $actors?->preparer_name,
                 'cashShiftId' => $shift === null ? null : (string) $shift->shift_id,
+                'cashierId' => $shift === null ? null : (string) $shift->cashier_id,
                 'cashShiftStatus' => $status,
                 'cashierName' => $shift?->cashier_name,
                 'reconciledByName' => $shift?->reviewer_name,
