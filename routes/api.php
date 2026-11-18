@@ -142,6 +142,10 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('allotment')->middleware('hotel.admin')->middleware('throttle:10,1');
             Route::get('/group-reservations/{group}/financial-summary', GroupFinanceController::class)
                 ->whereNumber('group')->middleware('hotel.permission:finance.read');
+            Route::post('/group-reservations/{group}/bookings/{booking}/payments/{payment}/allocations',
+                [GroupFinanceController::class, 'allocate'])
+                ->whereNumber('group')->whereNumber('booking')->whereNumber('payment')
+                ->middleware('hotel.admin')->middleware('throttle:10,1');
             Route::get('/group-reservations', [GroupReservationController::class, 'index'])
                 ->middleware('hotel.permission:reservation.read');
             Route::get('/group-reservations/{group}', [GroupReservationController::class, 'show'])
