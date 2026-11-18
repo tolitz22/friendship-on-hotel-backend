@@ -1,0 +1,122 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Finance;
+
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+
+/**
+ * Recognizes already-deferred room revenue; does not write reservation folios,
+ * charge a guest, create payments, or assess VAT.
+ *
+ * Only source journals explicitly posted as folio_deferred are accepted. The
+ * existing booking journals that credit ROOM_REV must never be recognized again.
+ */
+final class NightlyRoomRevenueRecognitionService
+{
+    public function recognize(
+        int $hotelId,
+        int $sourceJournalId,
+        string $stayDate,
+        int $amountMinor,
+        ?int $actorId = null
+    ): int {
+        if ($hotelId < 1 || $sourceJournalId < 1 || $amountMinor < 1
+            || $amountMinor > 1000000000000
+            || !preg_match('/^\d{4}-\d{2}-\d{2}$/D', $stayDate)
+            || !($date = \DateTimeImmutable::createFromFormat('!Y-m-d', $stayDate))
+            || $date->format('Y-m-d') !== $stayDate) {
+            throw new InvalidArgumentException('Invalid revenue recognition inputs.');
+        }
+
+        return DB::transaction(function () use ($hotelId, $sourceJournalId, $stayDate, $amountMinor, $actorId): int {
+            // Use the exact same per-hotel lock as journal writers and day close.
+            $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotelId)
+                ->lockForUpdate()->first();
+            if ($clock === null || $clock->status !== 'open'
+                || CarbonImmutable::parse($clock->business_date)->toDateString() !== $stayDate
+                || DB::table('financial_day_closes')->where('hotel_id', $hotelId)
+                    ->where('business_date', $stayDate)->exists()) {
+                throw ValidationException::withMessages([
+                    'stay_date' => 'Revenue can only be recognized for the currently open financial business date.',
+                ]);
+            }
+
+            $source = DB::table('financial_posting_journals')
+                ->where('hotel_id', $hotelId)->where('id', $sourceJournalId)->first();
+            if ($source === null || $source->source_type !== 'folio_deferred'
+                || $source->reverses_journal_id !== null || $source->currency !== 'PHP') {
+                throw ValidationException::withMessages([
+                    'source_journal_id' => 'Recognition requires an existing PHP deferred-folio journal.',
+                ]);
+            }
+
+            $existing = DB::table('financial_room_revenue_recognitions')
+                ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)
+                ->where('stay_date', $stayDate)->first();
+            if ($existing !== null) {
+                if ((int) $existing->amount_minor !== $amountMinor) {
+                    throw ValidationException::withMessages([
+                        'amount_minor' => 'The stay date already has a different recognized amount.',
+                    ]);
+                }
+                return (int) $existing->recognition_journal_id;
+            }
+
+            $deferred = 0;
+            foreach (DB::table('financial_posting_lines')->where('journal_id', $sourceJournalId)
+                ->where('account_code', 'DEFERRED_ROOM_REV')
+                ->get(['credit_minor', 'debit_minor']) as $line) {
+                if ((int) $line->debit_minor !== 0 || (int) $line->credit_minor <= 0
+                    || (int) $line->credit_minor > PHP_INT_MAX - $deferred) {
+                    throw ValidationException::withMessages(['source_journal_id' => 'Invalid deferred-revenue source lines.']);
+                }
+                $deferred += (int) $line->credit_minor;
+            }
+            if ($deferred === 0) {
+                throw ValidationException::withMessages([
+                    'source_journal_id' => 'The source has no deferred room revenue to recognize.',
+                ]);
+            }
+
+            $recognized = 0;
+            foreach (DB::table('financial_room_revenue_recognitions')
+                ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)
+                ->get(['amount_minor']) as $row) {
+                $amount = (int) $row->amount_minor;
+                if ($amount < 1 || $amount > $deferred - $recognized) {
+                    throw ValidationException::withMessages(['amount_minor' => 'Recorded recognition totals are invalid.']);
+                }
+                $recognized += $amount;
+            }
+            if ($amountMinor > $deferred - $recognized) {
+                throw ValidationException::withMessages([
+                    'amount_minor' => 'Recognition exceeds the remaining deferred room revenue.',
+                ]);
+            }
+
+            $key = 'room-earned-'.$sourceJournalId.'-'.$stayDate;
+            $journalId = (new FinancialJournalPostingService())->post(
+                $hotelId, $key, 'nightly_revenue', (string) $sourceJournalId.'@'.$stayDate,
+                'Earned room revenue for '.$stayDate,
+                [
+                    ['account_code' => 'DEFERRED_ROOM_REV', 'debit_minor' => $amountMinor, 'credit_minor' => 0],
+                    ['account_code' => 'ROOM_REV', 'debit_minor' => 0, 'credit_minor' => $amountMinor],
+                ],
+                $actorId,
+            );
+
+            DB::table('financial_room_revenue_recognitions')->insert([
+                'hotel_id' => $hotelId, 'source_journal_id' => $sourceJournalId,
+                'recognition_journal_id' => $journalId, 'stay_date' => $stayDate,
+                'amount_minor' => $amountMinor, 'created_at' => now(),
+            ]);
+
+            return $journalId;
+        }, 3);
+    }
+}
