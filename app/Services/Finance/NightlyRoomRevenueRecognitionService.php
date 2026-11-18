@@ -63,6 +63,16 @@ final class NightlyRoomRevenueRecognitionService
                 ]);
             }
 
+            $linked = DB::table('financial_folio_night_assessments')
+                ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)->first();
+            if ($linked !== null && ($linked->status !== 'approved'
+                || $linked->stay_date !== $stayDate
+                || (int) $linked->room_revenue_minor !== $amountMinor)) {
+                throw ValidationException::withMessages([
+                    'amount_minor' => 'Linked folio-night revenue must match its approved date and net revenue amount.',
+                ]);
+            }
+
             $existing = DB::table('financial_room_revenue_recognitions')
                 ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)
                 ->where('stay_date', $stayDate)->first();
@@ -70,6 +80,12 @@ final class NightlyRoomRevenueRecognitionService
                 if ((int) $existing->amount_minor !== $amountMinor) {
                     throw ValidationException::withMessages([
                         'amount_minor' => 'The stay date already has a different recognized amount.',
+                    ]);
+                }
+                if (DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
+                    ->where('reverses_journal_id', $existing->recognition_journal_id)->exists()) {
+                    throw ValidationException::withMessages([
+                        'recognition_journal_id' => 'This recognition was reversed and requires a reviewed correction.',
                     ]);
                 }
                 return (int) $existing->recognition_journal_id;
