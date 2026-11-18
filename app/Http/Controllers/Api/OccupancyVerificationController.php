@@ -16,6 +16,7 @@ final class OccupancyVerificationController
         $filters = $request->validate([
             'status' => ['sometimes', 'in:assigned,submitted,verified,flagged'],
             'date' => ['sometimes', 'date_format:Y-m-d'],
+            'roomId' => ['sometimes', 'integer', 'min:1'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
         ]);
