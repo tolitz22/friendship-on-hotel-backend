@@ -204,19 +204,24 @@ final class OperationalExceptionsController
 
         $shifts = $this->bounded(DB::table('cashier_shifts as shift')
             ->leftJoin('users as cashier', 'cashier.id', '=', 'shift.cashier_id')
-            ->where('shift.hotel_id', $hotel->id)->where('shift.status', 'submitted')
+            ->where('shift.hotel_id', $hotel->id)->whereIn('shift.status', ['submitted', 'flagged'])
             ->orderBy('shift.id')->limit(self::MAX_SOURCE + 1)
-            ->get(['shift.id', 'shift.cashier_id', 'shift.submitted_at',
+            ->get(['shift.id', 'shift.cashier_id', 'shift.status', 'shift.submitted_at',
                 'cashier.name as cashier_name']), 'submitted cashier shifts');
         foreach ($shifts as $row) {
             $items[] = [
                 'id' => 'cashier_shift:'.$row->id,
-                'type' => 'cashier_shift_review', 'severity' => 'review',
+                'type' => $row->status === 'flagged' ? 'cashier_shift_discrepancy' : 'cashier_shift_review',
+                'severity' => $row->status === 'flagged' ? 'critical' : 'review',
                 'bookingId' => null, 'roomId' => null, 'roomNumber' => null,
                 'reference' => 'Cashier shift '.$row->id,
                 'ownerName' => $row->cashier_name,
-                'reason' => 'Cashier has submitted a physical cash count for independent reconciliation.',
-                'suggestion' => 'Another authorized manager must review the receipts and counted cash.',
+                'reason' => $row->status === 'flagged'
+                    ? 'This shift was flagged during reconciliation and needs documented follow-up.'
+                    : 'Cashier has submitted a physical cash count for independent reconciliation.',
+                'suggestion' => $row->status === 'flagged'
+                    ? 'Investigate the discrepancy and preserve the original shift audit records.'
+                    : 'Another authorized manager must review the receipts and counted cash.',
                 'recordDate' => (string) $row->submitted_at,
             ];
         }
