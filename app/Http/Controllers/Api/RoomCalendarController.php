@@ -79,6 +79,32 @@ final class RoomCalendarController
                     ->orWhereNotIn('lifecycle_state', ['cancelled', 'checked_out', 'no_show']);
             })->count();
 
+        // Unassigned group stays are a reservation queue, not physical
+        // occupancy. Keep identities and group reference visible to reception.
+        $unassignedGroupQuery = DB::table('reservation_records as b')
+            ->join('group_reservation_members as member', function ($join): void {
+                $join->on('member.reservation_record_id', '=', 'b.id')
+                    ->on('member.hotel_id', '=', 'b.hotel_id');
+            })
+            ->join('group_reservations as grp', function ($join): void {
+                $join->on('grp.id', '=', 'member.group_reservation_id')
+                    ->on('grp.hotel_id', '=', 'member.hotel_id');
+            })
+            ->leftJoin('guests as g', function ($join): void {
+                $join->on('g.id', '=', 'b.guest_id')->on('g.hotel_id', '=', 'b.hotel_id');
+            })
+            ->where('b.hotel_id', $hotel->id)->whereNull('b.assigned_room_id')
+            ->where('b.check_in', '<', $input['end'])
+            ->where('b.check_out', '>', $input['start'])
+            ->whereIn('b.lifecycle_state', ['confirmed', 'checked_in']);
+        $unassignedGroupTotal = (clone $unassignedGroupQuery)->count();
+        $unassignedGroupRows = $unassignedGroupQuery->orderBy('b.check_in')
+            ->orderBy('b.id')->limit(50)->get([
+                'b.id', 'b.reference', 'b.check_in', 'b.check_out',
+                'b.lifecycle_state', 'grp.id as group_id', 'grp.reference as group_reference',
+                'grp.name as group_name', 'g.first_name', 'g.last_name',
+            ]);
+
         return response()->json([
             'data' => [
                 'hotelId' => (string) $hotel->id,
@@ -104,6 +130,17 @@ final class RoomCalendarController
                     'reason' => $r->reason,
                 ])->values(),
                 'unassignedBookings' => $unassigned,
+                'unassignedGroupBookings' => $unassignedGroupRows->map(fn ($row): array => [
+                    'bookingId' => (string) $row->id, 'reference' => $row->reference,
+                    'groupId' => (string) $row->group_id,
+                    'groupReference' => $row->group_reference, 'groupName' => $row->group_name,
+                    'guestName' => $row->first_name === null ? null
+                        : trim($row->first_name.' '.($row->last_name ?? '')),
+                    'checkIn' => $row->check_in, 'checkOut' => $row->check_out,
+                    'status' => $row->lifecycle_state,
+                ])->values(),
+                'unassignedGroupTotal' => $unassignedGroupTotal,
+                'unassignedGroupTruncated' => $unassignedGroupTotal > 50,
             ],
             'meta' => [
                 'page' => $page->currentPage(), 'perPage' => $page->perPage(),
