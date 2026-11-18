@@ -26,6 +26,7 @@ final class RoomCalendarController
             'floor' => ['sometimes', 'integer', 'min:0', 'max:65535'],
             'room_type_id' => ['sometimes', 'integer', 'min:1'],
             'search' => ['sometimes', 'string', 'max:32'],
+            'group_id' => ['sometimes', 'integer', 'min:1'],
         ]);
         $from = CarbonImmutable::createFromFormat('!Y-m-d', $input['start']);
         $until = CarbonImmutable::createFromFormat('!Y-m-d', $input['end']);
@@ -38,6 +39,20 @@ final class RoomCalendarController
                     ->on('rt.hotel_id', '=', 'rm.hotel_id');
             })
             ->where('rm.hotel_id', $hotel->id);
+        if (isset($input['group_id'])) {
+            abort_unless(DB::table('group_reservations')->where('hotel_id', $hotel->id)
+                ->where('id', $input['group_id'])->exists(), 404);
+            $assignedGroupRoomIds = DB::table('group_reservation_members as gm')
+                ->join('reservation_records as booking', function ($join): void {
+                    $join->on('booking.id', '=', 'gm.reservation_record_id')
+                        ->on('booking.hotel_id', '=', 'gm.hotel_id');
+                })
+                ->where('gm.hotel_id', $hotel->id)
+                ->where('gm.group_reservation_id', $input['group_id'])
+                ->whereNotNull('booking.assigned_room_id')
+                ->pluck('booking.assigned_room_id')->unique()->all();
+            $rooms->whereIn('rm.id', $assignedGroupRoomIds);
+        }
         if (isset($input['floor'])) $rooms->where('rm.floor_number', $input['floor']);
         if (isset($input['room_type_id'])) $rooms->where('rm.room_type_id', $input['room_type_id']);
         if (isset($input['search']) && trim($input['search']) !== '') {
@@ -118,6 +133,7 @@ final class RoomCalendarController
             'data' => [
                 'hotelId' => (string) $hotel->id,
                 'start' => $input['start'], 'end' => $input['end'],
+                'focusedGroupId' => isset($input['group_id']) ? (string) $input['group_id'] : null,
                 'rooms' => $page->getCollection()->map(fn ($r): array => [
                     'id' => (string) $r->id,
                     'number' => $r->number,
