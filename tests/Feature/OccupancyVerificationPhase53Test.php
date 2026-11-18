@@ -199,3 +199,65 @@ it('filters selected-room checks within the hotel and inspection date', function
         ->assertOk()->assertJsonCount(0, 'data');
     $this->getJson($fx['base'].'?roomId=invalid')->assertUnprocessable();
 });
+
+it('tracks a flagged occupancy investigation through independent manager closure', function (): void {
+    $fx = phase53Fixture();
+    $reviewer = phase53User($fx['hotel'], 'admin');
+    $verifier = $fx['base'];
+    Sanctum::actingAs($fx['manager'], ['hotel:read','hotel:write']);
+    $id = $this->postJson($verifier, [
+        'roomId' => $fx['room']->id, 'assignedUserId' => $fx['worker']->id,
+        'inspectionDate' => $fx['date'],
+    ])->assertCreated()->json('data.id');
+
+    Sanctum::actingAs($fx['worker'], ['hotel:read']);
+    $this->postJson($verifier.'/'.$id.'/observe', [
+        'observedOccupancy' => 'occupied',
+        'note' => 'Room looked occupied from authorized shared corridor.',
+    ])->assertOk()->assertJsonPath('data.discrepancy', 'unexpected_occupied');
+
+    Sanctum::actingAs($fx['manager'], ['hotel:read','hotel:write']);
+    $this->postJson($verifier.'/'.$id.'/review', [
+        'decision' => 'flagged', 'note' => 'Cross-check front-desk register independently.',
+    ])->assertOk();
+
+    $caseUrl = $verifier.'/'.$id.'/investigation';
+    $this->getJson($caseUrl)->assertOk()->assertJsonPath('data', null);
+    $this->postJson($caseUrl, [
+        'ownerId' => $fx['manager']->id,
+        'note' => 'Investigate occupancy mismatch with written evidence.',
+    ])->assertCreated()->assertJsonPath('data.status','open')
+        ->assertJsonPath('data.ownerName',$fx['manager']->name);
+    $this->postJson($caseUrl, [
+        'ownerId' => $fx['manager']->id, 'note' => 'Accidental duplicate.',
+    ])->assertStatus(409);
+
+    $this->postJson($caseUrl.'/action', [
+        'action' => 'close', 'resolution' => 'observation_unconfirmed',
+        'note' => 'No independent findings have been recorded yet.',
+    ])->assertForbidden();
+
+    $this->postJson($caseUrl.'/action', [
+        'action' => 'note',
+        'note' => 'Checked the front desk arrival ledger and security log.',
+        'evidenceReference' => 'INC-TEST-2026-22',
+    ])->assertOk()->assertJsonPath('data.history.1.event','finding');
+
+    Sanctum::actingAs($reviewer, ['hotel:read','hotel:write']);
+    $this->postJson($caseUrl.'/action', [
+        'action' => 'close', 'resolution' => 'observation_unconfirmed',
+        'note' => 'The available observations could not confirm physical occupancy.',
+    ])->assertOk()->assertJsonPath('data.status','closed')
+        ->assertJsonPath('data.closedByName',$reviewer->name);
+
+    $this->postJson($caseUrl.'/action', [
+        'action' => 'note', 'note' => 'Cannot alter a closed case.',
+    ])->assertStatus(409);
+    expect(DB::table('reservation_records')->where('hotel_id', $fx['hotel']->id)->count())->toBe(0);
+
+    Sanctum::actingAs($fx['worker'], ['hotel:read']);
+    $this->getJson($caseUrl)->assertForbidden();
+    $this->postJson($caseUrl.'/action', [
+        'action' => 'note', 'note' => 'Unauthorized housekeeping update.',
+    ])->assertForbidden();
+});
