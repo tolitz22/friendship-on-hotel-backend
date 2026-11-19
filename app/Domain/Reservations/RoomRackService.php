@@ -25,7 +25,7 @@ final class RoomRackService
             ->join('room_types as t', function ($join): void {
                 $join->on('t.id', '=', 'r.room_type_id')->on('t.hotel_id', '=', 'r.hotel_id');
             })->where('r.hotel_id', $hotel->id)->whereIn('r.id', $ids)
-            ->get(['r.id', 'r.number', 'r.floor', 't.name as type_name'])->keyBy('id');
+            ->get(['r.id', 'r.number', 'r.floor', 'r.room_type_id', 't.name as type_name', 't.max_occupancy'])->keyBy('id');
 
         $statuses = $ids === [] ? collect() : collect(
             app(RoomInventoryStatusService::class)->forRooms($hotel, $ids)['data']
@@ -72,6 +72,8 @@ final class RoomRackService
                 'roomId' => $row['roomId'],
                 'roomNumber' => $row['roomNumber'],
                 'roomTypeName' => $room->type_name,
+                'roomTypeId' => (string) $room->room_type_id,
+                'maxOccupancy' => (int) $room->max_occupancy,
                 'floor' => $room->floor === null ? null : (int) $room->floor,
                 'occupancy' => $status['occupancy'],
                 'cleaning' => $status['cleaning'],
