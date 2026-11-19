@@ -261,3 +261,34 @@ it('shows linked housekeeping audit actors without exposing financial data in gr
         ->assertJsonPath('data.relatedOperationalEventsLimited', false);
     expect($response->json('data.relatedOperationalEvents.0'))->not->toHaveKey('amountMinor');
 });
+
+it('searches linked guest and booking records and filters assigned room inventory per hotel', function (): void {
+    [$hotel, $type, $guests] = groupFixture(2);
+    $endpoint = '/api/v1/hotels/'.$hotel->id.'/group-reservations';
+    $created = $this->postJson($endpoint, groupPayload($type, $guests))->assertCreated();
+    $groupId = $created->json('data.id');
+    $members = DB::table('group_reservation_members')->where('hotel_id', $hotel->id)
+        ->where('group_reservation_id', $groupId)->orderBy('position')
+        ->pluck('reservation_record_id')->all();
+    $firstRef = DB::table('reservation_records')->where('id', $members[0])->value('reference');
+    $rooms = Room::where('hotel_id', $hotel->id)->orderBy('id')->pluck('id')->all();
+
+    $this->getJson($endpoint.'?search=First%20Guest')->assertOk()
+        ->assertJsonPath('meta.total', 1);
+    $this->getJson($endpoint.'?search='.urlencode($firstRef))->assertOk()
+        ->assertJsonPath('meta.total', 1);
+    $this->getJson($endpoint.'?assignment=unassigned')->assertOk()
+        ->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.assignedCount', 0);
+    $this->getJson($endpoint.'?assignment=assigned')->assertOk()
+        ->assertJsonPath('meta.total', 0);
+
+    DB::table('reservation_records')->where('id', $members[0])
+        ->update(['assigned_room_id' => $rooms[0]]);
+    DB::table('reservation_records')->where('id', $members[1])
+        ->update(['assigned_room_id' => $rooms[1]]);
+    $this->getJson($endpoint.'?assignment=assigned')->assertOk()
+        ->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.assignedCount', 2);
+    $this->getJson($endpoint.'?assignment=unassigned')->assertOk()
+        ->assertJsonPath('meta.total', 0);
+    $this->getJson($endpoint.'?assignment=invalid')->assertUnprocessable();
+});
