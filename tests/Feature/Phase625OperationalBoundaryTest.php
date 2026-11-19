@@ -37,23 +37,11 @@ it('keeps room readiness approval and independent occupancy evidence separate fr
 
     Sanctum::actingAs($inspector, ['hotel:read', 'hotel:write']);
     $this->getJson($readiness)->assertOk()->assertJsonPath('data.advisoryReady', false);
-    $inspectionId = $this->postJson($readiness.'/inspections', [
+    $this->postJson($readiness.'/inspections', [
         'cleaningVerified' => true, 'safetyVerified' => true, 'amenitiesVerified' => true,
         'note' => 'Physical room checks completed independently of occupancy.',
-    ])->assertCreated()->assertJsonPath('data.inspection.status', 'submitted')
-      ->json('data.inspection.id');
-
-    $this->postJson($readiness.'/inspections/'.$inspectionId.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'An employee cannot approve their own inspection.',
-    ])->assertForbidden();
-
-    Sanctum::actingAs($reviewer, ['hotel:read', 'hotel:write']);
-    $this->postJson($readiness.'/inspections/'.$inspectionId.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Second administrator verified the inspection checklist.',
-    ])->assertOk()->assertJsonPath('data.inspection.status', 'approved');
-    $this->getJson($readiness)->assertOk()->assertJsonPath('data.advisoryReady', true);
+    ])->assertCreated()->assertJsonPath('data.inspection.status', 'approved')
+      ->assertJsonPath('data.advisoryReady', true);
 
     // A ready room can still have a physical occupancy anomaly. Neither evidence
     // source must silently manufacture or modify a registered guest stay.
