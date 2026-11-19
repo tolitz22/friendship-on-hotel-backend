@@ -21,6 +21,7 @@ final class GroupReservationController
             'page' => ['sometimes', 'integer', 'min:1'],
             'search' => ['sometimes', 'string', 'max:120'],
             'status' => ['sometimes', 'in:all,confirmed,partially_checked_in,fully_checked_in,partially_checked_out,checked_out,cancelled'],
+            'assignment' => ['sometimes', 'in:all,assigned,unassigned'],
         ]);
 
         // Counts come from the linked booking lifecycle states, rather than
@@ -35,6 +36,7 @@ final class GroupReservationController
             ->select('member.group_reservation_id')
             ->selectRaw('COUNT(*) as total, MIN(booking.check_in) as check_in, MAX(booking.check_out) as check_out')
             ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'confirmed' THEN 1 ELSE 0 END) as confirmed_count")
+            ->selectRaw("SUM(CASE WHEN booking.assigned_room_id IS NOT NULL THEN 1 ELSE 0 END) as assigned_count")
             ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'checked_in' THEN 1 ELSE 0 END) as in_house_count")
             ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'checked_out' THEN 1 ELSE 0 END) as departed_count")
             ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count");
@@ -70,11 +72,48 @@ final class GroupReservationController
 
         $term = trim($input['search'] ?? '');
         if ($term !== '') {
-            $query->where(function ($search) use ($term): void {
+            $parts = preg_split('/\\s+/', $term) ?: [];
+            $query->where(function ($search) use ($term, $parts, $hotel): void {
                 $search->where('groups.name', 'like', '%'.$term.'%')
                     ->orWhere('groups.reference', 'like', '%'.$term.'%')
-                    ->orWhere('groups.contact_name', 'like', '%'.$term.'%');
+                    ->orWhere('groups.contact_name', 'like', '%'.$term.'%')
+                    ->orWhereExists(function ($linked) use ($term, $parts, $hotel): void {
+                        $linked->selectRaw('1')->from('group_reservation_members as gm')
+                            ->join('reservation_records as booking', function ($join): void {
+                                $join->on('booking.id', '=', 'gm.reservation_record_id')
+                                    ->on('booking.hotel_id', '=', 'gm.hotel_id');
+                            })
+                            ->leftJoin('guests as guest', function ($join): void {
+                                $join->on('guest.id', '=', 'booking.guest_id')
+                                    ->on('guest.hotel_id', '=', 'booking.hotel_id');
+                            })
+                            ->leftJoin('rooms as room', function ($join): void {
+                                $join->on('room.id', '=', 'booking.assigned_room_id')
+                                    ->on('room.hotel_id', '=', 'booking.hotel_id');
+                            })
+                            ->whereColumn('gm.group_reservation_id', 'groups.id')
+                            ->where('gm.hotel_id', $hotel->id)
+                            ->where(function ($match) use ($term, $parts): void {
+                                $match->where('booking.reference', 'like', '%'.$term.'%')
+                                    ->orWhere('room.number', 'like', '%'.$term.'%')
+                                    ->orWhere('guest.first_name', 'like', '%'.$term.'%')
+                                    ->orWhere('guest.last_name', 'like', '%'.$term.'%');
+                                if (count($parts) >= 2) {
+                                    $first = $parts[0];
+                                    $last = implode(' ', array_slice($parts, 1));
+                                    $match->orWhere(function ($name) use ($first, $last): void {
+                                        $name->where('guest.first_name', 'like', '%'.$first.'%')
+                                            ->where('guest.last_name', 'like', '%'.$last.'%');
+                                    });
+                                }
+                            });
+                    });
             });
+        }
+        if (($input['assignment'] ?? 'all') === 'assigned') {
+            $query->whereRaw('COALESCE(stats.assigned_count, 0) = COALESCE(stats.total, 0)');
+        } elseif (($input['assignment'] ?? 'all') === 'unassigned') {
+            $query->whereRaw('COALESCE(stats.assigned_count, 0) < COALESCE(stats.total, 0)');
         }
 
         $state = $input['status'] ?? 'all';
@@ -88,6 +127,7 @@ final class GroupReservationController
                 'groups.id', 'groups.reference', 'groups.name',
                 'groups.contact_name', 'groups.created_at',
                 'stats.total', 'stats.check_in', 'stats.check_out',
+                'stats.assigned_count',
                 'stats.confirmed_count', 'stats.in_house_count',
                 'stats.departed_count', 'stats.cancelled_count',
             ], 'page', (int) ($input['page'] ?? 1));
@@ -104,6 +144,7 @@ final class GroupReservationController
                     'id' => (string) $row->id, 'reference' => $row->reference,
                     'name' => $row->name, 'contactName' => $row->contact_name,
                     'roomCount' => (int) $row->total,
+                    'assignedCount' => (int) $row->assigned_count,
                     'checkIn' => $row->check_in, 'checkOut' => $row->check_out,
                     'createdAt' => (string) $row->created_at,
                     'status' => $this->groupStatus((int) $row->total, $counts),
