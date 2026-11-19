@@ -486,7 +486,7 @@ final class FolioSettlementService
             ];
         }, $payments));
 
-        return [
+        $response = [
             'hotelId' => (string) $hotel->id,
             'bookingId' => (string) $bookingId,
             'folioId' => (string) $folio->id,
@@ -512,7 +512,12 @@ final class FolioSettlementService
             'isTaxInvoice' => false, 'bankOrGatewayApiVerified' => false,
             'paymentEvidenceIndependentlyReviewed' => $pending === 0,
             'settlementWorkflowEnabled' => (bool) config('financial_accounting.enable_verified_settlement', false),
+            'simplifiedCashierModeEnabled' => (bool) config('financial_accounting.simplified_cashier_mode', false),
         ];
+        $readiness = app(SimplifiedCashCheckoutPolicy::class)->readiness($hotel, $bookingId, $response);
+        $response['routineCashCheckoutEligible'] = $readiness['eligible'];
+        $response['routineCashCheckoutReason'] = $readiness['reason'];
+        return $response;
     }
 
     private function assertUnsigned(object $folio): void
