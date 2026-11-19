@@ -105,3 +105,56 @@ it('requires receptionist booking-write authority before creating a group', func
     expect(DB::table('group_reservations')->where('hotel_id', $hotel->id)->count())->toBe(0);
     expect(DB::table('reservation_records')->where('hotel_id', $hotel->id)->count())->toBe(0);
 });
+
+it('derives group lifecycle from every linked room and filters with hotel-scoped search', function (): void {
+    [$hotel, $type, $guests] = groupFixture();
+    $endpoint = '/api/v1/hotels/'.$hotel->id.'/group-reservations';
+    $created = $this->postJson($endpoint, groupPayload($type, $guests))->assertCreated();
+    $id = $created->json('data.id');
+    $bookingIds = DB::table('group_reservation_members')
+        ->where('hotel_id', $hotel->id)->where('group_reservation_id', (int) $id)
+        ->orderBy('position')->pluck('reservation_record_id')->all();
+
+    $this->getJson($endpoint.'?status=confirmed&search=Team')
+        ->assertOk()->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.0.status', 'confirmed')
+        ->assertJsonPath('data.0.statusCounts.confirmed', 2);
+    $this->getJson($endpoint.'?search=No-Such-Group')->assertOk()
+        ->assertJsonPath('meta.total', 0);
+    $this->getJson($endpoint.'?status=checked_out')->assertOk()
+        ->assertJsonPath('meta.total', 0);
+
+    DB::table('reservation_records')->where('id', $bookingIds[0])
+        ->update(['lifecycle_state' => 'checked_in']);
+    $this->getJson($endpoint.'?status=partially_checked_in')->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('data.0.status', 'partially_checked_in')
+        ->assertJsonPath('data.0.statusCounts.checkedIn', 1);
+
+    DB::table('reservation_records')->where('id', $bookingIds[1])
+        ->update(['lifecycle_state' => 'checked_in']);
+    $this->getJson($endpoint.'?status=fully_checked_in')->assertOk()
+        ->assertJsonPath('data.0.status', 'fully_checked_in');
+
+    DB::table('reservation_records')->where('id', $bookingIds[0])
+        ->update(['lifecycle_state' => 'checked_out']);
+    $this->getJson($endpoint.'?status=partially_checked_out')->assertOk()
+        ->assertJsonPath('data.0.status', 'partially_checked_out');
+
+    DB::table('reservation_records')->where('id', $bookingIds[1])
+        ->update(['lifecycle_state' => 'checked_out']);
+    $this->getJson($endpoint.'?status=checked_out')->assertOk()
+        ->assertJsonPath('data.0.status', 'checked_out')
+        ->assertJsonPath('data.0.statusCounts.checkedOut', 2);
+    $this->getJson($endpoint.'?status=partially_checked_out')->assertOk()
+        ->assertJsonPath('meta.total', 0);
+
+    DB::table('reservation_records')->whereIn('id', $bookingIds)
+        ->update(['lifecycle_state' => 'cancelled']);
+    $this->getJson($endpoint.'?status=cancelled')->assertOk()
+        ->assertJsonPath('data.0.status', 'cancelled');
+    $this->getJson($endpoint.'?status=not_a_real_status')
+        ->assertUnprocessable();
+    $this->getJson($endpoint.'?search='.str_repeat('x', 121))
+        ->assertUnprocessable();
+});
