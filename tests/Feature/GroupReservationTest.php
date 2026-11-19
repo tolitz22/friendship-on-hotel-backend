@@ -224,3 +224,36 @@ it('reports pending evidence separately from reviewed and allocated balances', f
         ->assertJsonPath('data.rooms.1.independentlyVerifiedPaymentCount', 0)
         ->assertJsonPath('meta.finalInvoice', false);
 });
+
+it('shows linked housekeeping audit actors without exposing financial data in group history', function (): void {
+    [$hotel, $type, $guests, $staff] = groupFixture();
+    $endpoint = '/api/v1/hotels/'.$hotel->id.'/group-reservations';
+    $id = $this->postJson($endpoint, groupPayload($type, $guests))
+        ->assertCreated()->json('data.id');
+    $booking = DB::table('group_reservation_members')->where('hotel_id', $hotel->id)
+        ->where('group_reservation_id', $id)->orderBy('position')
+        ->value('reservation_record_id');
+    $room = Room::where('hotel_id', $hotel->id)->firstOrFail();
+    $task = DB::table('housekeeping_tasks')->insertGetId([
+        'hotel_id' => $hotel->id, 'room_id' => $room->id,
+        'type' => 'checkout_clean', 'status' => 'todo',
+        'created_by' => $staff->id, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    DB::table('reservation_turnover_links')->insert([
+        'hotel_id' => $hotel->id, 'reservation_record_id' => $booking,
+        'housekeeping_task_id' => $task, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    DB::table('housekeeping_task_events')->insert([
+        'hotel_id' => $hotel->id, 'task_id' => $task,
+        'actor_id' => $staff->id, 'action' => 'created',
+        'after_state' => json_encode(['status' => 'todo']),
+        'created_at' => now(),
+    ]);
+    $response = $this->getJson($endpoint.'/'.$id)->assertOk()
+        ->assertJsonPath('data.relatedOperationalEvents.0.source', 'housekeeping')
+        ->assertJsonPath('data.relatedOperationalEvents.0.action', 'created')
+        ->assertJsonPath('data.relatedOperationalEvents.0.actorName', 'Reception Staff')
+        ->assertJsonPath('data.relatedOperationalEvents.0.bookingId', (string) $booking)
+        ->assertJsonPath('data.relatedOperationalEventsLimited', false);
+    expect($response->json('data.relatedOperationalEvents.0'))->not->toHaveKey('amountMinor');
+});
