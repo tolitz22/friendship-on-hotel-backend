@@ -92,6 +92,19 @@ it('accepts ordinary cash without manager payment approval and permits cash-only
         ->and(DB::table('folio_settlement_signoffs')->count())->toBe(0);
     expect(DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)
         ->where('type', 'checkout_clean')->count())->toBe(1);
+    $audit = DB::table('simplified_cash_checkout_audits')->where('hotel_id', $hotel->id)
+        ->where('reservation_record_id', $booking)->first();
+    expect($audit)->not->toBeNull()
+        ->and((int) $audit->recorded_charges_minor)->toBe(840000)
+        ->and((int) $audit->net_cash_minor)->toBe(840000)
+        ->and((int) $audit->receipt_count)->toBe(1)
+        ->and((int) $audit->performed_by)->toBe($cashier->id)
+        ->and(hash('sha256', $audit->receipt_snapshot))->toBe($audit->receipt_snapshot_sha256);
+    $auditView = app(\App\Domain\Reservations\FolioSettlementService::class)
+        ->statement($hotel, $booking)['routineCashCheckoutAudit'];
+    expect($auditView['integrityValid'])->toBeTrue()
+        ->and($auditView['performedByName'])->toBe('Cashier A')
+        ->and($auditView['isIndependentFinancialSettlement'])->toBeFalse();
 
     // The shift remains independently reviewable after the guest departs.
     $shifts->close($hotel, $cashier->id, (int) $open['id'], 1040000,
@@ -212,4 +225,22 @@ it('permits an authorized front desk checkout through the API without an indepen
     ]);
     expect(DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)->count())
         ->toBe(0);
+});
+
+it('detects out-of-band modification of an operational cash checkout snapshot', function (): void {
+    config()->set('financial_accounting.simplified_cashier_mode', true);
+    [$hotel, $booking, $folio, $cashier] = simplifiedCashFixture();
+    $shift = app(CashierShiftService::class)->open($hotel, $cashier->id, 0);
+    app(CashierShiftService::class)->receive($hotel, $cashier->id, (int) $shift['id'], $booking, [
+        'requestKey' => 'audit-immutable-tampering',
+        'reference' => 'SIMPLE-AUDIT-INTEGRITY', 'amountMinor' => 840000,
+        'cashTenderedMinor' => 1000000, 'changeGivenMinor' => 160000,
+    ]);
+    app(ReservationStayLifecycleService::class)->transition($hotel, $cashier->id, $booking, 'check_out');
+    DB::table('simplified_cash_checkout_audits')->where('hotel_id', $hotel->id)
+        ->where('reservation_record_id', $booking)
+        ->update(['receipt_snapshot' => '{"changed":true}']);
+    $view = app(\App\Domain\Reservations\FolioSettlementService::class)
+        ->statement($hotel, $booking)['routineCashCheckoutAudit'];
+    expect($view['integrityValid'])->toBeFalse();
 });
