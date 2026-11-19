@@ -27,7 +27,7 @@ final class FinancialTaxPolicyController
             'reviewNote' => ['required', 'string', 'min:15', 'max:2000'],
         ]);
         $id = $service->draft((int) $hotel->id, $data['classification'], $data['priceMode'],
-            (int) $data['rateBps'], $data['effectiveFrom'], $data['effectiveUntil'] ?? null, $data['reviewNote']);
+            (int) $data['rateBps'], $data['effectiveFrom'], $data['effectiveUntil'] ?? null, $data['reviewNote'], (int) $request->user()->id);
         return response()->json(['data' => ['id' => (string) $id, 'status' => 'draft']], 201);
     }
 
