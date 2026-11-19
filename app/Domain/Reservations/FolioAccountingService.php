@@ -122,10 +122,14 @@ final class FolioAccountingService
                     throw new HttpException(422, 'Routine incidental charges cannot reduce the guest bill.');
                 }
             }
-            $fingerprint = $this->fingerprint([
+            $fingerprintFields = [
                 $bookingId, $input['kind'], (int) $input['amountMinor'], trim($input['reason']),
-                !empty($input['routineIncidental']),
-            ]);
+            ];
+            // Preserve hashes of older pre-incidental adjustment requests.
+            if (!empty($input['routineIncidental'])) {
+                $fingerprintFields[] = 'routine_incidental_v1';
+            }
+            $fingerprint = $this->fingerprint($fingerprintFields);
             $previous = DB::table('folio_adjustments')->where('hotel_id', $hotel->id)
                 ->where('request_key', $input['requestKey'])->first();
             if ($previous !== null) {
