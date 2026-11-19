@@ -52,6 +52,8 @@ it('reports complete hotel room totals with separately paginated room details', 
         ->assertJsonPath('data.summary.approvedCurrent', 0)
         ->assertJsonPath('data.enforceAtCheckIn', false)
         ->assertJsonPath('data.rooms.0.roomId', (string) $first->id)
+        ->assertJsonPath('data.rooms.0.activeMaintenanceOrderId', null)
+        ->assertJsonPath('data.rooms.0.activeInventoryBlockId', null)
         ->assertJsonPath('meta.roomTotalPages', 2)
         ->assertJsonPath('meta.snapshotOnly', true)
         ->assertJsonPath('meta.futureRoomReadinessGuaranteed', false)
@@ -79,14 +81,19 @@ it('distinguishes an unassigned arrival from an assigned room needing inspection
     $this->getJson($base.'/readiness/dashboard?days=7')
         ->assertOk()->assertJsonPath('meta.arrivalTotal', 1)
         ->assertJsonPath('data.arrivals.0.bookingId', (string) $booking)
-        ->assertJsonPath('data.arrivals.0.risk', 'unassigned_room');
+        ->assertJsonPath('data.arrivals.0.risk', 'unassigned_room')
+        ->assertJsonPath('data.arrivals.0.guestName', 'Arrival Guest')
+        ->assertJsonPath('data.arrivals.0.roomBlockers', null)
+        ->assertJsonPath('data.arrivals.0.openHousekeepingTaskId', null);
 
     $this->patchJson($base.'/bookings/'.$booking.'/assign-room', [
         'roomId' => $first->id,
     ])->assertOk();
     $this->getJson($base.'/readiness/dashboard?days=7')
         ->assertOk()->assertJsonPath('data.arrivals.0.risk', 'inspection_or_blocker')
-        ->assertJsonPath('data.arrivals.0.roomStatus', 'needs_inspection');
+        ->assertJsonPath('data.arrivals.0.roomStatus', 'needs_inspection')
+        ->assertJsonPath('data.arrivals.0.roomBlockers.activeInventoryBlockToday', false)
+        ->assertJsonPath('data.arrivals.0.roomBlockers.unfinishedHousekeeping', false);
 });
 
 it('shows approved coverage and invalidates it for subsequent completed room work', function (): void {
