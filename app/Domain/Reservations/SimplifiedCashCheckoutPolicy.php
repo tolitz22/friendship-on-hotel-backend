@@ -127,8 +127,19 @@ final class SimplifiedCashCheckoutPolicy
         if ($statement['refunds'] !== []) {
             throw new HttpException(409, 'Refunds require reviewed financial settlement.');
         }
-        foreach ($statement['adjustments'] as $adjustment) {
-            if ($adjustment['kind'] !== 'debit' || ! ($adjustment['routineIncidental'] ?? false)) {
+        if ($statement['adjustments'] !== []) {
+            if (! Schema::hasColumn('folio_adjustments', 'is_routine_incidental')) {
+                throw new HttpException(409,
+                    'Incidental charge classification migration is required before checkout.');
+            }
+            $exceptions = DB::table('folio_adjustments')
+                ->where('hotel_id', $hotel->id)
+                ->where('folio_id', (int) $statement['folioId'])
+                ->where(function ($query): void {
+                    $query->where('kind', '!=', 'debit')
+                        ->orWhere('is_routine_incidental', false);
+                })->exists();
+            if ($exceptions) {
                 throw new HttpException(409,
                     'Discounts and manually corrected bills require reviewed settlement.');
             }
