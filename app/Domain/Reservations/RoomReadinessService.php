@@ -141,8 +141,14 @@ final class RoomReadinessService
             if (! $input['cleaningVerified'] || ! $input['safetyVerified'] || ! $input['amenitiesVerified']) {
                 throw new HttpException(409, 'Complete all physical inspection checks before marking the room ready.');
             }
-            if (in_array(true, array_values($this->blockers($hotel, $roomId)), true)) {
-                throw new HttpException(409, 'Resolve active housekeeping, maintenance and inventory blockers before inspecting this room as ready.');
+            $currentBlockers = $this->blockers($hotel, $roomId);
+            // Old turnover/work timestamps only make the previous inspection stale.
+            // A fresh inspection is the remedy, so only current restrictions stop it.
+            foreach (['activeInventoryBlockToday', 'activeRoomImpactMaintenance',
+                'latestTurnoverIncomplete', 'unfinishedHousekeeping'] as $key) {
+                if ($currentBlockers[$key]) {
+                    throw new HttpException(409, 'Resolve active housekeeping, maintenance and inventory blockers before inspecting this room as ready.');
+                }
             }
 
             $id = DB::table('room_readiness_inspections')->insertGetId([
