@@ -240,6 +240,9 @@ final class FolioSettlementIntegrationTest extends TestCase
             ->value('statement_snapshot'), true, 512, JSON_THROW_ON_ERROR);
         self::assertArrayNotHasKey('cashShiftContexts', $snapshot,
             'Operational cash handoff metadata must never alter immutable signed financial facts.');
+        self::assertArrayNotHasKey('simplifiedCashierModeEnabled', $snapshot);
+        self::assertArrayNotHasKey('routineCashCheckoutEligible', $snapshot);
+        self::assertArrayNotHasKey('routineCashCheckoutReason', $snapshot);
         self::assertTrue($service->statement($hotel, 11)['signedSnapshotIntegrity']);
         self::assertSame(1, DB::table('folio_entries')->count());
         try {
