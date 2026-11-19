@@ -109,6 +109,9 @@ final class FolioAccountingService
             $folio = $this->findFolio($hotel, $bookingId, true);
             $this->assertNotSigned($hotel, $folio);
             if (!empty($input['routineIncidental'])) {
+                if (!Schema::hasColumn('folio_adjustments', 'is_routine_incidental')) {
+                    throw new HttpException(409, 'Incidental charge migration is required before adding this service.');
+                }
                 // The dedicated front-desk incidental route is the only route
                 // that may set this server-owned classification.
                 $booking = DB::table('reservation_records')
@@ -144,7 +147,9 @@ final class FolioAccountingService
                 'request_key' => $input['requestKey'],
                 'payload_sha256' => $fingerprint,
                 'kind' => $input['kind'],
-                'is_routine_incidental' => !empty($input['routineIncidental']),
+                ...(Schema::hasColumn('folio_adjustments', 'is_routine_incidental')
+                    ? ['is_routine_incidental' => !empty($input['routineIncidental'])]
+                    : []),
                 'amount_minor' => $input['amountMinor'],
                 'reason' => trim($input['reason']),
                 'actor_id' => $actor,
