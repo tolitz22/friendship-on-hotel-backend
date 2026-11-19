@@ -123,6 +123,17 @@ final class GroupFinanceController
             $confirmedCount = $paymentStages->where('status', 'staff_confirmed')->count();
             $verifiedCount = $paymentStages->filter(static fn (object $payment): bool =>
                 $payment->status === 'staff_confirmed' && $payment->verification_status === 'verified')->count();
+            $independentlyVerifiedAmount = $paymentStages->filter(static fn (object $payment): bool =>
+                $payment->status === 'staff_confirmed' && $payment->verification_status === 'verified')
+                ->sum('amount_minor');
+            $refunds = DB::table('folio_refund_requests')
+                ->where('hotel_id', $hotel->id)->where('folio_id', $row->folio_id)
+                ->whereIn('status', ['requested', 'approved'])->get(['status', 'amount_minor']);
+            $requestedRefunds = (int) $refunds->where('status', 'requested')->sum('amount_minor');
+            $approvedRefunds = (int) $refunds->where('status', 'approved')->sum('amount_minor');
+            $verifiedDisbursementEvidence = (int) DB::table('folio_refund_disbursement_evidence')
+                ->where('hotel_id', $hotel->id)->where('folio_id', $row->folio_id)
+                ->where('status', 'verified')->sum('amount_minor');
             $pendingAmount = (int) $summary['pendingReviewPaymentsMinor'];
             $confirmedAmount = (int) $summary['staffConfirmedPaymentsMinor'];
             $recordedAmount = $pendingAmount + $confirmedAmount;
@@ -133,7 +144,10 @@ final class GroupFinanceController
             if (!isset($totals[$currency])) {
                 $totals[$currency] = ['currency' => $currency, 'netRecordedChargesMinor' => 0,
                     'pendingReviewPaymentsMinor' => 0, 'recordedPaymentsMinor' => 0,
-                    'staffConfirmedPaymentsMinor' => 0, 'verifiedAllocatedMinor' => 0,
+                    'staffConfirmedPaymentsMinor' => 0, 'independentlyVerifiedPaymentsMinor' => 0,
+                    'requestedRefundsMinor' => 0, 'approvedRefundsMinor' => 0,
+                    'verifiedRefundDisbursementEvidenceMinor' => 0,
+                    'verifiedAllocatedMinor' => 0,
                     'verifiedGroupPayerAllocatedMinor' => 0, 'unallocatedNetChargesMinor' => 0,
                     'balanceAfterRecordedPaymentsMinor' => 0,
                     'pricedFolioCount' => 0];
@@ -144,6 +158,10 @@ final class GroupFinanceController
             $totals[$currency]['recordedPaymentsMinor'] += $recordedAmount;
             $totals[$currency]['balanceAfterRecordedPaymentsMinor'] += $net - $recordedAmount;
             $totals[$currency]['staffConfirmedPaymentsMinor'] += $confirmedAmount;
+            $totals[$currency]['independentlyVerifiedPaymentsMinor'] += (int) $independentlyVerifiedAmount;
+            $totals[$currency]['requestedRefundsMinor'] += $requestedRefunds;
+            $totals[$currency]['approvedRefundsMinor'] += $approvedRefunds;
+            $totals[$currency]['verifiedRefundDisbursementEvidenceMinor'] += $verifiedDisbursementEvidence;
             $totals[$currency]['verifiedAllocatedMinor'] += $verifiedAllocated;
             $totals[$currency]['verifiedGroupPayerAllocatedMinor'] += $groupAllocated;
             $totals[$currency]['unallocatedNetChargesMinor'] += $net - $verifiedAllocated;
@@ -159,6 +177,10 @@ final class GroupFinanceController
                 'staffConfirmedPaymentCount' => $confirmedCount,
                 'independentlyVerifiedPaymentCount' => $verifiedCount,
                 'staffConfirmedPaymentsMinor' => $confirmedAmount,
+                'independentlyVerifiedPaymentsMinor' => (int) $independentlyVerifiedAmount,
+                'requestedRefundsMinor' => $requestedRefunds,
+                'approvedRefundsMinor' => $approvedRefunds,
+                'verifiedRefundDisbursementEvidenceMinor' => $verifiedDisbursementEvidence,
                 'verifiedAllocatedMinor' => $verifiedAllocated,
                 'verifiedGroupPayerAllocatedMinor' => $groupAllocated,
                 'unallocatedNetChargesMinor' => $net - $verifiedAllocated,
