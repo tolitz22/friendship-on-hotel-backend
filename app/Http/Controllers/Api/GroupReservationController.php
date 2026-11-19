@@ -353,10 +353,12 @@ final class GroupReservationController
                 ->where('turnover.hotel_id', $hotelId)
                 ->whereIn('turnover.reservation_record_id', $departedIds)
                 ->orderByDesc('turnover.id')
-                ->get(['turnover.reservation_record_id', 'cleaning.status'])
+                ->get(['turnover.reservation_record_id', 'cleaning.status', 'cleaning.assigned_to'])
                 ->unique('reservation_record_id');
         $cleaned = $linkedCleaning->where('status', 'done')->count();
         $pendingCleaning = $linkedCleaning->where('status', '!=', 'done')->count();
+        $unassignedCleaning = $linkedCleaning->filter(static fn (object $task): bool =>
+            $task->status !== 'done' && ($task->assigned_to === null || trim((string) $task->assigned_to) === ''))->count();
 
         // Consolidated display is informational only: charges, payments, taxes,
         // refunds and receipts remain in their own reservation folios.
@@ -377,6 +379,7 @@ final class GroupReservationController
                 'checkedOutCount' => count($departedIds),
                 'checkoutCleaningCompleteCount' => $cleaned,
                 'checkoutCleaningPendingCount' => $pendingCleaning,
+                'checkoutCleaningUnassignedCount' => $unassignedCleaning,
                 'checkoutCleaningNoTaskCount' => count($departedIds) - $linkedCleaning->count(),
                 'readinessIsAdvisoryOnly' => true,
             ],
