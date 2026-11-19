@@ -118,3 +118,19 @@ it('rejects review attempts on already completed one-step inspections', function
     $this->getJson($base)->assertJsonPath('data.inspection.status', 'approved')
         ->assertJsonPath('data.advisoryReady', true);
 });
+
+it('allows a fresh on-site inspection to replace a legacy pending review while retaining audit history', function (): void {
+    [$hotel, $room] = phase35Room();
+    $base = '/api/v1/hotels/'.$hotel->id.'/rooms/'.$room->id.'/readiness';
+    $old = $this->postJson($base.'/inspections', phase35Checklist())
+        ->assertCreated()->json('data.inspection.id');
+    DB::table('room_readiness_inspections')->where('id', $old)
+        ->update(['status' => 'submitted']);
+    $this->getJson($base)->assertJsonPath('data.advisoryReady', false);
+    $new = $this->postJson($base.'/inspections', phase35Checklist())
+        ->assertCreated()->assertJsonPath('data.inspection.status', 'approved')
+        ->assertJsonPath('data.advisoryReady', true)->json('data.inspection.id');
+    expect($new)->not->toBe($old);
+    $this->getJson($base.'/history')->assertOk()->assertJsonPath('meta.total', 2);
+    expect(DB::table('room_readiness_inspections')->where('id', $old)->value('status'))->toBe('submitted');
+});
