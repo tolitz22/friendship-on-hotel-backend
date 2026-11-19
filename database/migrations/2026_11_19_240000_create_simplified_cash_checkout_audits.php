@@ -21,8 +21,11 @@ return new class extends Migration
             $table->unsignedInteger('receipt_count');
             $table->longText('receipt_snapshot');
             $table->char('receipt_snapshot_sha256', 64);
-            $table->timestamp('checked_out_at');
-            $table->timestamp('created_at');
+            // Explicitly supplied by the checkout transaction. DATETIME avoids
+            // MySQL versions that reject multiple required TIMESTAMP columns
+            // without defaults (or implicitly auto-update the first one).
+            $table->dateTime('checked_out_at');
+            $table->dateTime('created_at');
             $table->unique(['hotel_id', 'reservation_record_id'], 'cash_checkout_once_per_booking');
             $table->index(['hotel_id', 'checked_out_at'], 'cash_checkout_history');
         });
