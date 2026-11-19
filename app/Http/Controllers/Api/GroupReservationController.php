@@ -333,6 +333,84 @@ final class GroupReservationController
             'at' => (string) $event->created_at,
         ])->values()->all();
 
+        // Supplement the booking audit with separately attributable operational
+        // events. No payment details are exposed through reservation.read;
+        // finance history remains protected by finance.read permissions.
+        $memberIds = $members->pluck('id')->all();
+        $relatedEvents = collect();
+        if ($memberIds !== []) {
+            $housekeeping = DB::table('housekeeping_task_events as event')
+                ->join('reservation_turnover_links as link', function ($join): void {
+                    $join->on('link.housekeeping_task_id', '=', 'event.task_id')
+                        ->on('link.hotel_id', '=', 'event.hotel_id');
+                })
+                ->leftJoin('users as actor', 'actor.id', '=', 'event.actor_id')
+                ->where('event.hotel_id', $hotelId)
+                ->whereIn('link.reservation_record_id', $memberIds)
+                ->orderByDesc('event.id')->limit(50)
+                ->get(['event.id', 'event.action', 'event.created_at',
+                    'event.actor_id', 'actor.name as actor_name',
+                    'link.reservation_record_id as booking_id', 'event.task_id']);
+            foreach ($housekeeping as $event) {
+                $relatedEvents->push([
+                    'id' => 'cleaning-'.(string) $event->id,
+                    'source' => 'housekeeping', 'action' => (string) $event->action,
+                    'actorName' => $event->actor_name,
+                    'at' => (string) $event->created_at,
+                    'bookingId' => (string) $event->booking_id,
+                    'recordId' => (string) $event->task_id,
+                ]);
+            }
+            $approvals = DB::table('manager_approval_events as event')
+                ->join('manager_approval_requests as approval', function ($join): void {
+                    $join->on('approval.id', '=', 'event.approval_request_id')
+                        ->on('approval.hotel_id', '=', 'event.hotel_id');
+                })
+                ->leftJoin('users as actor', 'actor.id', '=', 'event.actor_id')
+                ->where('event.hotel_id', $hotelId)
+                ->whereIn('approval.reservation_record_id', $memberIds)
+                ->orderByDesc('event.id')->limit(50)
+                ->get(['event.id', 'event.event', 'event.created_at',
+                    'actor.name as actor_name',
+                    'approval.reservation_record_id as booking_id',
+                    'event.approval_request_id']);
+            foreach ($approvals as $event) {
+                $relatedEvents->push([
+                    'id' => 'approval-'.(string) $event->id,
+                    'source' => 'manager_approval', 'action' => (string) $event->event,
+                    'actorName' => $event->actor_name,
+                    'at' => (string) $event->created_at,
+                    'bookingId' => (string) $event->booking_id,
+                    'recordId' => (string) $event->approval_request_id,
+                ]);
+            }
+        }
+        $assignedRoomIds = $members->pluck('assigned_room_id')->filter()->unique()->values()->all();
+        if ($assignedRoomIds !== []) {
+            // This identifies events on currently assigned physical rooms,
+            // not an assertion that every such inspection was group-specific.
+            $inspections = DB::table('room_readiness_events as event')
+                ->leftJoin('users as actor', 'actor.id', '=', 'event.actor_id')
+                ->where('event.hotel_id', $hotelId)
+                ->whereIn('event.room_id', $assignedRoomIds)
+                ->where('event.created_at', '>=', $group->created_at)
+                ->orderByDesc('event.id')->limit(50)
+                ->get(['event.id', 'event.action', 'event.created_at',
+                    'actor.name as actor_name', 'event.room_id', 'event.inspection_id']);
+            foreach ($inspections as $event) {
+                $relatedEvents->push([
+                    'id' => 'inspection-'.(string) $event->id,
+                    'source' => 'room_inspection', 'action' => (string) $event->action,
+                    'actorName' => $event->actor_name,
+                    'at' => (string) $event->created_at,
+                    'bookingId' => null,
+                    'recordId' => (string) $event->inspection_id,
+                    'roomId' => (string) $event->room_id,
+                ]);
+            }
+        }
+        $relatedEvents = $relatedEvents->sortByDesc('at')->take(50)->values();
+
         // Operational indicators are derived from the existing authoritative
         // readiness service and checkout-to-cleaning links, never guessed from
         // booking status or the mere existence of a housekeeping task.
@@ -369,6 +447,8 @@ final class GroupReservationController
             'createdAt' => (string) $group->created_at,
             'createdByName' => $actorName,
             'activity' => $activity, 'activityHasMore' => $hasMoreEvents,
+            'relatedOperationalEvents' => $relatedEvents->all(),
+            'relatedOperationalEventsLimited' => $relatedEvents->count() >= 50,
             'roomCount' => $members->count(),
             'operations' => [
                 'assignedCount' => $assigned->count(),
