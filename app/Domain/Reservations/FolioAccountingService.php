@@ -108,8 +108,23 @@ final class FolioAccountingService
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = $this->findFolio($hotel, $bookingId, true);
             $this->assertNotSigned($hotel, $folio);
+            if (!empty($input['routineIncidental'])) {
+                // The dedicated front-desk incidental route is the only route
+                // that may set this server-owned classification.
+                $booking = DB::table('reservation_records')
+                    ->where('hotel_id', $hotel->id)->where('id', $bookingId)
+                    ->lockForUpdate()->first();
+                if ($booking === null || !in_array($booking->lifecycle_state,
+                    ['confirmed', 'checked_in'], true)) {
+                    throw new HttpException(409, 'Additional charges are only available before checkout.');
+                }
+                if ($input['kind'] !== 'debit') {
+                    throw new HttpException(422, 'Routine incidental charges cannot reduce the guest bill.');
+                }
+            }
             $fingerprint = $this->fingerprint([
                 $bookingId, $input['kind'], (int) $input['amountMinor'], trim($input['reason']),
+                !empty($input['routineIncidental']),
             ]);
             $previous = DB::table('folio_adjustments')->where('hotel_id', $hotel->id)
                 ->where('request_key', $input['requestKey'])->first();
@@ -125,6 +140,7 @@ final class FolioAccountingService
                 'request_key' => $input['requestKey'],
                 'payload_sha256' => $fingerprint,
                 'kind' => $input['kind'],
+                'is_routine_incidental' => !empty($input['routineIncidental']),
                 'amount_minor' => $input['amountMinor'],
                 'reason' => trim($input['reason']),
                 'actor_id' => $actor,
