@@ -106,6 +106,9 @@ final class SimplifiedCashCheckoutPolicy
 
     private function validateStatement(Hotel $hotel, int $bookingId, array $statement): void
     {
+        if (! Schema::hasTable('simplified_cash_checkout_audits')) {
+            throw new HttpException(409, 'Operational cash checkout audit migration is not installed.');
+        }
         if ($statement['signed']) {
             if (! $statement['signedSnapshotIntegrity'] || ! $statement['canSignOff']) {
                 throw new HttpException(409, 'Signed statement failed financial integrity checks.');
