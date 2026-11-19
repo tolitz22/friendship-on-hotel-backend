@@ -63,7 +63,7 @@ it('keeps readiness check-in enforcement disabled unless the hotel explicitly ac
         ->assertJsonPath('data.status', 'checked_in');
 });
 
-it('enforces independent current inspection only for an explicitly activated hotel', function (): void {
+it('enforces completed current physical inspection only for an explicitly activated hotel', function (): void {
     $this->travelTo(new DateTimeImmutable('2026-12-10T09:00:00+08:00'));
     [$hotel, $room, $booking] = phase36Booking();
     $base = '/api/v1/hotels/'.$hotel->id;
@@ -77,20 +77,13 @@ it('enforces independent current inspection only for an explicitly activated hot
     $this->postJson($base.'/bookings/'.$booking.'/check-in')->assertStatus(409);
     $this->getJson($base.'/rooms/'.$room->id.'/readiness')->assertOk()
         ->assertJsonPath('data.enforcedAtCheckIn', true);
-    $inspection = $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections', [
+    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections', [
         'cleaningVerified' => true, 'safetyVerified' => true,
         'amenitiesVerified' => true, 'note' => 'Physical check passed in guest room',
-    ])->assertCreated()->json('data.inspection.id');
+    ])->assertCreated()->assertJsonPath('data.inspection.status', 'approved');
 
-    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Inspector cannot approve their own work',
-    ])->assertForbidden();
-    phase36Admin($hotel);
-    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Independent in-room inspection approved',
-    ])->assertOk()->assertJsonPath('data.advisoryReady', true);
+    $this->getJson($base.'/rooms/'.$room->id.'/readiness')->assertOk()
+        ->assertJsonPath('data.advisoryReady', true);
 
     $this->postJson($base.'/bookings/'.$booking.'/check-in')->assertOk()
         ->assertJsonPath('data.status', 'checked_in');
@@ -150,12 +143,6 @@ it('checks current room-impact maintenance during enforced check-in even after a
         'cleaningVerified' => true, 'safetyVerified' => true,
         'amenitiesVerified' => true, 'note' => 'Completed physical inspection of room',
     ])->assertCreated()->json('data.inspection.id');
-    phase36Admin($hotel);
-    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Independent room inspection has passed',
-    ])->assertOk();
-
     $this->postJson($base.'/maintenance-work-orders', [
         'roomId' => $room->id, 'title' => 'Broken electric socket',
         'description' => 'Requires safe electrical repair before check-in',
@@ -177,19 +164,13 @@ it('invalidates approved inspection after a new housekeeping task even if that t
     $base = '/api/v1/hotels/'.$hotel->id;
     $this->patchJson($base.'/readiness/enforcement-policy', [
         'expectedRevision' => 0, 'enforceAtCheckIn' => true,
-        'reason' => 'Activate independently reviewed physical room readiness',
+        'reason' => 'Activate completed physical room inspection readiness',
     ])->assertOk();
 
     $inspection = $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections', [
         'cleaningVerified' => true, 'safetyVerified' => true,
         'amenitiesVerified' => true, 'note' => 'All physical room checks completed on site',
     ])->assertCreated()->json('data.inspection.id');
-    phase36Admin($hotel);
-    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Independent room inspection approval recorded',
-    ])->assertOk()->assertJsonPath('data.advisoryReady', true);
-
     $task = $this->postJson($base.'/housekeeping-tasks', [
         'roomId' => $room->id, 'type' => 'inspection',
         'note' => 'Another physical inspection is required',
