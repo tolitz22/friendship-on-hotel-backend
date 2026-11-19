@@ -53,6 +53,19 @@ final class CashierShiftService
         $amount = (int) $shift->opening_float_minor;
         $unconfirmed = 0;
         foreach ($receipts as $receipt) {
+            $tenderKnown = $receipt->cash_tendered_minor !== null;
+            $changeKnown = $receipt->change_given_minor !== null;
+            $netKnown = $receipt->net_receipt_minor !== null;
+            if ($tenderKnown || $changeKnown || $netKnown) {
+                if (! $tenderKnown || ! $changeKnown || ! $netKnown
+                    || (int) $receipt->net_receipt_minor !== (int) $receipt->amount_minor
+                    || (int) $receipt->cash_tendered_minor < (int) $receipt->net_receipt_minor
+                    || (int) $receipt->cash_tendered_minor - (int) $receipt->change_given_minor
+                        !== (int) $receipt->net_receipt_minor) {
+                    throw new HttpException(409,
+                        'Cash receipt tender, change or net amount has changed or is inconsistent. Investigate before reconciliation.');
+                }
+            }
             // Keep voided receipts in the immutable shift history, but never
             // treat a manager-voided mistake as physically received cash.
             if ($receipt->status === 'voided') {
