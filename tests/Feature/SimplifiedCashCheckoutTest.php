@@ -281,3 +281,75 @@ it('preserves a previously signed strict bank settlement without manufacturing a
         ->toBe(0);
     expect($settlement->statement($hotel, $booking)['signedSnapshotIntegrity'])->toBeTrue();
 });
+
+it('lets front desk add an incidental after a cash payment and checkout once the extra balance is received', function (): void {
+    config()->set('financial_accounting.simplified_cashier_mode', true);
+    config()->set('financial_accounting.enable_verified_settlement', true);
+    [$hotel, $booking, $folio, $cashier] = simplifiedCashFixture();
+    $shift = app(CashierShiftService::class)->open($hotel, $cashier->id, 0);
+    app(CashierShiftService::class)->receive($hotel, $cashier->id, (int) $shift['id'], $booking, [
+        'requestKey' => 'incident-room-payment-001',
+        'reference' => 'ROOM-CASH-PAYMENT', 'amountMinor' => 840000,
+        'cashTenderedMinor' => 1000000, 'changeGivenMinor' => 160000,
+    ]);
+    Sanctum::actingAs($cashier, ['hotel:read','booking:write']);
+    $url = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking.'/incidental-charges';
+    $payload = [
+        'requestKey' => 'incident-food-001', 'category' => 'Food and drinks',
+        'description' => 'Bottled water and snacks', 'amountMinor' => 50000,
+    ];
+    $response = $this->postJson($url, $payload)->assertCreated();
+    $this->postJson($url, $payload)->assertOk()
+        ->assertJsonPath('data.id', $response->json('data.id'))
+        ->assertJsonPath('data.replayed', true);
+    $this->assertDatabaseHas('folio_adjustments', [
+        'hotel_id' => $hotel->id, 'folio_id' => $folio,
+        'amount_minor' => 50000, 'kind' => 'debit', 'is_routine_incidental' => 1,
+    ]);
+    expect(DB::table('folio_adjustments')->where('folio_id', $folio)->count())->toBe(1);
+    $statement = app(\App\Domain\Reservations\FolioSettlementService::class)->statement($hotel, $booking);
+    expect($statement['netRecordedChargesMinor'])->toBe(890000);
+    expect($statement['routineCashCheckoutEligible'])->toBeFalse();
+    app(CashierShiftService::class)->receive($hotel, $cashier->id, (int) $shift['id'], $booking, [
+        'requestKey' => 'incident-extra-cash-002', 'reference' => 'EXTRA-CASH-PAYMENT',
+        'amountMinor' => 50000, 'cashTenderedMinor' => 50000, 'changeGivenMinor' => 0,
+    ]);
+    expect(app(\App\Domain\Reservations\FolioSettlementService::class)
+        ->statement($hotel, $booking)['routineCashCheckoutEligible'])->toBeTrue();
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking.'/check-out')
+        ->assertOk()->assertJsonPath('data.status', 'checked_out');
+    expect(DB::table('simplified_cash_checkout_audits')->where('hotel_id', $hotel->id)
+        ->value('net_cash_minor'))->toBe(890000);
+    $this->postJson($url, [
+        'requestKey' => 'incident-after-checkout',
+        'category' => 'Minibar', 'description' => 'Bottled water', 'amountMinor' => 1000,
+    ])->assertStatus(409);
+});
+
+it('does not let incidental endpoint create discounts, arbitrary categories or damage penalties', function (): void {
+    [$hotel, $booking, $folio, $cashier, $manager] = simplifiedCashFixture();
+    Sanctum::actingAs($cashier, ['hotel:read','booking:write']);
+    $url = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking.'/incidental-charges';
+    $base = [
+        'requestKey' => 'incident-invalid-001', 'category' => 'Minibar',
+        'description' => 'Small water bottle', 'amountMinor' => 5000,
+    ];
+    $this->postJson($url, [...$base, 'kind' => 'credit', 'category' => 'Damage fee'])
+        ->assertUnprocessable();
+    $this->postJson($url, [...$base, 'amountMinor' => -5000])
+        ->assertUnprocessable();
+    expect(DB::table('folio_adjustments')->count())->toBe(0);
+});
+
+it('keeps manager-only credits out of simplified cash checkout', function (): void {
+    config()->set('financial_accounting.simplified_cashier_mode', true);
+    [$hotel, $booking, $folio, $cashier, $manager] = simplifiedCashFixture();
+    app(FolioAccountingService::class)->adjust($hotel, $booking, $manager->id, [
+        'requestKey' => 'independent-manager-credit',
+        'kind' => 'credit', 'amountMinor' => 10000,
+        'reason' => 'Manager-approved correction',
+    ]);
+    $view = app(\App\Domain\Reservations\FolioSettlementService::class)
+        ->statement($hotel, $booking);
+    expect($view['routineCashCheckoutEligible'])->toBeFalse();
+});
