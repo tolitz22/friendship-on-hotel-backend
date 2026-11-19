@@ -57,6 +57,8 @@ final class CashierShiftController
             'requestKey' => ['required','string','min:8','max:100'],
             'reference' => ['required','string','min:3','max:120','regex:/\\S/u'],
             'amountMinor' => ['required','integer','min:1','max:100000000000'],
+            'cashTenderedMinor' => ['required_with:changeGivenMinor','integer','min:1','max:100000000000'],
+            'changeGivenMinor' => ['required_with:cashTenderedMinor','integer','min:0','max:100000000000'],
             'duplicateOverrideReason' => ['sometimes','string','min:12','max:500'],
         ]);
         $data['duplicateOverrideAuthorized'] = $this->manager($request, $hotel);
