@@ -85,6 +85,20 @@ final class RoomReadinessDashboardService
                 ->get(['links.id', 't.room_id', 't.status'])
                 ->keyBy('room_id');
 
+        // Operational shortcuts are derived from actual active records, not
+        // the newest historical record, which may already be completed.
+        $openTasks = DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)
+            ->whereIn('room_id', $roomIds)->where('status', '!=', 'done')
+            ->orderByDesc('id')->get(['id','room_id'])->unique('room_id')->keyBy('room_id');
+        $openOrders = DB::table('maintenance_work_orders')->where('hotel_id', $hotel->id)
+            ->whereIn('room_id', $roomIds)->where('affects_room', true)
+            ->whereIn('status', ['open','in_progress'])
+            ->orderByDesc('id')->get(['id','room_id'])->unique('room_id')->keyBy('room_id');
+        $activeBlocks = DB::table('room_inventory_blocks')->where('hotel_id', $hotel->id)
+            ->whereIn('room_id', $roomIds)->where('is_active', true)
+            ->where('check_in', '<=', $asOf)->where('check_out', '>', $asOf)
+            ->orderByDesc('id')->get(['id','room_id'])->unique('room_id')->keyBy('room_id');
+
         $roomStatuses = [];
         $counts = ['totalRooms' => $rooms->count(), 'approvedCurrent' => 0,
             'awaitingReview' => 0, 'needsInspection' => 0, 'blockedOrStale' => 0];
@@ -126,11 +140,18 @@ final class RoomReadinessDashboardService
                 'status' => $status,
                 'latestInspectionId' => $inspection === null ? null : (string) $inspection->id,
                 'inspectionStatus' => $inspection?->status,
+                'openHousekeepingTaskId' => $openTasks->has($id) ? (string) $openTasks->get($id)->id : null,
+                'activeMaintenanceOrderId' => $openOrders->has($id) ? (string) $openOrders->get($id)->id : null,
+                'activeInventoryBlockId' => $activeBlocks->has($id) ? (string) $activeBlocks->get($id)->id : null,
                 'blockers' => $blockers,
             ];
         }
 
         $arrivals = DB::table('reservation_records as r')
+            ->leftJoin('guests as guest', function ($join): void {
+                $join->on('guest.id', '=', 'r.guest_id')
+                    ->on('guest.hotel_id', '=', 'r.hotel_id');
+            })
             ->leftJoin('rooms as rm', function ($join): void {
                 $join->on('rm.id', '=', 'r.assigned_room_id')
                     ->on('rm.hotel_id', '=', 'r.hotel_id');
@@ -141,7 +162,8 @@ final class RoomReadinessDashboardService
             ->orderBy('r.check_in')->orderBy('r.id')
             ->limit(2001)
             ->get(['r.id', 'r.reference', 'r.check_in', 'r.check_out',
-                'r.assigned_room_id', 'rm.number as room_number']);
+                'r.assigned_room_id', 'rm.number as room_number',
+                'guest.first_name', 'guest.last_name']);
         if ($arrivals->count() > 2000) {
             throw new HttpException(422, 'Upcoming arrival count exceeds the synchronous readiness dashboard limit. No partial arrival totals are provided.');
         }
@@ -154,12 +176,17 @@ final class RoomReadinessDashboardService
             return [
                 'bookingId' => (string) $arrival->id,
                 'reference' => $arrival->reference,
+                'guestName' => $arrival->first_name === null ? null : trim($arrival->first_name.' '.$arrival->last_name),
                 'checkIn' => $arrival->check_in,
                 'checkOut' => $arrival->check_out,
                 'assignedRoomId' => $roomId === null ? null : (string) $roomId,
                 'roomNumber' => $arrival->room_number,
                 'risk' => $risk,
                 'roomStatus' => $room['status'] ?? null,
+                'roomBlockers' => $room['blockers'] ?? null,
+                'openHousekeepingTaskId' => $room['openHousekeepingTaskId'] ?? null,
+                'activeMaintenanceOrderId' => $room['activeMaintenanceOrderId'] ?? null,
+                'activeInventoryBlockId' => $room['activeInventoryBlockId'] ?? null,
             ];
         })->all();
 
