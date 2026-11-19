@@ -69,8 +69,19 @@ it('creates all group bookings atomically and safely replays the request', funct
     $changed['name'] = 'Different group';
     $this->postJson($endpoint, $changed)->assertStatus(409);
 
-    $this->getJson($endpoint.'/'.$id)->assertOk()->assertJsonPath('data.roomCount', 2);
-    $this->getJson($endpoint)->assertOk()->assertJsonPath('meta.total', 1);
+    $this->getJson($endpoint.'/'.$id)->assertOk()
+        ->assertJsonPath('data.roomCount', 2)
+        ->assertJsonPath('data.createdByName', 'Reception Staff')
+        ->assertJsonCount(2, 'data.activity')
+        ->assertJsonPath('data.activity.0.action', 'created')
+        ->assertJsonPath('data.activity.0.actorName', 'Reception Staff')
+        ->assertJsonPath('data.activityHasMore', false);
+    $this->getJson($endpoint)->assertOk()
+        ->assertJsonPath('meta.total', 1)
+        ->assertJsonPath('meta.summary.totalGroups', 1)
+        ->assertJsonPath('meta.summary.upcomingArrivals', 1)
+        ->assertJsonPath('meta.summary.inHouseGroups', 0)
+        ->assertJsonPath('meta.summary.attentionGroups', 0);
 });
 
 it('rolls back every child when group inventory is insufficient', function (): void {
@@ -130,6 +141,9 @@ it('derives group lifecycle from every linked room and filters with hotel-scoped
         ->assertJsonPath('meta.total', 1)
         ->assertJsonPath('data.0.status', 'partially_checked_in')
         ->assertJsonPath('data.0.statusCounts.checkedIn', 1);
+    $this->getJson($endpoint)->assertOk()
+        ->assertJsonPath('meta.summary.inHouseGroups', 1)
+        ->assertJsonPath('meta.summary.attentionGroups', 1);
 
     DB::table('reservation_records')->where('id', $bookingIds[1])
         ->update(['lifecycle_state' => 'checked_in']);
