@@ -75,7 +75,8 @@ it('creates all group bookings atomically and safely replays the request', funct
         ->assertJsonCount(2, 'data.activity')
         ->assertJsonPath('data.activity.0.action', 'created')
         ->assertJsonPath('data.activity.0.actorName', 'Reception Staff')
-        ->assertJsonPath('data.activityHasMore', false);
+        ->assertJsonPath('data.activityHasMore', false)
+        ->assertJsonPath('data.operations.checkoutCleaningUnassignedCount', 0);
     $this->getJson($endpoint)->assertOk()
         ->assertJsonPath('meta.total', 1)
         ->assertJsonPath('meta.summary.totalGroups', 1)
