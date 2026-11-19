@@ -39,6 +39,29 @@ final class GroupReservationController
             ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'checked_out' THEN 1 ELSE 0 END) as departed_count")
             ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count");
 
+        // Hotel-wide operational KPIs must not be inferred from the
+        // current 20-row page, or altered by the list search/filter.
+        $hotelToday = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
+        $upcomingCutoff = now($hotel->timezone ?: 'Asia/Manila')
+            ->addDays(7)->toDateString();
+        $statusExpression = $this->groupStatusSql();
+        $summary = DB::table('group_reservations as groups')
+            ->leftJoinSub(clone $members, 'stats', function ($join): void {
+                $join->on('stats.group_reservation_id', '=', 'groups.id');
+            })
+            ->where('groups.hotel_id', $hotel->id)
+            ->selectRaw('COUNT(*) as group_total')
+            ->selectRaw("SUM(CASE WHEN stats.check_in BETWEEN ? AND ?
+                 AND (".$statusExpression.") = 'confirmed'
+                 THEN 1 ELSE 0 END) as upcoming_arrivals", [$hotelToday, $upcomingCutoff])
+            ->selectRaw("SUM(CASE WHEN (".$statusExpression.") IN
+                 ('partially_checked_in','fully_checked_in','partially_checked_out')
+                 THEN 1 ELSE 0 END) as in_house_groups")
+            ->selectRaw("SUM(CASE WHEN (".$statusExpression.") IN
+                 ('partially_checked_in','partially_checked_out')
+                 THEN 1 ELSE 0 END) as attention_groups")
+            ->first();
+
         $query = DB::table('group_reservations as groups')
             ->leftJoinSub($members, 'stats', function ($join): void {
                 $join->on('stats.group_reservation_id', '=', 'groups.id');
@@ -90,6 +113,14 @@ final class GroupReservationController
             'meta' => [
                 'page' => $page->currentPage(), 'total' => $page->total(),
                 'totalPages' => $page->lastPage(), 'perPage' => 20,
+                'summary' => [
+                    'totalGroups' => (int) ($summary?->group_total ?? 0),
+                    'upcomingArrivals' => (int) ($summary?->upcoming_arrivals ?? 0),
+                    'inHouseGroups' => (int) ($summary?->in_house_groups ?? 0),
+                    'attentionGroups' => (int) ($summary?->attention_groups ?? 0),
+                    'upcomingWindowStart' => $hotelToday,
+                    'upcomingWindowEnd' => $upcomingCutoff,
+                ],
             ],
         ]);
     }
