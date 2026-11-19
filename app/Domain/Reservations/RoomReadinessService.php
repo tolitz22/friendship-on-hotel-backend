@@ -138,10 +138,18 @@ final class RoomReadinessService
             if ($previous !== null && $previous->status === 'submitted') {
                 throw new HttpException(409, 'Resolve the previous submitted inspection before creating another.');
             }
+            // One-step inspection: the authorized inspector certifies the physical checks.
+            // Housekeeping, maintenance and inventory blockers are still hard stops.
+            if (! $input['cleaningVerified'] || ! $input['safetyVerified'] || ! $input['amenitiesVerified']) {
+                throw new HttpException(409, 'Complete all physical inspection checks before marking the room ready.');
+            }
+            if (in_array(true, array_values($this->blockers($hotel, $roomId)), true)) {
+                throw new HttpException(409, 'Resolve active housekeeping, maintenance and inventory blockers before inspecting this room as ready.');
+            }
 
             $id = DB::table('room_readiness_inspections')->insertGetId([
                 'hotel_id' => $hotel->id, 'room_id' => $room->id,
-                'revision' => 1, 'status' => 'submitted',
+                'revision' => 1, 'status' => 'approved',
                 'cleaning_verified' => $input['cleaningVerified'],
                 'safety_verified' => $input['safetyVerified'],
                 'amenities_verified' => $input['amenitiesVerified'],
@@ -163,7 +171,7 @@ final class RoomReadinessService
                 'inspector_note' => trim($input['note']),
                 'inspected_by' => $actor, 'created_at' => now(), 'updated_at' => now(),
             ]);
-            $this->event($hotel, $roomId, $id, $actor, 'submitted', [
+            $this->event($hotel, $roomId, $id, $actor, 'approved', [
                 'checks' => [
                     'cleaningVerified' => $input['cleaningVerified'],
                     'safetyVerified' => $input['safetyVerified'],
