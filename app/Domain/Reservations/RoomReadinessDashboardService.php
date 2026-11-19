@@ -124,9 +124,9 @@ final class RoomReadinessDashboardService
             ];
             $hasBlocker = in_array(true, $blockers, true);
             $status = $inspection === null ? 'needs_inspection'
-                : ($inspection->status === 'submitted' ? 'awaiting_review'
-                    : ($inspection->status === 'approved' && ! $hasBlocker
-                        ? 'approved_current' : 'blocked_or_stale'));
+                : ($inspection->status === 'approved' && ! $hasBlocker
+                    ? 'approved_current' : ($inspection->status === 'submitted'
+                        ? 'needs_inspection' : 'blocked_or_stale'));
             $counts[match ($status) {
                 'needs_inspection' => 'needsInspection',
                 'awaiting_review' => 'awaitingReview',
