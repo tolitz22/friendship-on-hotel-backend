@@ -128,6 +128,9 @@ it('shows approved coverage and invalidates it for subsequent completed room wor
         'roomId' => $room->id, 'type' => 'inspection',
         'note' => 'A second check was needed',
     ])->assertCreated()->json('data.id');
+    $this->getJson($base.'/readiness/dashboard')->assertOk()
+        ->assertJsonPath('data.rooms.0.openHousekeepingTaskId', (string) $task)
+        ->assertJsonPath('data.rooms.0.blockers.unfinishedHousekeeping', true);
     $this->patchJson($base.'/housekeeping-tasks/'.$task, [
         'expectedRevision' => 1, 'status' => 'done',
         'note' => 'Second task finished but original room inspection is stale',
