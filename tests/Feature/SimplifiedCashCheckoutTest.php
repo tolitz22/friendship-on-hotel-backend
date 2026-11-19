@@ -244,3 +244,40 @@ it('detects out-of-band modification of an operational cash checkout snapshot', 
         ->statement($hotel, $booking)['routineCashCheckoutAudit'];
     expect($view['integrityValid'])->toBeFalse();
 });
+
+it('preserves a previously signed strict bank settlement without manufacturing a cash checkout audit', function (): void {
+    config()->set('financial_accounting.simplified_cashier_mode', false);
+    config()->set('financial_accounting.enable_verified_settlement', true);
+    [$hotel, $booking, $folio, $cashier, $owner] = simplifiedCashFixture();
+    $secondReviewer = User::create([
+        'name' => 'Independent finance reviewer',
+        'email' => 'cash-strict-reviewer@example.test',
+        'password' => 'testing-only', 'is_active' => true,
+    ]);
+    $accounting = app(FolioAccountingService::class);
+    $settlement = app(\App\Domain\Reservations\FolioSettlementService::class);
+    $payment = $accounting->recordPayment($hotel, $booking, $cashier->id, [
+        'requestKey' => 'strict-signed-bank-payment',
+        'method' => 'bank_transfer', 'reference' => 'BANK-STRICT-SIGN',
+        'amountMinor' => 840000,
+    ]);
+    $accounting->review($hotel, $booking, (int) $payment['id'], $owner->id, [
+        'decision' => 'confirm', 'note' => 'Bank statement reviewed.',
+    ]);
+    $verification = $settlement->prepareVerification($hotel, $booking,
+        (int) $payment['id'], $owner->id, 'bank_statement', 'BANK-REF-STRICT-0001');
+    $settlement->reviewVerification($hotel, $booking, (int) $verification['id'],
+        $secondReviewer->id, 'verify', 'Independently compared bank statement details.');
+    $settlement->allocate($hotel, $booking, (int) $payment['id'], $owner->id,
+        'strict-cash-test-allocation', 'guest', 'Guest payment', 840000, null);
+    expect($settlement->statement($hotel, $booking)['canSignOff'])->toBeTrue();
+    $settlement->signoff($hotel, $booking, $owner->id);
+
+    config()->set('financial_accounting.simplified_cashier_mode', true);
+    app(ReservationStayLifecycleService::class)->transition(
+        $hotel, $cashier->id, $booking, 'check_out'
+    );
+    expect(DB::table('simplified_cash_checkout_audits')->where('hotel_id', $hotel->id)->count())
+        ->toBe(0);
+    expect($settlement->statement($hotel, $booking)['signedSnapshotIntegrity'])->toBeTrue();
+});
