@@ -124,8 +124,14 @@ final class SimplifiedCashCheckoutPolicy
         if ($charges <= 0) {
             throw new HttpException(409, 'Zero or negative guest charges require a reviewed complimentary-stay or credit policy.');
         }
-        if ($statement['refunds'] !== [] || $statement['adjustments'] !== []) {
-            throw new HttpException(409, 'Refunds and manual bill adjustments require reviewed settlement.');
+        if ($statement['refunds'] !== []) {
+            throw new HttpException(409, 'Refunds require reviewed financial settlement.');
+        }
+        foreach ($statement['adjustments'] as $adjustment) {
+            if ($adjustment['kind'] !== 'debit' || ! ($adjustment['routineIncidental'] ?? false)) {
+                throw new HttpException(409,
+                    'Discounts and manually corrected bills require reviewed settlement.');
+            }
         }
         // Avoid bypassing tax and unsettled accounting assessment controls.
         if (config('financial_accounting.enable_live_folio_tax', false)
