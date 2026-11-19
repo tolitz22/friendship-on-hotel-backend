@@ -15,7 +15,7 @@ function rackFixture(): array
     $type = RoomType::create(['hotel_id' => $hotel->id, 'name' => 'Standard', 'max_occupancy' => 2]);
     $rooms = collect(range(1, 3))->map(fn (int $n) => Room::create([
         'hotel_id' => $hotel->id, 'room_type_id' => $type->id,
-        'number' => 'RACK-'.$n, 'floor' => 4,
+        'number' => 'RACK-'.$n, 'floor_number' => 4,
     ]));
     $actor = User::create(['name' => 'Rack Administrator',
         'email' => uniqid('rack-').'@example.test', 'password' => 'Password123456!']);
