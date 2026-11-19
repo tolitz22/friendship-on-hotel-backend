@@ -110,19 +110,40 @@ final class GroupFinanceController
                         'reference' => (string) $payment->reference,
                         'remainingMinor' => max(0, (int) $payment->amount_minor - $allocated - $reservedRefunds)];
                 })->values();
+            $paymentStages = DB::table('folio_payment_records as pay')
+                ->leftJoin('folio_settlement_verifications as verify', function ($join): void {
+                    $join->on('verify.payment_record_id', '=', 'pay.id')
+                        ->on('verify.folio_id', '=', 'pay.folio_id')
+                        ->on('verify.hotel_id', '=', 'pay.hotel_id');
+                })
+                ->where('pay.hotel_id', $hotel->id)->where('pay.folio_id', $row->folio_id)
+                ->whereIn('pay.status', ['pending_review', 'staff_confirmed'])
+                ->get(['pay.id', 'pay.status', 'pay.amount_minor', 'verify.status as verification_status']);
+            $pendingCount = $paymentStages->where('status', 'pending_review')->count();
+            $confirmedCount = $paymentStages->where('status', 'staff_confirmed')->count();
+            $verifiedCount = $paymentStages->filter(static fn (object $payment): bool =>
+                $payment->status === 'staff_confirmed' && $payment->verification_status === 'verified')->count();
+            $pendingAmount = (int) $summary['pendingReviewPaymentsMinor'];
+            $confirmedAmount = (int) $summary['staffConfirmedPaymentsMinor'];
+            $recordedAmount = $pendingAmount + $confirmedAmount;
             $signed = DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $row->folio_id)->exists();
 
             $currency = $row->currency;
             if (!isset($totals[$currency])) {
                 $totals[$currency] = ['currency' => $currency, 'netRecordedChargesMinor' => 0,
+                    'pendingReviewPaymentsMinor' => 0, 'recordedPaymentsMinor' => 0,
                     'staffConfirmedPaymentsMinor' => 0, 'verifiedAllocatedMinor' => 0,
                     'verifiedGroupPayerAllocatedMinor' => 0, 'unallocatedNetChargesMinor' => 0,
+                    'balanceAfterRecordedPaymentsMinor' => 0,
                     'pricedFolioCount' => 0];
             }
             $net = (int) $summary['netRecordedChargesMinor'];
             $totals[$currency]['netRecordedChargesMinor'] += $net;
-            $totals[$currency]['staffConfirmedPaymentsMinor'] += (int) $summary['staffConfirmedPaymentsMinor'];
+            $totals[$currency]['pendingReviewPaymentsMinor'] += $pendingAmount;
+            $totals[$currency]['recordedPaymentsMinor'] += $recordedAmount;
+            $totals[$currency]['balanceAfterRecordedPaymentsMinor'] += $net - $recordedAmount;
+            $totals[$currency]['staffConfirmedPaymentsMinor'] += $confirmedAmount;
             $totals[$currency]['verifiedAllocatedMinor'] += $verifiedAllocated;
             $totals[$currency]['verifiedGroupPayerAllocatedMinor'] += $groupAllocated;
             $totals[$currency]['unallocatedNetChargesMinor'] += $net - $verifiedAllocated;
@@ -131,7 +152,13 @@ final class GroupFinanceController
                 'bookingId' => (string) $row->booking_id, 'reference' => $row->reference,
                 'folioId' => (string) $row->folio_id, 'priced' => true, 'currency' => $currency,
                 'netRecordedChargesMinor' => $net,
-                'staffConfirmedPaymentsMinor' => (int) $summary['staffConfirmedPaymentsMinor'],
+                'pendingReviewPaymentsMinor' => $pendingAmount,
+                'recordedPaymentsMinor' => $recordedAmount,
+                'balanceAfterRecordedPaymentsMinor' => $net - $recordedAmount,
+                'pendingReviewPaymentCount' => $pendingCount,
+                'staffConfirmedPaymentCount' => $confirmedCount,
+                'independentlyVerifiedPaymentCount' => $verifiedCount,
+                'staffConfirmedPaymentsMinor' => $confirmedAmount,
                 'verifiedAllocatedMinor' => $verifiedAllocated,
                 'verifiedGroupPayerAllocatedMinor' => $groupAllocated,
                 'unallocatedNetChargesMinor' => $net - $verifiedAllocated,
