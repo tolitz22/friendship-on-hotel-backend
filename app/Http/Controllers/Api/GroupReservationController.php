@@ -47,12 +47,10 @@ final class GroupReservationController
 
         $term = trim($input['search'] ?? '');
         if ($term !== '') {
-            // Escape LIKE meta characters so user input is a literal search.
-            $escaped = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term);
-            $query->where(function ($search) use ($escaped): void {
-                $search->where('groups.name', 'like', '%'.$escaped.'%')
-                    ->orWhere('groups.reference', 'like', '%'.$escaped.'%')
-                    ->orWhere('groups.contact_name', 'like', '%'.$escaped.'%');
+            $query->where(function ($search) use ($term): void {
+                $search->where('groups.name', 'like', '%'.$term.'%')
+                    ->orWhere('groups.reference', 'like', '%'.$term.'%')
+                    ->orWhere('groups.contact_name', 'like', '%'.$term.'%');
             });
         }
 
