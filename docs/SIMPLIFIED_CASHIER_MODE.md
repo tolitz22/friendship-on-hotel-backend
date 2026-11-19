@@ -10,7 +10,7 @@ Set on the **Laravel backend** only:
 FINANCE_SIMPLIFIED_CASHIER_MODE=true
 ```
 
-Default is `false` (strict legacy settlement enforcement remains in effect). Test with synthetic data on staging first. The separate `FINANCE_ENABLE_VERIFIED_SETTLEMENT` flag controls strict signed settlement paths, including bank/evidence workflows. Enabling simplified cash mode does **not** remove or relax bank verification, refund approvals, or the manager's independent shift reconciliation. Existing historical receipts with no recorded tender/change are **not** eligible for simplified checkout.
+Default is `false` (strict legacy settlement enforcement remains in effect). Test with synthetic data on staging first. The separate `FINANCE_ENABLE_VERIFIED_SETTLEMENT` flag controls strict signed settlement paths, including bank/evidence workflows. Enabling simplified cash mode does **not** remove or relax bank verification, refund approvals, or the manager's independent shift reconciliation. Existing historical receipts with no recorded tender/change are **not** eligible for simplified checkout. The `simplified_cash_checkout_audits` migration is required; cash checkout is blocked until it exists.
 
 Do not activate in live financial operations until the owner approves the property SOP, tax-complete charges, statutory invoicing, history/backfill approach, permissions, backups, and finance reporting. Coordinate configuration deployment and `php artisan config:clear` / `php artisan config:cache` as appropriate. Never change the flag mid-shift without an operational plan.
 
@@ -20,10 +20,10 @@ Do not activate in live financial operations until the owner approves the proper
 2. Record the guest payment in Guest Billing. For an ₱8,400 bill and ₱10,000 tendered, save `cashTenderedMinor=1000000`, `changeGivenMinor=160000`, and `amountMinor=840000`. Give ₱1,600 change immediately.
 3. The newly recorded cash payment becomes **staff-confirmed** (not independently verified). It is tied to the cashier's open shift; the backend prevents mismatched amounts and duplicate receipts.
 4. If the whole guest folio is covered by auditable cash, has no refunds/manual adjustments/disputed evidence, and has no outstanding tax assessment constraints, the receptionist may follow the **routine cash checkout** path without waiting for shift closure.
-5. The guest room remains subject to the normal reservation checkout, keycard revocation, housekeeping turnover and room readiness rules.
+5. The checkout transaction atomically saves an immutable `simplified_cash_checkout_audits` snapshot of the actor, net cash, tender/change receipts, and SHA-256 digest. This is operational evidence, **not** a signed financial settlement. The guest room remains subject to normal reservation checkout, keycard revocation, housekeeping turnover and room readiness rules.
 6. Cashier physically counts the whole drawer, including the opening float, submits the shift, and cannot record further cash against it.
 7. **Another authorized manager/owner** reconciles the shift or flags the variance. Cashiers cannot reconcile their own shift, and managers cannot disguise a shortage by changing captured receipts.
-8. Owner reviews Cashier Shifts > Cash control overview for submitted, flagged and reconciled drawers, opens linked guest bills and investigates all discrepancies.
+8. Owner reviews Cashier Shifts > Cash control overview for submitted, flagged and reconciled drawers, opens linked guest bills and checks the checkout audit and integrity indicator. Investigate every discrepancy.
 
 Expected drawer cash = opening float + sum of **net valid cash receipts** (excluding voided mistakes). Tendered minus change equals the net receipt. Change given is not hotel revenue. End-of-shift reconciliation is separate from guest checkout.
 
@@ -39,6 +39,7 @@ These require authorized finance review. Ordinary mutation after checkout is blo
 ## Verification before production
 
 ```bash
+php artisan migrate --force
 php artisan test --filter=SimplifiedCashCheckoutTest
 php artisan test --filter=PaymentDuplicateAndVoidTest
 php artisan test --filter=FolioSettlementIntegrationTest
