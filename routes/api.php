@@ -56,6 +56,7 @@ use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
+use App\Http\Controllers\Api\GuestIncidentalChargeController;
 use App\Http\Controllers\Api\OccupancyVerificationController;
 use App\Http\Controllers\Api\OccupancyInvestigationController;
 use App\Http\Controllers\Api\OccupancyCoverageReportController;
@@ -99,6 +100,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
+            Route::post('/bookings/{booking}/incidental-charges', GuestIncidentalChargeController::class)
+                ->whereNumber('booking')->middleware('hotel.permission:cashier.write')
+                ->middleware('throttle:20,1');
             Route::get('/bookings/{booking}/payment-safety', [FolioAccountingController::class, 'paymentSafety'])
                 ->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/finance/folios', FinanceFolioIndexController::class)->middleware('hotel.permission:finance.read');
