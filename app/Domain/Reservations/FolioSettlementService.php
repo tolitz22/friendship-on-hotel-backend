@@ -292,17 +292,12 @@ final class FolioSettlementService
                     'benefitKind' => $r->benefit_kind,
                 ])->all();
         }
-        $adjustmentQuery = DB::table('folio_adjustments')
+        $adjustments = DB::table('folio_adjustments')
             ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
-            ->orderBy('id');
-        $routineColumn = Schema::hasColumn('folio_adjustments', 'is_routine_incidental');
-        $adjustments = $adjustmentQuery->get($routineColumn
-                ? ['id', 'kind', 'reason', 'amount_minor', 'is_routine_incidental']
-                : ['id', 'kind', 'reason', 'amount_minor'])
+            ->orderBy('id')->get(['id', 'kind', 'reason', 'amount_minor'])
             ->map(fn ($r) => [
                 'id' => (string) $r->id, 'kind' => $r->kind, 'description' => $r->reason,
                 'amountMinor' => (int) $r->amount_minor,
-                'routineIncidental' => $routineColumn && (bool) $r->is_routine_incidental,
             ])->all();
         $payments = DB::table('folio_payment_records as p')
             ->leftJoin('folio_settlement_verifications as v', function ($join): void {
