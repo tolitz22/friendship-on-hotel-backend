@@ -48,78 +48,48 @@ function phase35Checklist(): array
     ];
 }
 
-it('stores a separate inspection and requires a second hotel administrator to approve', function (): void {
+it('completes physical room inspection without a manager approval and audits every completion', function (): void {
     [$hotel, $room] = phase35Room();
     $base = '/api/v1/hotels/'.$hotel->id.'/rooms/'.$room->id.'/readiness';
     $this->getJson($base)->assertOk()
         ->assertJsonPath('data.advisoryReady', false)
-        ->assertJsonPath('data.enforcedAtCheckIn', false)
         ->assertJsonPath('data.inventoryGuaranteed', false);
+    $first = $this->postJson($base.'/inspections', phase35Checklist())
+        ->assertCreated()->assertJsonPath('data.inspection.status', 'approved')
+        ->assertJsonPath('data.advisoryReady', true)->json('data.inspection.id');
 
-    $inspection = $this->postJson($base.'/inspections', phase35Checklist())
-        ->assertCreated()->assertJsonPath('data.inspection.status', 'submitted')
-        ->json('data.inspection.id');
-
-    $this->postJson($base.'/inspections', phase35Checklist())->assertStatus(409);
-    $this->postJson($base.'/inspections/'.$inspection.'/review', [
+    // A later physical inspection is allowed without a separate reviewer.
+    $this->postJson($base.'/inspections', phase35Checklist())
+        ->assertCreated()->assertJsonPath('data.advisoryReady', true);
+    $this->postJson($base.'/inspections/'.$first.'/review', [
         'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Self review should not work',
-    ])->assertForbidden();
-
-    phase35Staff($hotel);
-    $this->postJson($base.'/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Independent physical inspection review',
-    ])->assertOk()->assertJsonPath('data.inspection.status', 'approved')
-        ->assertJsonPath('data.advisoryReady', true)
-        ->assertJsonPath('data.enforcedAtCheckIn', false);
-
-    $this->postJson($base.'/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'reject',
-        'note' => 'Duplicate review rejected',
-    ])->assertStatus(409);
+        'note' => 'An earlier inspection cannot be modified',
+    ])->assertNotFound();
     $this->getJson($base.'/history')->assertOk()
         ->assertJsonCount(2, 'data')
         ->assertJsonPath('data.0.action', 'approved')
         ->assertJsonPath('meta.total', 2);
 });
 
-it('does not approve failed inspection checks or active maintenance blockers', function (): void {
+it('rejects failed physical checks and active maintenance restrictions', function (): void {
     [$hotel, $room, $first] = phase35Room();
     $base = '/api/v1/hotels/'.$hotel->id.'/rooms/'.$room->id.'/readiness';
-
     $failed = phase35Checklist();
     $failed['safetyVerified'] = false;
-    $id = $this->postJson($base.'/inspections', $failed)
-        ->assertCreated()->json('data.inspection.id');
-    phase35Staff($hotel);
-    $this->postJson($base.'/inspections/'.$id.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'A failed safety inspection cannot pass',
-    ])->assertStatus(409);
-    $this->postJson($base.'/inspections/'.$id.'/review', [
-        'expectedRevision' => 1, 'decision' => 'reject',
-        'note' => 'Reject failed physical inspection',
-    ])->assertOk()->assertJsonPath('data.inspection.status', 'rejected');
+    $this->postJson($base.'/inspections', $failed)->assertStatus(409);
+    $this->getJson($base)->assertJsonPath('data.inspection', null);
 
     DB::table('maintenance_work_orders')->insert([
         'hotel_id' => $hotel->id, 'room_id' => $room->id,
         'title' => 'Broken AC', 'description' => 'Room is unsafe',
-        'priority' => 'urgent', 'status' => 'open',
-        'affects_room' => true, 'revision' => 1,
-        'created_by' => $first->id,
+        'priority' => 'urgent', 'status' => 'open', 'affects_room' => true,
+        'revision' => 1, 'created_by' => $first->id,
         'created_at' => now(), 'updated_at' => now(),
     ]);
-    $id2 = $this->postJson($base.'/inspections', phase35Checklist())
-        ->assertCreated()->json('data.inspection.id');
-    $this->getJson($base)->assertJsonPath('data.blockers.activeRoomImpactMaintenance', true);
-    // A different administrator must review the new inspection; otherwise
-    // the self-approval guard returns 403 before evaluating blockers.
-    phase35Staff($hotel);
-    $this->postJson($base.'/inspections/'.$id2.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Cannot approve during maintenance',
-    ])->assertStatus(409);
+    $this->postJson($base.'/inspections', phase35Checklist())->assertStatus(409);
+    $this->getJson($base)->assertJsonPath('data.blockers.activeRoomImpactMaintenance', true)
+        ->assertJsonPath('data.advisoryReady', false);
+    $this->getJson($base.'/history')->assertJsonCount(0, 'data');
 });
 
 it('isolates hotel inspection history and blocks unauthorized review', function (): void {
@@ -136,15 +106,15 @@ it('isolates hotel inspection history and blocks unauthorized review', function 
     $this->postJson($base.'/inspections', phase35Checklist())->assertForbidden();
 });
 
-it('rejects stale revisions, preserving the latest review state', function (): void {
+it('rejects review attempts on already completed one-step inspections', function (): void {
     [$hotel, $room] = phase35Room();
     $base = '/api/v1/hotels/'.$hotel->id.'/rooms/'.$room->id.'/readiness';
     $inspection = $this->postJson($base.'/inspections', phase35Checklist())
         ->assertCreated()->json('data.inspection.id');
-    phase35Staff($hotel);
     $this->postJson($base.'/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 9, 'decision' => 'approve',
-        'note' => 'Stale inspection review',
+        'expectedRevision' => 1, 'decision' => 'approve',
+        'note' => 'Completed record should not be re-approved',
     ])->assertStatus(409);
-    $this->getJson($base)->assertJsonPath('data.inspection.status', 'submitted');
+    $this->getJson($base)->assertJsonPath('data.inspection.status', 'approved')
+        ->assertJsonPath('data.advisoryReady', true);
 });
