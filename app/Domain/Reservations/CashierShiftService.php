@@ -105,6 +105,7 @@ final class CashierShiftService
             'id' => (string) $shift->id, 'hotelId' => (string) $shift->hotel_id,
             'cashierId' => (string) $shift->cashier_id,
             'currency' => $shift->currency, 'status' => $shift->status,
+            'cashTenderTrackingSupported' => true,
             'openingFloatMinor' => (int) $shift->opening_float_minor,
             // Do not expose the live expected cash to the cashier before count submission.
             'expectedCashMinor' => $shift->status === 'open' ? null : (int) $shift->expected_cash_minor,
