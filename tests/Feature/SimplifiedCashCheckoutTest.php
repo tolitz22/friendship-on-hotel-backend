@@ -11,6 +11,7 @@ use App\Models\HotelMembership;
 use App\Models\Room;
 use App\Models\RoomType;
 use App\Models\User;
+use Laravel\Sanctum\Sanctum;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -188,4 +189,27 @@ it('keeps the original independent-approval checkout policy when simplified mode
     } catch (HttpException $e) {
         expect($e->getStatusCode())->toBe(409);
     }
+});
+
+it('permits an authorized front desk checkout through the API without an independent manager payment signoff', function (): void {
+    config()->set('financial_accounting.simplified_cashier_mode', true);
+    config()->set('financial_accounting.enable_verified_settlement', true);
+    [$hotel, $booking, $folio, $cashier, $owner] = simplifiedCashFixture();
+    $shifts = app(CashierShiftService::class);
+    $open = $shifts->open($hotel, $cashier->id, 0);
+    $shifts->receive($hotel, $cashier->id, (int) $open['id'], $booking, [
+        'requestKey' => 'front-desk-api-fast-checkout-01',
+        'reference' => 'CASH-CHECKOUT-API', 'amountMinor' => 840000,
+        'cashTenderedMinor' => 1000000, 'changeGivenMinor' => 160000,
+    ]);
+    Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking.'/check-out')
+        ->assertOk()->assertJsonPath('data.status', 'checked_out');
+    expect(DB::table('cashier_shifts')->where('id', $open['id'])->value('status'))
+        ->toBe('open');
+    $this->assertDatabaseHas('reservation_records', [
+        'id' => $booking, 'lifecycle_state' => 'checked_out',
+    ]);
+    expect(DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)->count())
+        ->toBe(0);
 });
