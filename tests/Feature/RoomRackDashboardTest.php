@@ -58,6 +58,7 @@ it('reports hotel-wide PMS occupancy separately from physical readiness and futu
         ->assertJsonPath('data.rooms.0.roomTypeName', 'Standard')
         ->assertJsonPath('data.rooms.0.floor', 4)
         ->assertJsonPath('data.rooms.0.advisoryReady', false)
+        ->assertJsonPath('data.allowedActions.completeInspection', true)
         ->assertJsonPath('meta.totalPages', 2)
         ->assertJsonPath('meta.availabilityGuaranteed', false)
         ->assertJsonPath('meta.physicalOccupancyVerified', false)
@@ -86,4 +87,21 @@ it('shows unassigned arrivals separately and scopes guest-aware rack to hotel pe
 
     $other = Hotel::create(['name' => 'Other Rack Hotel', 'currency' => 'PHP']);
     $this->getJson('/api/v1/hotels/'.$other->id.'/rooms/rack')->assertNotFound();
+});
+
+it('returns inspection affordances from active server membership, never from a client role claim', function (): void {
+    [$hotel] = rackFixture();
+    $staff = User::create(['name' => 'Reception Rack User',
+        'email' => uniqid('rack-desk-').'@example.test', 'password' => 'Password123456!']);
+    HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $staff->id,
+        'role' => 'front_desk', 'is_active' => true]);
+    Sanctum::actingAs($staff, ['hotel:read', 'booking:write']);
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $this->getJson($base.'/rooms/rack')->assertOk()
+        ->assertJsonPath('data.allowedActions.completeInspection', false);
+    Sanctum::actingAs($staff, ['hotel:read']);
+    $this->postJson($base.'/rooms/1/readiness/inspections', [
+        'cleaningVerified' => true,'safetyVerified' => true,
+        'amenitiesVerified' => true,'note' => 'Reception cannot inspect a room',
+    ])->assertForbidden();
 });
