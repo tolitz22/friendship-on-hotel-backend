@@ -60,7 +60,7 @@ final class ReservationRecordController
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'search' => ['sometimes', 'string', 'max:100'],
-            'filter' => ['sometimes', 'in:all,needs_room,arrivals,in_house,completed'],
+            'filter' => ['sometimes', 'in:all,needs_room,arrivals,in_house,completed,checked_out,cancelled'],
         ]);
 
         $perPage = (int) ($data['per_page'] ?? 20);
@@ -75,6 +75,8 @@ final class ReservationRecordController
             $query->where('lifecycle_state', 'checked_in');
         } elseif ($filter === 'completed') {
             $query->whereIn('lifecycle_state', ['checked_out', 'cancelled']);
+        } elseif ($filter === 'checked_out' || $filter === 'cancelled') {
+            $query->where('lifecycle_state', $filter);
         }
 
         $search = trim((string) ($data['search'] ?? ''));
