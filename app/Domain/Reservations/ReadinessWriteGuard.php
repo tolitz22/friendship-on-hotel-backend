@@ -34,7 +34,7 @@ final class ReadinessWriteGuard
     {
         $assessment = app(RoomReadinessService::class)->show($hotel, $roomId);
         if (! $assessment['advisoryReady']) {
-            throw new HttpException(409, 'Room is not approved for check-in: obtain an independently reviewed current inspection and clear all readiness blockers.');
+            throw new HttpException(409, 'Room is not approved for check-in: record a completed current physical inspection and clear all readiness blockers.');
         }
     }
 }
