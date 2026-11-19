@@ -173,3 +173,54 @@ it('derives group lifecycle from every linked room and filters with hotel-scoped
     $this->getJson($endpoint.'?search='.str_repeat('x', 121))
         ->assertUnprocessable();
 });
+
+it('reports pending evidence separately from reviewed and allocated balances', function (): void {
+    [$hotel, $type, $guests, $staff] = groupFixture();
+    $endpoint = '/api/v1/hotels/'.$hotel->id.'/group-reservations';
+    $groupId = $this->postJson($endpoint, groupPayload($type, $guests))
+        ->assertCreated()->json('data.id');
+    $bookingIds = DB::table('group_reservation_members')
+        ->where('hotel_id', $hotel->id)->where('group_reservation_id', $groupId)
+        ->orderBy('position')->pluck('reservation_record_id')->all();
+
+    $folios = [];
+    foreach ($bookingIds as $bookingId) {
+        $folioId = DB::table('reservation_folios')->insertGetId([
+            'hotel_id' => $hotel->id, 'reservation_record_id' => $bookingId,
+            'currency' => 'PHP', 'created_by' => $staff->id,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+        $folios[] = $folioId;
+        DB::table('folio_entries')->insert([
+            'hotel_id' => $hotel->id, 'folio_id' => $folioId,
+            'entry_type' => 'room_night', 'description' => 'One room night',
+            'amount_minor' => 250000, 'actor_id' => $staff->id,
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+    foreach ([
+        [$folios[0], 'pending_review', 50000, 'PENDING-GROUP-1'],
+        [$folios[1], 'staff_confirmed', 25000, 'CONFIRMED-GROUP-2'],
+    ] as [$folioId, $status, $amount, $reference]) {
+        DB::table('folio_payment_records')->insert([
+            'hotel_id' => $hotel->id, 'folio_id' => $folioId,
+            'request_key' => 'group-payment-'.$reference,
+            'payload_sha256' => hash('sha256', $reference),
+            'method' => 'bank_transfer', 'reference' => $reference,
+            'amount_minor' => $amount, 'status' => $status,
+            'recorded_by' => $staff->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+    $this->getJson($endpoint.'/'.$groupId.'/financial-summary')->assertOk()
+        ->assertJsonPath('data.currencies.0.netRecordedChargesMinor', 500000)
+        ->assertJsonPath('data.currencies.0.pendingReviewPaymentsMinor', 50000)
+        ->assertJsonPath('data.currencies.0.staffConfirmedPaymentsMinor', 25000)
+        ->assertJsonPath('data.currencies.0.recordedPaymentsMinor', 75000)
+        ->assertJsonPath('data.currencies.0.balanceAfterRecordedPaymentsMinor', 425000)
+        ->assertJsonPath('data.currencies.0.unallocatedNetChargesMinor', 500000)
+        ->assertJsonPath('data.rooms.0.pendingReviewPaymentCount', 1)
+        ->assertJsonPath('data.rooms.0.staffConfirmedPaymentCount', 0)
+        ->assertJsonPath('data.rooms.1.staffConfirmedPaymentCount', 1)
+        ->assertJsonPath('data.rooms.1.independentlyVerifiedPaymentCount', 0)
+        ->assertJsonPath('meta.finalInvoice', false);
+});
