@@ -36,6 +36,60 @@ final class SimplifiedCashCheckoutPolicy
         $this->validateStatement($hotel, $bookingId, $statement);
     }
 
+    /**
+     * Save the immutable operational checkout evidence while the reservation
+     * transition holds the hotel lock. This is NOT a financial settlement signoff.
+     */
+    public function recordCheckout(Hotel $hotel, int $bookingId, int $actorId): void
+    {
+        if (! Schema::hasTable('simplified_cash_checkout_audits')) {
+            throw new HttpException(409, 'Simplified cash checkout audit migration is required before activation.');
+        }
+        $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+            ->where('reservation_record_id', $bookingId)->first();
+        abort_unless($folio !== null, 404);
+        $statement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
+        $this->validateStatement($hotel, $bookingId, $statement);
+
+        $receipts = DB::table('cashier_shift_receipts as receipt')
+            ->join('folio_payment_records as payment', function ($join): void {
+                $join->on('payment.id', '=', 'receipt.payment_id')
+                    ->on('payment.hotel_id', '=', 'receipt.hotel_id');
+            })
+            ->where('receipt.hotel_id', $hotel->id)
+            ->where('receipt.reservation_record_id', $bookingId)
+            ->where('payment.folio_id', $folio->id)
+            ->where('payment.status', 'staff_confirmed')
+            ->orderBy('receipt.payment_id')
+            ->get(['receipt.payment_id', 'receipt.shift_id',
+                'receipt.amount_minor', 'receipt.cash_tendered_minor',
+                'receipt.change_given_minor', 'receipt.net_receipt_minor'])
+            ->map(fn (object $row): array => [
+                'paymentId' => (string) $row->payment_id,
+                'cashierShiftId' => (string) $row->shift_id,
+                'cashAmountMinor' => (int) $row->amount_minor,
+                'cashTenderedMinor' => (int) $row->cash_tendered_minor,
+                'changeGivenMinor' => (int) $row->change_given_minor,
+                'netReceiptMinor' => (int) $row->net_receipt_minor,
+            ])->all();
+        $snapshot = json_encode([
+            'bookingId' => (string) $bookingId,
+            'folioId' => (string) $folio->id,
+            'recordedChargesMinor' => (int) $statement['netRecordedChargesMinor'],
+            'receipts' => $receipts,
+        ], JSON_THROW_ON_ERROR);
+        DB::table('simplified_cash_checkout_audits')->insert([
+            'hotel_id' => $hotel->id, 'reservation_record_id' => $bookingId,
+            'folio_id' => $folio->id, 'performed_by' => $actorId,
+            'recorded_charges_minor' => (int) $statement['netRecordedChargesMinor'],
+            'net_cash_minor' => array_sum(array_column($receipts, 'netReceiptMinor')),
+            'receipt_count' => count($receipts),
+            'receipt_snapshot' => $snapshot,
+            'receipt_snapshot_sha256' => hash('sha256', $snapshot),
+            'checked_out_at' => now(), 'created_at' => now(),
+        ]);
+    }
+
     /** Preview only: checkout re-checks eligibility under the hotel lock. */
     public function readiness(Hotel $hotel, int $bookingId, array $statement): array
     {
