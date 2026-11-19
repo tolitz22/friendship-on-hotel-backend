@@ -17,12 +17,20 @@ final class FinancialTaxPolicyService
     public function list(int $hotelId): array
     {
         return DB::table('financial_tax_policies')->where('hotel_id', $hotelId)
-            ->orderByDesc('effective_from')->orderByDesc('id')->get()->toArray();
+            ->leftJoin('users as creators', 'financial_tax_policies.created_by', '=', 'creators.id')
+            ->leftJoin('users as reviewers', 'financial_tax_policies.approved_by', '=', 'reviewers.id')
+            ->select('financial_tax_policies.*', 'creators.name as created_by_name',
+                'reviewers.name as approved_by_name')
+            ->orderByDesc('financial_tax_policies.effective_from')
+            ->orderByDesc('financial_tax_policies.id')->get()->toArray();
     }
 
     public function draft(int $hotelId, string $classification, string $priceMode,
-        int $rateBps, string $from, ?string $until, string $note): int
+        int $rateBps, string $from, ?string $until, string $note, int $creatorId): int
     {
+        if ($creatorId < 1) {
+            throw new InvalidArgumentException('Invalid tax policy creator identity.');
+        }
         try {
             $this->validatePolicy($hotelId, $classification, $priceMode, $rateBps, $from, $until);
         } catch (InvalidArgumentException $exception) {
@@ -33,7 +41,7 @@ final class FinancialTaxPolicyService
         }
 
         return (int) DB::table('financial_tax_policies')->insertGetId([
-            'hotel_id' => $hotelId, 'classification' => $classification,
+            'hotel_id' => $hotelId, 'created_by' => $creatorId, 'classification' => $classification,
             'price_mode' => $priceMode, 'rate_bps' => $rateBps,
             'effective_from' => $from, 'effective_until' => $until,
             'status' => 'draft', 'review_note' => trim($note),
@@ -57,6 +65,16 @@ final class FinancialTaxPolicyService
                 ->where('id', $policyId)->lockForUpdate()->first();
             if ($policy === null || $policy->status !== 'draft') {
                 throw ValidationException::withMessages(['policy_id' => 'Only a draft policy can be approved.']);
+            }
+            if ($policy->created_by === null) {
+                throw ValidationException::withMessages([
+                    'policy_id' => 'Legacy draft has no verified creator. Create a new draft for independent review.',
+                ]);
+            }
+            if ((int) $policy->created_by === $actorId) {
+                throw ValidationException::withMessages([
+                    'policy_id' => 'The policy creator cannot approve their own draft. A different authorized administrator is required.',
+                ]);
             }
             $this->validatePolicy($hotelId, $policy->classification, $policy->price_mode,
                 (int) $policy->rate_bps, $policy->effective_from, $policy->effective_until);
