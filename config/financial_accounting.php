@@ -17,4 +17,11 @@ return [
      * Existing signed folios remain immutable even after rollback.
      */
     'enable_verified_settlement' => (bool) env('FINANCE_ENABLE_VERIFIED_SETTLEMENT', false),
+    /*
+     * Optional property-wide simplified CASH checkout.
+     * Only newly recorded, shift-linked, staff-confirmed cash qualifies.
+     * Cashier shift remains subject to independent review after departure.
+     * DO NOT activate for live guests without validated finance procedures.
+     */
+    'simplified_cashier_mode' => (bool) env('FINANCE_SIMPLIFIED_CASHIER_MODE', false),
 ];
