@@ -27,6 +27,15 @@ final class FolioSettlementService
             ]);
         }
         app(ReadinessWriteGuard::class)->lockHotel($hotel);
+        // Simplified checkout deliberately happens before shift review, but
+        // post-departure financial mutations require a separate approved
+        // correction flow, not an ordinary pre-checkout endpoint.
+        if (config('financial_accounting.simplified_cashier_mode', false)
+            && DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->where('lifecycle_state', 'checked_out')->exists()) {
+            throw new HttpException(409,
+                'The guest has checked out; use an owner-approved post-checkout finance correction workflow.');
+        }
         return app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
     }
 
