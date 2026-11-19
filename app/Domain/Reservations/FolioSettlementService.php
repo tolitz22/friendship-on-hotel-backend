@@ -244,7 +244,8 @@ final class FolioSettlementService
             // but never embed them in the immutable financial sign-off snapshot.
             $snapshot = $statement;
             unset($snapshot['cashShiftContexts'], $snapshot['simplifiedCashierModeEnabled'],
-                $snapshot['routineCashCheckoutEligible'], $snapshot['routineCashCheckoutReason']);
+                $snapshot['routineCashCheckoutEligible'], $snapshot['routineCashCheckoutReason'],
+                $snapshot['routineCashCheckoutAudit']);
             $encoded = json_encode($snapshot, JSON_THROW_ON_ERROR);
             $id = DB::table('folio_settlement_signoffs')->insertGetId([
                 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
@@ -523,6 +524,27 @@ final class FolioSettlementService
             'paymentEvidenceIndependentlyReviewed' => $pending === 0,
             'settlementWorkflowEnabled' => (bool) config('financial_accounting.enable_verified_settlement', false),
             'simplifiedCashierModeEnabled' => (bool) config('financial_accounting.simplified_cashier_mode', false),
+        ];
+        // Operational checkout is not an independently signed settlement.
+        // Expose the original receipt evidence and its integrity only as
+        // read-only audit metadata, never as immutable folio financial facts.
+        $cashCheckout = Schema::hasTable('simplified_cash_checkout_audits')
+            ? DB::table('simplified_cash_checkout_audits as record')
+                ->leftJoin('users as actor', 'actor.id', '=', 'record.performed_by')
+                ->where('record.hotel_id', $hotel->id)
+                ->where('record.reservation_record_id', $bookingId)
+                ->first(['record.*', 'actor.name as actor_name'])
+            : null;
+        $response['routineCashCheckoutAudit'] = $cashCheckout === null ? null : [
+            'performedBy' => (string) $cashCheckout->performed_by,
+            'performedByName' => $cashCheckout->actor_name,
+            'checkedOutAt' => (string) $cashCheckout->checked_out_at,
+            'recordedChargesMinor' => (int) $cashCheckout->recorded_charges_minor,
+            'netCashMinor' => (int) $cashCheckout->net_cash_minor,
+            'receiptCount' => (int) $cashCheckout->receipt_count,
+            'integrityValid' => hash_equals((string) $cashCheckout->receipt_snapshot_sha256,
+                hash('sha256', (string) $cashCheckout->receipt_snapshot)),
+            'isIndependentFinancialSettlement' => false,
         ];
         $readiness = app(SimplifiedCashCheckoutPolicy::class)->readiness($hotel, $bookingId, $response);
         $response['routineCashCheckoutEligible'] = $readiness['eligible'];
