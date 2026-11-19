@@ -20,7 +20,7 @@ final class ReservationRecordController
         $record = $hotel->reservationRecords()->with(['roomType:id,name', 'assignedRoom:id,number'])
             ->whereKey($booking)->firstOrFail();
         $guest = DB::table('guests')->where('hotel_id', $hotel->id)
-            ->where('id', $record->guest_id)->first(['first_name', 'last_name']);
+            ->where('id', $record->guest_id)->first(['first_name', 'last_name', 'phone']);
         $early = DB::table('reservation_early_check_ins')
             ->where('hotel_id', $hotel->id)->where('reservation_record_id', $record->id)->first();
 
@@ -30,6 +30,7 @@ final class ReservationRecordController
             'hotelId' => (string) $record->hotel_id,
             'reference' => $record->reference,
             'guestName' => $guest === null ? null : trim($guest->first_name.' '.$guest->last_name),
+            'guestPhone' => $guest?->phone,
             'roomTypeName' => $record->roomType?->name,
             'assignedRoomNumber' => $record->assignedRoom?->number,
             'roomTypeId' => (string) $record->room_type_id,
@@ -106,7 +107,7 @@ final class ReservationRecordController
         $guestNames = DB::table('guests')
             ->where('hotel_id', $hotel->id)
             ->whereIn('id', $records->getCollection()->pluck('guest_id')->filter()->all())
-            ->get(['id', 'first_name', 'last_name'])->keyBy('id');
+            ->get(['id', 'first_name', 'last_name', 'phone'])->keyBy('id');
         $earlyRecords = DB::table('reservation_early_check_ins')
             ->where('hotel_id', $hotel->id)
             ->whereIn('reservation_record_id', $records->getCollection()->pluck('id')->all())
@@ -120,6 +121,8 @@ final class ReservationRecordController
                 'guestName' => isset($guestNames[$record->guest_id])
                     ? trim($guestNames[$record->guest_id]->first_name.' '.$guestNames[$record->guest_id]->last_name)
                     : null,
+                'guestPhone' => isset($guestNames[$record->guest_id])
+                    ? $guestNames[$record->guest_id]->phone : null,
                 'roomTypeName' => $record->roomType?->name,
                 'assignedRoomNumber' => $record->assignedRoom?->number,
                 'roomTypeId' => (string) $record->room_type_id,
