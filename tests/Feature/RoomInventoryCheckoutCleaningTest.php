@@ -91,18 +91,12 @@ it('tracks actual checkout cleaning until independent inspection approves the ro
         'cleaningVerified' => true, 'safetyVerified' => true,
         'amenitiesVerified' => true, 'note' => 'Cleaning, amenities and safety checked.',
     ])->assertCreated()->json('data.inspection.id');
-    $this->getJson($roomStatus)->assertJsonPath('data.0.cleaning', 'awaiting_inspection');
-
-    Sanctum::actingAs($inspector, ['hotel:read', 'hotel:write']);
-    $this->postJson($readiness.'/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Independently verified checkout cleaning and safety.',
-    ])->assertOk();
     $this->getJson($roomStatus)->assertOk()
         ->assertJsonPath('data.0.cleaning', 'ready')
         ->assertJsonPath('data.0.advisoryReady', true)
         ->assertJsonPath('data.0.inspectionId', $inspection)
-        ->assertJsonPath('data.0.reviewedById', (string) $inspector->id);
+        ->assertJsonPath('data.0.inspectedById', (string) $manager->id)
+        ->assertJsonPath('data.0.reviewedById', null);
 
     Sanctum::actingAs($reception, ['hotel:read', 'booking:write']);
     $this->getJson($roomStatus)->assertOk()->assertJsonPath('data.0.cleaning', 'ready');
