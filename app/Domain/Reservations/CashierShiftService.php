@@ -261,15 +261,30 @@ final class CashierShiftService
                 'net_receipt_minor' => $hasTender ? $net : null,
                 'created_at' => now(),
             ]);
+            // In simplified cashier mode, registering an actual cash tender
+            // in the employee's own open shift replaces routine manager
+            // confirmation. This is NOT independent verification or settlement.
+            $autoConfirmed = config('financial_accounting.simplified_cashier_mode', false)
+                && $hasTender && $record->status === 'pending_review';
+            if ($autoConfirmed) {
+                DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
+                    ->where('id', $record->id)->update([
+                        'status' => 'staff_confirmed',
+                        'review_note' => 'Cash receipt captured in the owning cashier shift under simplified cash policy; independent shift reconciliation pending.',
+                        'updated_at' => now(),
+                    ]);
+            }
             $this->event($hotel, $shiftId, $actor, 'cash_received', [
                 'paymentId' => (string) $record->id, 'bookingId' => (string) $bookingId,
                 'amountMinor' => (int) $record->amount_minor, 'reference' => $record->reference,
                 'cashTenderedMinor' => $hasTender ? $tendered : null,
                 'changeGivenMinor' => $hasTender ? $change : null,
                 'netReceiptMinor' => $hasTender ? $net : null,
+                'simplifiedCashPolicy' => $autoConfirmed,
             ]);
             return ['paymentId' => (string) $record->id, 'shiftId' => (string) $shiftId,
-                'status' => $record->status, 'replayed' => false,
+                'status' => $autoConfirmed ? 'staff_confirmed' : $record->status,
+                'replayed' => false,
                 'cashTenderedMinor' => $hasTender ? $tendered : null,
                 'changeGivenMinor' => $hasTender ? $change : null,
                 'netReceiptMinor' => $hasTender ? $net : null];
