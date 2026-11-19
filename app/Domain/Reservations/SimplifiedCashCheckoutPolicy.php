@@ -40,8 +40,8 @@ final class SimplifiedCashCheckoutPolicy
             return;
         }
         $charges = (int) $statement['netRecordedChargesMinor'];
-        if ($charges < 0) {
-            throw new HttpException(409, 'Negative charges require owner finance review.');
+        if ($charges <= 0) {
+            throw new HttpException(409, 'Zero or negative guest charges require a reviewed complimentary-stay or credit policy.');
         }
         if ($statement['refunds'] !== [] || $statement['adjustments'] !== []) {
             throw new HttpException(409, 'Refunds and manual bill adjustments require reviewed settlement.');
@@ -57,8 +57,11 @@ final class SimplifiedCashCheckoutPolicy
 
         $sum = 0;
         foreach ($statement['payments'] as $payment) {
-            if (in_array($payment['status'], ['voided', 'rejected'], true)) {
+            if ($payment['status'] === 'voided') {
                 continue;
+            }
+            if ($payment['status'] === 'rejected') {
+                throw new HttpException(409, 'Rejected payment evidence requires owner finance review before checkout.');
             }
             if ($payment['method'] !== 'cash' || $payment['status'] !== 'staff_confirmed') {
                 throw new HttpException(409, 'Only staff-confirmed cash receipts qualify for simplified checkout.');
