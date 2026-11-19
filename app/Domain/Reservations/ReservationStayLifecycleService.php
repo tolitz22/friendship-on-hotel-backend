@@ -65,8 +65,21 @@ final class ReservationStayLifecycleService
             if ($operation === 'check_in' && $hotelDate >= $record->check_out) {
                 throw new HttpException(409, 'The stay has already reached its departure date.');
             }
-            if ($operation === 'check_out' && $hotelDate < $record->check_out) {
-                throw new HttpException(409, 'Early check-out requires a separate stay amendment.');
+            $earlyDeparture = $operation === 'check_out' && $hotelDate < $record->check_out;
+            if ($earlyDeparture) {
+                // Normal checkout never bypasses stay dates; only the independent
+                // manager-review transaction may authorize this specific exception.
+                if ($earlyApprovalId === null || $hotelDate < $record->check_in) {
+                    throw new HttpException(409, 'Early checkout requires manager approval after check-in.');
+                }
+                $earlyApproval = DB::table('manager_approval_requests')
+                    ->where('hotel_id', $hotel->id)->where('reservation_record_id', $record->id)
+                    ->where('id', $earlyApprovalId)->where('action', 'early_check_out')
+                    ->where('status', 'pending')->lockForUpdate()->first();
+                if ($earlyApproval === null || (int) $earlyApproval->requested_by === $actor
+                    || now()->greaterThanOrEqualTo($earlyApproval->expires_at)) {
+                    throw new HttpException(409, 'Early checkout approval is invalid or expired.');
+                }
             }
 
             if ($operation === 'check_out'
@@ -202,7 +215,7 @@ final class ReservationStayLifecycleService
                 'hotel_id' => $hotel->id,
                 'reservation_record_id' => $record->id,
                 'actor_id' => $actor,
-                'event_type' => $early ? 'early_check_in' : $operation,
+                'event_type' => $early ? 'early_check_in' : ($earlyDeparture ? 'early_check_out' : $operation),
                 'old_state' => $expected,
                 'new_state' => $next,
                 'created_at' => now(),
@@ -215,6 +228,7 @@ final class ReservationStayLifecycleService
                 'status' => $next,
                 'assignedRoomId' => $record->assigned_room_id === null
                     ? null : (string) $record->assigned_room_id,
+                'earlyDeparture' => $earlyDeparture,
             ];
         }, 3);
     }
