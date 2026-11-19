@@ -234,7 +234,8 @@ final class FolioSettlementService
             // mutable operational metadata. Keep them in the API response,
             // but never embed them in the immutable financial sign-off snapshot.
             $snapshot = $statement;
-            unset($snapshot['cashShiftContexts']);
+            unset($snapshot['cashShiftContexts'], $snapshot['simplifiedCashierModeEnabled'],
+                $snapshot['routineCashCheckoutEligible'], $snapshot['routineCashCheckoutReason']);
             $encoded = json_encode($snapshot, JSON_THROW_ON_ERROR);
             $id = DB::table('folio_settlement_signoffs')->insertGetId([
                 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
