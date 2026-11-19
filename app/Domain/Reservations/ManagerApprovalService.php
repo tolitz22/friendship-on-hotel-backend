@@ -14,7 +14,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
  */
 final class ManagerApprovalService
 {
-    public const ACTIONS = ['cancel_booking', 'amend_dates', 'early_check_in'];
+    public const ACTIONS = ['cancel_booking', 'amend_dates', 'early_check_in', 'early_check_out'];
 
     public function list(Hotel $hotel, int $actor, bool $manager, array $filters): array
     {
@@ -73,10 +73,12 @@ final class ManagerApprovalService
             $booking = DB::table('reservation_records')
                 ->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
             abort_unless($booking !== null, 404);
-            if ($booking->lifecycle_state !== 'confirmed') {
-                throw new HttpException(409, 'Only confirmed bookings can be requested for these exceptions.');
+            $expectedState = $action === 'early_check_out' ? 'checked_in' : 'confirmed';
+            if ($booking->lifecycle_state !== $expectedState) {
+                throw new HttpException(409, 'This exception is not available for the current booking status.');
             }
-            if ($action !== 'early_check_in' && DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+            if (!in_array($action, ['early_check_in', 'early_check_out'], true)
+                && DB::table('reservation_folios')->where('hotel_id', $hotel->id)
                 ->where('reservation_record_id', $bookingId)->exists()) {
                 throw new HttpException(409, 'Priced reservations require a separate finance-approved workflow.');
             }
@@ -93,6 +95,17 @@ final class ManagerApprovalService
                     ->where('reservation_record_id', $bookingId)->where('action', 'early_check_in')
                     ->where('status', 'pending')->exists()) {
                     throw new HttpException(409, 'An early check-in request is already awaiting manager review.');
+                }
+            }
+            if ($action === 'early_check_out') {
+                $today = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
+                if ($today < $booking->check_in || $today >= $booking->check_out) {
+                    throw new HttpException(409, 'Early checkout requests are allowed only during a checked-in stay before scheduled departure.');
+                }
+                if (DB::table('manager_approval_requests')->where('hotel_id', $hotel->id)
+                    ->where('reservation_record_id', $bookingId)->where('action', 'early_check_out')
+                    ->where('status', 'pending')->exists()) {
+                    throw new HttpException(409, 'An early checkout request is already awaiting manager review.');
                 }
             }
             if ($action === 'amend_dates'
@@ -156,9 +169,9 @@ final class ManagerApprovalService
             }
 
             $note = $note === null ? null : trim($note);
-            if ($request->action === 'early_check_in' && $decision === 'approve'
-                && mb_strlen($note ?? '') < 10) {
-                throw new HttpException(422, 'Early check-in approval requires a manager note of at least 10 characters.');
+            if (in_array($request->action, ['early_check_in', 'early_check_out'], true)
+                && $decision === 'approve' && mb_strlen($note ?? '') < 10) {
+                throw new HttpException(422, 'Early check-in or checkout approval requires a manager note of at least 10 characters.');
             }
             if ($decision === 'reject') {
                 DB::table('manager_approval_requests')->where('id', $id)->update([
@@ -180,6 +193,13 @@ final class ManagerApprovalService
                     throw new HttpException(409, 'Booking changed after the request. Reopen the reservation and submit a new request.');
                 }
 
+                if ($request->action === 'early_check_out') {
+                    $today = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
+                    if ($booking->lifecycle_state !== 'checked_in' ||
+                        $today < $booking->check_in || $today >= $booking->check_out) {
+                        throw new HttpException(409, 'Early checkout is no longer eligible. Refresh the booking.');
+                    }
+                }
                 if ($request->action === 'early_check_in'
                     && now($hotel->timezone ?: 'Asia/Manila')->toDateString() >= $booking->check_in) {
                     throw new HttpException(409, 'This is no longer an early arrival. Use the standard check-in flow.');
@@ -197,6 +217,9 @@ final class ManagerApprovalService
                     ),
                     'early_check_in' => app(ReservationStayLifecycleService::class)->transition(
                         $hotel, $actor, (int) $request->reservation_record_id, 'check_in', $id
+                    ),
+                    'early_check_out' => app(ReservationStayLifecycleService::class)->transition(
+                        $hotel, $actor, (int) $request->reservation_record_id, 'check_out', $id
                     ),
                     default => throw new HttpException(409, 'Unsupported approval action.'),
                 };
