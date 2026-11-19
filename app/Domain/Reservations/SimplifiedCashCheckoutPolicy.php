@@ -50,6 +50,11 @@ final class SimplifiedCashCheckoutPolicy
         abort_unless($folio !== null, 404);
         $statement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
         $this->validateStatement($hotel, $bookingId, $statement);
+        // Already-signed financial settlements remain on the strict path.
+        // Never manufacture a cash checkout audit for a bank/mixed signed folio.
+        if ($statement['signed']) {
+            return;
+        }
 
         $receipts = DB::table('cashier_shift_receipts as receipt')
             ->join('folio_payment_records as payment', function ($join): void {
