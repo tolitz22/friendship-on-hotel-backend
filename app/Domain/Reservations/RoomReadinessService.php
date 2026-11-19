@@ -134,10 +134,8 @@ final class RoomReadinessService
         return DB::transaction(function () use ($hotel, $roomId, $actor, $input): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $room = $this->room($hotel, $roomId, true);
-            $previous = $this->latest($hotel, $roomId);
-            if ($previous !== null && $previous->status === 'submitted') {
-                throw new HttpException(409, 'Resolve the previous submitted inspection before creating another.');
-            }
+            // An older pending inspection remains in audit history; a new on-site
+            // inspection supersedes it without needing the legacy manager workflow.
             // One-step inspection: the authorized inspector certifies the physical checks.
             // Housekeeping, maintenance and inventory blockers are still hard stops.
             if (! $input['cleaningVerified'] || ! $input['safetyVerified'] || ! $input['amenitiesVerified']) {
