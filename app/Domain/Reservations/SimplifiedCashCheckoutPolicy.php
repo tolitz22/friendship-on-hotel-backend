@@ -131,7 +131,7 @@ final class SimplifiedCashCheckoutPolicy
         if (config('financial_accounting.enable_live_folio_tax', false)
             || (Schema::hasTable('financial_folio_night_assessments')
                 && DB::table('financial_folio_night_assessments')
-                    ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
+                    ->where('hotel_id', $hotel->id)->where('folio_id', (int) $statement['folioId'])
                     ->where('status', 'pending')->exists())) {
             throw new HttpException(409, 'Tax assessment requires reviewed financial settlement.');
         }
