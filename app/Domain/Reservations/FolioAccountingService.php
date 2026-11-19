@@ -85,6 +85,16 @@ final class FolioAccountingService
 
     public function assertNotSigned(Hotel $hotel, object $folio): void
     {
+        // Under simplified cashier mode a guest may check out before the
+        // cashier shift is independently reconciled. The folio must still be
+        // locked against ordinary after-checkout payment edits and refunds.
+        if (config('financial_accounting.simplified_cashier_mode', false)
+            && DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $folio->reservation_record_id)
+                ->where('lifecycle_state', 'checked_out')->exists()) {
+            throw new HttpException(409,
+                'Checked-out guest account is locked. Use an independently approved financial correction.');
+        }
         if (Schema::hasTable('folio_settlement_signoffs')
             && DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->exists()) {
