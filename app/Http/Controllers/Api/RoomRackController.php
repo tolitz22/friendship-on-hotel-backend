@@ -18,8 +18,15 @@ final class RoomRackController
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'days' => ['sometimes', 'integer', 'min:1', 'max:14'],
         ]);
-        return response()->json($rack->snapshot($hotel,
+        $result = $rack->snapshot($hotel,
             (int) ($args['page'] ?? 1), (int) ($args['per_page'] ?? 30),
-            (int) ($args['days'] ?? 7)));
+            (int) ($args['days'] ?? 7));
+        $member = $request->user()->memberships()
+            ->where('hotel_id', $hotel->id)->where('is_active', true)->first();
+        $result['data']['allowedActions'] = [
+            'completeInspection' => $member?->role === 'admin'
+                && $request->user()->tokenCan('hotel:write'),
+        ];
+        return response()->json($result);
     }
 }
