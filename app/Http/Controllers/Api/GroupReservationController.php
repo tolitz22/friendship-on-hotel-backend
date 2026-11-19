@@ -17,35 +17,111 @@ final class GroupReservationController
 {
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
-        $input = $request->validate(['page' => ['sometimes', 'integer', 'min:1']]);
-        $page = DB::table('group_reservations')
-            ->where('hotel_id', $hotel->id)->orderByDesc('id')
-            ->paginate(20, ['id', 'reference', 'name', 'contact_name', 'created_at'], 'page', (int) ($input['page'] ?? 1));
-        $ids = $page->getCollection()->pluck('id');
-        // A group's travel dates belong to its linked reservations, not its
-        // creation timestamp. Aggregate for all groups on this page at once.
-        $stays = DB::table('group_reservation_members as member')
+        $input = $request->validate([
+            'page' => ['sometimes', 'integer', 'min:1'],
+            'search' => ['sometimes', 'string', 'max:120'],
+            'status' => ['sometimes', 'in:all,confirmed,partially_checked_in,fully_checked_in,partially_checked_out,checked_out,cancelled'],
+        ]);
+
+        // Counts come from the linked booking lifecycle states, rather than
+        // guessing a group status from its oldest or first reservation.
+        $members = DB::table('group_reservation_members as member')
             ->join('reservation_records as booking', function ($join): void {
                 $join->on('booking.id', '=', 'member.reservation_record_id')
                     ->on('booking.hotel_id', '=', 'member.hotel_id');
             })
             ->where('member.hotel_id', $hotel->id)
-            ->whereIn('member.group_reservation_id', $ids)
+            ->groupBy('member.group_reservation_id')
             ->select('member.group_reservation_id')
             ->selectRaw('COUNT(*) as total, MIN(booking.check_in) as check_in, MAX(booking.check_out) as check_out')
-            ->groupBy('member.group_reservation_id')->get()->keyBy('group_reservation_id');
+            ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'confirmed' THEN 1 ELSE 0 END) as confirmed_count")
+            ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'checked_in' THEN 1 ELSE 0 END) as in_house_count")
+            ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'checked_out' THEN 1 ELSE 0 END) as departed_count")
+            ->selectRaw("SUM(CASE WHEN booking.lifecycle_state = 'cancelled' THEN 1 ELSE 0 END) as cancelled_count");
+
+        $query = DB::table('group_reservations as groups')
+            ->leftJoinSub($members, 'stats', function ($join): void {
+                $join->on('stats.group_reservation_id', '=', 'groups.id');
+            })
+            ->where('groups.hotel_id', $hotel->id);
+
+        $term = trim($input['search'] ?? '');
+        if ($term !== '') {
+            // Escape LIKE meta characters so user input is a literal search.
+            $escaped = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term);
+            $query->where(function ($search) use ($escaped): void {
+                $search->where('groups.name', 'like', '%'.$escaped.'%')
+                    ->orWhere('groups.reference', 'like', '%'.$escaped.'%')
+                    ->orWhere('groups.contact_name', 'like', '%'.$escaped.'%');
+            });
+        }
+
+        $state = $input['status'] ?? 'all';
+        if ($state !== 'all') {
+            $statusSql = $this->groupStatusSql();
+            $query->whereRaw('('.$statusSql.') = ?', [$state]);
+        }
+
+        $page = $query->orderByDesc('groups.id')
+            ->paginate(20, [
+                'groups.id', 'groups.reference', 'groups.name',
+                'groups.contact_name', 'groups.created_at',
+                'stats.total', 'stats.check_in', 'stats.check_out',
+                'stats.confirmed_count', 'stats.in_house_count',
+                'stats.departed_count', 'stats.cancelled_count',
+            ], 'page', (int) ($input['page'] ?? 1));
+
         return response()->json([
-            'data' => $page->getCollection()->map(fn (object $row): array => [
-                'id' => (string) $row->id, 'reference' => $row->reference, 'name' => $row->name,
-                'contactName' => $row->contact_name,
-                'roomCount' => (int) ($stays->get($row->id)?->total ?? 0),
-                'checkIn' => $stays->get($row->id)?->check_in,
-                'checkOut' => $stays->get($row->id)?->check_out,
-                'createdAt' => (string) $row->created_at,
-            ])->values(),
-            'meta' => ['page' => $page->currentPage(), 'total' => $page->total(),
-                'totalPages' => $page->lastPage(), 'perPage' => 20],
+            'data' => $page->getCollection()->map(function (object $row): array {
+                $counts = [
+                    'confirmed' => (int) $row->confirmed_count,
+                    'checkedIn' => (int) $row->in_house_count,
+                    'checkedOut' => (int) $row->departed_count,
+                    'cancelled' => (int) $row->cancelled_count,
+                ];
+                return [
+                    'id' => (string) $row->id, 'reference' => $row->reference,
+                    'name' => $row->name, 'contactName' => $row->contact_name,
+                    'roomCount' => (int) $row->total,
+                    'checkIn' => $row->check_in, 'checkOut' => $row->check_out,
+                    'createdAt' => (string) $row->created_at,
+                    'status' => $this->groupStatus((int) $row->total, $counts),
+                    'statusCounts' => $counts,
+                ];
+            })->values(),
+            'meta' => [
+                'page' => $page->currentPage(), 'total' => $page->total(),
+                'totalPages' => $page->lastPage(), 'perPage' => 20,
+            ],
         ]);
+    }
+
+    private function groupStatus(int $total, array $counts): string
+    {
+        if ($total === 0) return 'confirmed';
+        $cancelled = $counts['cancelled'];
+        $active = $total - $cancelled;
+        if ($cancelled === $total) return 'cancelled';
+        if ($active <= 0) return 'cancelled';
+        if ($counts['checkedOut'] === $active) return 'checked_out';
+        if ($counts['checkedOut'] > 0) return 'partially_checked_out';
+        if ($counts['checkedIn'] === $active) return 'fully_checked_in';
+        if ($counts['checkedIn'] > 0) return 'partially_checked_in';
+        return 'confirmed';
+    }
+
+    private function groupStatusSql(): string
+    {
+        return "CASE
+            WHEN COALESCE(stats.total,0) = COALESCE(stats.cancelled_count,0)
+                 AND COALESCE(stats.total,0) > 0 THEN 'cancelled'
+            WHEN COALESCE(stats.departed_count,0) = COALESCE(stats.total,0) - COALESCE(stats.cancelled_count,0)
+                 AND COALESCE(stats.total,0) > COALESCE(stats.cancelled_count,0) THEN 'checked_out'
+            WHEN COALESCE(stats.departed_count,0) > 0 THEN 'partially_checked_out'
+            WHEN COALESCE(stats.in_house_count,0) = COALESCE(stats.total,0) - COALESCE(stats.cancelled_count,0)
+                 AND COALESCE(stats.total,0) > COALESCE(stats.cancelled_count,0) THEN 'fully_checked_in'
+            WHEN COALESCE(stats.in_house_count,0) > 0 THEN 'partially_checked_in'
+            ELSE 'confirmed' END";
     }
 
     public function show(Hotel $hotel, string $group): JsonResponse
