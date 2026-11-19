@@ -70,6 +70,11 @@ final class ReservationStayLifecycleService
             }
 
             if ($operation === 'check_out'
+                && app(SimplifiedCashCheckoutPolicy::class)->enabled()) {
+                // Ordinary cash-only checkout is operational, not the final
+                // independent cashier reconciliation or financial sign-off.
+                app(SimplifiedCashCheckoutPolicy::class)->requireEligible($hotel, $bookingId);
+            } elseif ($operation === 'check_out'
                 && config('financial_accounting.enable_verified_settlement', false)) {
                 $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
                     ->where('reservation_record_id', $bookingId)->lockForUpdate()->first();
