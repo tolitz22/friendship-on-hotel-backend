@@ -109,7 +109,14 @@ final class RoomRackService
             ->where('hotel_id', $hotel->id)->where('lifecycle_state', 'checked_in')
             ->where('check_out', $today)->count();
         $cleaningRooms = DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)
+            ->whereIn('type', ['checkout_clean', 'stayover'])
             ->where('status', '!=', 'done')->distinct()->count('room_id');
+        $legacyPendingInspections = DB::table('room_readiness_inspections')
+            ->where('hotel_id', $hotel->id)
+            ->whereIn('id', DB::table('room_readiness_inspections')
+                ->where('hotel_id', $hotel->id)
+                ->selectRaw('MAX(id)')->groupBy('room_id'))
+            ->where('status', 'submitted')->count();
         $maintRooms = DB::table('maintenance_work_orders')
             ->where('hotel_id', $hotel->id)->where('affects_room', true)
             ->whereIn('status', ['open', 'in_progress'])->pluck('room_id')->all();
@@ -132,8 +139,8 @@ final class RoomRackService
                     'pmsOccupiedRooms' => $occupied,
                     'arrivalsToday' => $arrivalsToday,
                     'departuresToday' => $departuresToday,
-                    'roomsWithOpenHousekeeping' => $cleaningRooms,
-                    'inspectionsAwaitingReview' => $report['data']['summary']['awaitingReview'],
+                    'roomsNeedingCleaning' => $cleaningRooms,
+                    'legacyPendingInspections' => $legacyPendingInspections,
                     'activelyBlockedRooms' => $blockedRooms,
                 ],
             ],
