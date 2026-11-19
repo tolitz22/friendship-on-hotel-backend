@@ -125,11 +125,12 @@ jobs:
           php artisan test tests/Feature/FolioSettlementIntegrationTest.php --no-ansi
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'true'
-      - name: PostgreSQL six-process booking inventory race
+      - name: PostgreSQL booking and multi-room group races
         run: |
           php artisan db:wipe --force --no-interaction --quiet
           php artisan migrate --force --no-interaction
           php scripts/real-engine-booking-race.php
+          php scripts/real-engine-group-race.php
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
 
@@ -186,10 +187,11 @@ jobs:
           php artisan test tests/Feature/FolioSettlementIntegrationTest.php --no-ansi
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'true'
-      - name: MySQL six-process booking inventory race
+      - name: MySQL 8.4 booking and multi-room group races
         run: |
           php artisan db:wipe --force --no-interaction --quiet
           php artisan migrate --force --no-interaction
           php scripts/real-engine-booking-race.php
+          php scripts/real-engine-group-race.php
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
