@@ -414,3 +414,25 @@ it('validates paired tender and change through the cash receipt API', function (
         ->assertJsonPath('data.changeGivenMinor', 160000)
         ->assertJsonPath('data.netReceiptMinor', 840000);
 });
+
+it('blocks reconciliation when saved cash tender or change was modified out of band', function (): void {
+    [$hotel, $booking, $folio, $cashier, $manager] = paymentControlFixture();
+    $shifts = app(CashierShiftService::class);
+    $shift = $shifts->open($hotel, $cashier->id, 0);
+    $receipt = $shifts->receive($hotel, $cashier->id, (int) $shift['id'], $booking, [
+        'requestKey' => 'cash-tamper-integrity-check',
+        'reference' => 'CASH-AUDIT-TAMPER', 'amountMinor' => 840000,
+        'cashTenderedMinor' => 1000000, 'changeGivenMinor' => 160000,
+    ]);
+    DB::table('cashier_shift_receipts')->where('hotel_id', $hotel->id)
+        ->where('payment_id', $receipt['paymentId'])
+        ->update(['change_given_minor' => 150000]);
+    try {
+        $shifts->close($hotel, $cashier->id, (int) $shift['id'],
+            840000, 'Physical cash was counted.');
+        test()->fail('Corrupted cash breakdown should prevent close and reconciliation.');
+    } catch (HttpException $e) {
+        expect($e->getStatusCode())->toBe(409);
+    }
+    expect(DB::table('cashier_shifts')->where('id', $shift['id'])->value('status'))->toBe('open');
+});
