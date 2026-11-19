@@ -47,7 +47,9 @@ final class CashierShiftService
             ->where('sr.hotel_id', $hotel->id)
             ->where('sr.shift_id', $shift->id)
             ->orderBy('sr.id')
-            ->get(['sr.id','sr.payment_id','sr.reservation_record_id','sr.amount_minor','p.status','p.reference']);
+            ->get(['sr.id','sr.payment_id','sr.reservation_record_id','sr.amount_minor',
+                'sr.cash_tendered_minor','sr.change_given_minor','sr.net_receipt_minor',
+                'p.status','p.reference']);
         $amount = (int) $shift->opening_float_minor;
         $unconfirmed = 0;
         foreach ($receipts as $receipt) {
@@ -71,6 +73,13 @@ final class CashierShiftService
                 'bookingId' => (string) $p->reservation_record_id,
                 'reference' => $p->reference,
                 'amountMinor' => (int) $p->amount_minor,
+                // Historical receipts legitimately have no tender/change breakdown.
+                'cashTenderedMinor' => $p->cash_tendered_minor === null
+                    ? null : (int) $p->cash_tendered_minor,
+                'changeGivenMinor' => $p->change_given_minor === null
+                    ? null : (int) $p->change_given_minor,
+                'netReceiptMinor' => $p->net_receipt_minor === null
+                    ? null : (int) $p->net_receipt_minor,
                 'paymentStatus' => $p->status,
             ])->all(),
         ];
@@ -171,6 +180,21 @@ final class CashierShiftService
             if ($folio->currency !== $shift->currency) {
                 throw new HttpException(409, 'Folio currency does not match the shift.');
             }
+            // Net receipt is the booked payment and drawer increase. Change is
+            // physically paid back to the guest, never hotel revenue.
+            $hasTender = array_key_exists('cashTenderedMinor', $data);
+            $hasChange = array_key_exists('changeGivenMinor', $data);
+            if ($hasTender !== $hasChange) {
+                throw new HttpException(422, 'Enter cash tendered and change given together.');
+            }
+            if ($hasTender) {
+                $net = (int) $data['amountMinor'];
+                $tendered = (int) $data['cashTenderedMinor'];
+                $change = (int) $data['changeGivenMinor'];
+                if ($net < 1 || $tendered < $net || $change < 0 || $change !== $tendered - $net) {
+                    throw new HttpException(422, 'Cash tendered minus change given must equal the recorded payment.');
+                }
+            }
             // The legacy service retains reference uniqueness, idempotency and
             // pending independent financial review. Never bypass its validation.
             $payment = app(FolioAccountingService::class)->recordPayment($hotel, $bookingId, $actor, [
@@ -195,20 +219,46 @@ final class CashierShiftService
                 if ((int) $linked->shift_id !== $shiftId) {
                     throw new HttpException(409, 'Payment is already linked to another shift.');
                 }
+                // Same idempotency key must not silently replay a different
+                // tender/change breakdown, even when net payment is identical.
+                if ($hasTender && ((int) $linked->cash_tendered_minor !== $tendered
+                    || (int) $linked->change_given_minor !== $change
+                    || (int) $linked->net_receipt_minor !== $net)) {
+                    throw new HttpException(409, 'Cash tender or change differs from the original receipt.');
+                }
+                if (! $hasTender && $linked->cash_tendered_minor !== null) {
+                    throw new HttpException(409, 'A recorded cash breakdown must be preserved on retry.');
+                }
                 return ['paymentId' => (string) $record->id, 'shiftId' => (string) $shiftId,
-                    'status' => $record->status, 'replayed' => true];
+                    'status' => $record->status, 'replayed' => true,
+                    'cashTenderedMinor' => $linked->cash_tendered_minor === null
+                        ? null : (int) $linked->cash_tendered_minor,
+                    'changeGivenMinor' => $linked->change_given_minor === null
+                        ? null : (int) $linked->change_given_minor,
+                    'netReceiptMinor' => $linked->net_receipt_minor === null
+                        ? null : (int) $linked->net_receipt_minor];
             }
             DB::table('cashier_shift_receipts')->insert([
                 'hotel_id' => $hotel->id, 'shift_id' => $shiftId,
                 'payment_id' => $record->id, 'reservation_record_id' => $bookingId,
-                'amount_minor' => $data['amountMinor'], 'created_at' => now(),
+                'amount_minor' => $data['amountMinor'],
+                'cash_tendered_minor' => $hasTender ? $tendered : null,
+                'change_given_minor' => $hasTender ? $change : null,
+                'net_receipt_minor' => $hasTender ? $net : null,
+                'created_at' => now(),
             ]);
             $this->event($hotel, $shiftId, $actor, 'cash_received', [
                 'paymentId' => (string) $record->id, 'bookingId' => (string) $bookingId,
                 'amountMinor' => (int) $record->amount_minor, 'reference' => $record->reference,
+                'cashTenderedMinor' => $hasTender ? $tendered : null,
+                'changeGivenMinor' => $hasTender ? $change : null,
+                'netReceiptMinor' => $hasTender ? $net : null,
             ]);
             return ['paymentId' => (string) $record->id, 'shiftId' => (string) $shiftId,
-                'status' => $record->status, 'replayed' => false];
+                'status' => $record->status, 'replayed' => false,
+                'cashTenderedMinor' => $hasTender ? $tendered : null,
+                'changeGivenMinor' => $hasTender ? $change : null,
+                'netReceiptMinor' => $hasTender ? $net : null];
         }, 3);
     }
 
