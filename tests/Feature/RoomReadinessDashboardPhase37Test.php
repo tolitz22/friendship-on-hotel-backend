@@ -100,25 +100,10 @@ it('shows approved coverage and invalidates it for subsequent completed room wor
     $this->travelTo(new DateTimeImmutable('2026-12-10T09:00:00+08:00'));
     [$hotel, $room] = phase37Fixture();
     $base = '/api/v1/hotels/'.$hotel->id;
-    $inspection = $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections', [
+    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections', [
         'cleaningVerified' => true, 'safetyVerified' => true,
         'amenitiesVerified' => true, 'note' => 'Physical inspection completed for all required items',
-    ])->assertCreated()->json('data.inspection.id');
-
-    $second = User::create([
-        'name' => 'Independent Readiness Reviewer',
-        'email' => uniqid('phase37-review-').'@example.test',
-        'password' => 'Password123456!',
-    ]);
-    HotelMembership::create([
-        'hotel_id' => $hotel->id, 'user_id' => $second->id,
-        'role' => 'admin', 'is_active' => true,
-    ]);
-    Sanctum::actingAs($second, ['hotel:read', 'hotel:write']);
-    $this->postJson($base.'/rooms/'.$room->id.'/readiness/inspections/'.$inspection.'/review', [
-        'expectedRevision' => 1, 'decision' => 'approve',
-        'note' => 'Independent review of the completed physical checklist',
-    ])->assertOk();
+    ])->assertCreated()->assertJsonPath('data.inspection.status', 'approved');
 
     $this->getJson($base.'/readiness/dashboard')->assertOk()
         ->assertJsonPath('data.summary.approvedCurrent', 1)
