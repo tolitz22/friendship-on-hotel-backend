@@ -33,6 +33,25 @@ final class SimplifiedCashCheckoutPolicy
             throw new HttpException(409, 'An auditable guest folio and cashier receipts are required.');
         }
         $statement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
+        $this->validateStatement($hotel, $bookingId, $statement);
+    }
+
+    /** Preview only: checkout re-checks eligibility under the hotel lock. */
+    public function readiness(Hotel $hotel, int $bookingId, array $statement): array
+    {
+        if (! $this->enabled()) {
+            return ['eligible' => false, 'reason' => 'Simplified cashier mode is disabled.'];
+        }
+        try {
+            $this->validateStatement($hotel, $bookingId, $statement);
+            return ['eligible' => true, 'reason' => null];
+        } catch (HttpException $exception) {
+            return ['eligible' => false, 'reason' => $exception->getMessage()];
+        }
+    }
+
+    private function validateStatement(Hotel $hotel, int $bookingId, array $statement): void
+    {
         if ($statement['signed']) {
             if (! $statement['signedSnapshotIntegrity'] || ! $statement['canSignOff']) {
                 throw new HttpException(409, 'Signed statement failed financial integrity checks.');
