@@ -305,3 +305,112 @@ it('reports the correct cash shift for a guest payment through open, submitted a
     // Shift state is presentation metadata only, not an altered guest bill.
     expect($settlement->statement($hotel, $booking)['verifiedAllocatedMinor'])->toBe(0);
 });
+
+it('records cash tender and returned change while counting only net cash in the drawer', function (): void {
+    [$hotel, $booking, $folio, $cashier, $manager] = paymentControlFixture();
+    $shifts = app(CashierShiftService::class);
+    $opened = $shifts->open($hotel, $cashier->id, 200000);
+    $receipt = $shifts->receive($hotel, $cashier->id, (int) $opened['id'], $booking, [
+        'requestKey' => 'tender-ten-thousand-001', 'reference' => 'CASH-TENDER-10000',
+        'amountMinor' => 840000, 'cashTenderedMinor' => 1000000,
+        'changeGivenMinor' => 160000,
+    ]);
+    expect($receipt['cashTenderedMinor'])->toBe(1000000)
+        ->and($receipt['changeGivenMinor'])->toBe(160000)
+        ->and($receipt['netReceiptMinor'])->toBe(840000);
+    $this->assertDatabaseHas('cashier_shift_receipts', [
+        'payment_id' => $receipt['paymentId'], 'amount_minor' => 840000,
+        'cash_tendered_minor' => 1000000, 'change_given_minor' => 160000,
+        'net_receipt_minor' => 840000,
+    ]);
+    $detail = $shifts->details($hotel, $cashier->id, false, (int) $opened['id']);
+    expect($detail['expectedCashMinor'])->toBeNull()
+        ->and($detail['receipts'][0]['cashTenderedMinor'])->toBe(1000000)
+        ->and($detail['receipts'][0]['changeGivenMinor'])->toBe(160000)
+        ->and($detail['receipts'][0]['netReceiptMinor'])->toBe(840000);
+    app(FolioAccountingService::class)->review($hotel, $booking,
+        (int) $receipt['paymentId'], $manager->id, [
+            'decision' => 'confirm', 'note' => 'Cash counted and receipt inspected.',
+        ]);
+    $closed = $shifts->close($hotel, $cashier->id, (int) $opened['id'],
+        1040000, 'Opening float plus net collected cash.');
+    expect($closed['expectedCashMinor'])->toBe(1040000)
+        ->and($closed['countedCashMinor'])->toBe(1040000)
+        ->and($closed['varianceMinor'])->toBe(0);
+    $events = DB::table('cashier_shift_events')->where('hotel_id', $hotel->id)
+        ->where('event', 'cash_received')->first();
+    $audit = json_decode($events->details, true, 512, JSON_THROW_ON_ERROR);
+    expect($audit['cashTenderedMinor'])->toBe(1000000)
+        ->and($audit['changeGivenMinor'])->toBe(160000)
+        ->and($audit['netReceiptMinor'])->toBe(840000);
+});
+
+it('rejects incorrect change and prevents replay with a different tender under the same key', function (): void {
+    [$hotel, $booking, $folio, $cashier] = paymentControlFixture();
+    $shifts = app(CashierShiftService::class);
+    $opened = $shifts->open($hotel, $cashier->id, 0);
+    $base = [
+        'requestKey' => 'cash-tender-replay-123', 'reference' => 'CASH-CHANGE-CHECK',
+        'amountMinor' => 840000, 'cashTenderedMinor' => 1000000,
+        'changeGivenMinor' => 160000,
+    ];
+    try {
+        $shifts->receive($hotel, $cashier->id, (int) $opened['id'], $booking,
+            [...$base, 'changeGivenMinor' => 150000]);
+        test()->fail('Incorrect change cannot be saved.');
+    } catch (HttpException $e) {
+        expect($e->getStatusCode())->toBe(422);
+    }
+    expect(DB::table('folio_payment_records')->count())->toBe(0);
+    $created = $shifts->receive($hotel, $cashier->id, (int) $opened['id'], $booking, $base);
+    $again = $shifts->receive($hotel, $cashier->id, (int) $opened['id'], $booking, $base);
+    expect($again['replayed'])->toBeTrue()
+        ->and($again['paymentId'])->toBe($created['paymentId']);
+    try {
+        $shifts->receive($hotel, $cashier->id, (int) $opened['id'], $booking,
+            [...$base, 'cashTenderedMinor' => 900000, 'changeGivenMinor' => 60000]);
+        test()->fail('A replay must not replace the original tender or change.');
+    } catch (HttpException $e) {
+        expect($e->getStatusCode())->toBe(409);
+    }
+    expect(DB::table('cashier_shift_receipts')->count())->toBe(1);
+});
+
+it('preserves null tender and change for cash receipts recorded by older clients', function (): void {
+    [$hotel, $booking, $folio, $cashier] = paymentControlFixture();
+    $shifts = app(CashierShiftService::class);
+    $opened = $shifts->open($hotel, $cashier->id, 0);
+    $receipt = $shifts->receive($hotel, $cashier->id, (int) $opened['id'], $booking, [
+        'requestKey' => 'legacy-cash-tender-none',
+        'reference' => 'CASH-LEGACY-NO-BREAKDOWN', 'amountMinor' => 840000,
+    ]);
+    $this->assertDatabaseHas('cashier_shift_receipts', [
+        'payment_id' => $receipt['paymentId'],
+        'cash_tendered_minor' => null, 'change_given_minor' => null,
+        'net_receipt_minor' => null,
+    ]);
+    $detail = $shifts->details($hotel, $cashier->id, false, (int) $opened['id']);
+    expect($detail['receipts'][0]['cashTenderedMinor'])->toBeNull()
+        ->and($detail['receipts'][0]['changeGivenMinor'])->toBeNull()
+        ->and($detail['receipts'][0]['amountMinor'])->toBe(840000);
+});
+
+it('validates paired tender and change through the cash receipt API', function (): void {
+    [$hotel, $booking, $folio, $cashier] = paymentControlFixture();
+    Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $shift = $this->postJson($base.'/cashier-shifts', ['openingFloatMinor' => 0])
+        ->assertCreated()->json('data.id');
+    $endpoint = $base.'/cashier-shifts/'.$shift.'/bookings/'.$booking.'/cash-receipts';
+    $payload = [
+        'requestKey' => 'api-tender-change-test-01', 'reference' => 'CASH-API-TENDER',
+        'amountMinor' => 840000, 'cashTenderedMinor' => 1000000,
+        'changeGivenMinor' => 160000,
+    ];
+    $this->postJson($endpoint, array_diff_key($payload, ['changeGivenMinor' => true]))
+        ->assertUnprocessable();
+    $this->postJson($endpoint, $payload)->assertCreated()
+        ->assertJsonPath('data.cashTenderedMinor', 1000000)
+        ->assertJsonPath('data.changeGivenMinor', 160000)
+        ->assertJsonPath('data.netReceiptMinor', 840000);
+});
