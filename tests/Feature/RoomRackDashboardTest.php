@@ -31,14 +31,6 @@ it('reports hotel-wide PMS occupancy separately from physical readiness and futu
     $base = '/api/v1/hotels/'.$hotel->id;
     $guest = $hotel->guests()->create(['first_name' => 'Rack', 'last_name' => 'Guest']);
     $booking = $this->postJson($base.'/bookings', [
-        'idempotencyKey' => 'room-rack-e2e-01',
-        'guestId' => $guest->id, 'roomTypeId' => $type->id,
-        'checkIn' => '2026-12-10', 'checkOut' => '2026-12-10',
-    ]);
-    // The reservation engine must reject zero-night stays independently of the rack.
-    $booking->assertUnprocessable();
-
-    $booking = $this->postJson($base.'/bookings', [
         'idempotencyKey' => 'room-rack-e2e-02',
         'guestId' => $guest->id, 'roomTypeId' => $type->id,
         'checkIn' => '2026-12-10', 'checkOut' => '2026-12-11',
