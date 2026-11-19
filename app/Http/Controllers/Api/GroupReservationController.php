@@ -296,6 +296,43 @@ final class GroupReservationController
                 'type.name as type_name', 'room.number as room_number',
                 'guest.first_name', 'guest.last_name']);
 
+        $actorName = DB::table('users')->where('id', $group->created_by)->value('name');
+        $eventRows = DB::table('reservation_booking_events as event')
+            ->join('group_reservation_members as gm', function ($join): void {
+                $join->on('gm.reservation_record_id', '=', 'event.reservation_record_id')
+                    ->on('gm.hotel_id', '=', 'event.hotel_id');
+            })
+            ->join('reservation_records as booking', function ($join): void {
+                $join->on('booking.id', '=', 'event.reservation_record_id')
+                    ->on('booking.hotel_id', '=', 'event.hotel_id');
+            })
+            ->leftJoin('guests as guest', function ($join): void {
+                $join->on('guest.id', '=', 'booking.guest_id')
+                    ->on('guest.hotel_id', '=', 'booking.hotel_id');
+            })
+            ->leftJoin('users as actor', 'actor.id', '=', 'event.actor_id')
+            ->where('event.hotel_id', $hotelId)
+            ->where('gm.group_reservation_id', $groupId)
+            ->orderByDesc('event.created_at')->orderByDesc('event.id')
+            ->limit(51)
+            ->get(['event.id', 'event.event_type', 'event.old_state',
+                'event.new_state', 'event.created_at', 'event.actor_id',
+                'actor.name as actor_name', 'booking.reference as booking_reference',
+                'guest.first_name', 'guest.last_name']);
+        $hasMoreEvents = $eventRows->count() > 50;
+        $activity = $eventRows->take(50)->map(static fn (object $event): array => [
+            'id' => (string) $event->id,
+            'action' => $event->event_type,
+            'before' => $event->old_state,
+            'after' => $event->new_state,
+            'actorId' => (string) $event->actor_id,
+            'actorName' => $event->actor_name,
+            'bookingReference' => $event->booking_reference,
+            'guestName' => $event->first_name === null ? null
+                : trim($event->first_name.' '.$event->last_name),
+            'at' => (string) $event->created_at,
+        ])->values()->all();
+
         // Operational indicators are derived from the existing authoritative
         // readiness service and checkout-to-cleaning links, never guessed from
         // booking status or the mere existence of a housekeeping task.
@@ -328,6 +365,8 @@ final class GroupReservationController
             'reference' => $group->reference, 'name' => $group->name,
             'contactName' => $group->contact_name,
             'createdAt' => (string) $group->created_at,
+            'createdByName' => $actorName,
+            'activity' => $activity, 'activityHasMore' => $hasMoreEvents,
             'roomCount' => $members->count(),
             'operations' => [
                 'assignedCount' => $assigned->count(),
