@@ -110,6 +110,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
             $table->date('effective_from');
             $table->date('effective_until')->nullable();
             $table->string('status')->default('draft');
+            $table->unsignedBigInteger('created_by')->nullable();
             $table->unsignedBigInteger('approved_by')->nullable();
             $table->timestamp('approved_at')->nullable();
             $table->text('review_note')->nullable();
@@ -491,7 +492,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         $this->seedHotel(1);
         $service = new FinancialTaxPolicyService();
         $first = $service->draft(1, 'vat_standard', 'inclusive', 1200,
-            '2026-11-18', '2026-11-30', 'Hotel tax treatment reviewed by finance.');
+            '2026-11-18', '2026-11-30', 'Hotel tax treatment reviewed by finance.', 6);
         try {
             $service->preview(1, '2026-11-18', 11200);
             self::fail('Draft tax policy must not be used in financial previews.');
@@ -508,7 +509,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         self::assertSame(10000, $result['breakdown']['base_minor']);
 
         $overlap = $service->draft(1, 'vat_exempt', 'inclusive', 0,
-            '2026-11-25', null, 'Review of an alternate tax treatment.');
+            '2026-11-25', null, 'Review of an alternate tax treatment.', 6);
         try {
             $service->approve(1, $overlap, 7);
             self::fail('Overlapping approved tax configurations must be rejected.');
@@ -524,7 +525,7 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
         $this->seedHotel(2);
         $service = new FinancialTaxPolicyService();
         $policy = $service->draft(1, 'vat_zero', 'inclusive', 0,
-            '2026-11-18', null, 'Finance approved this classification for testing.');
+            '2026-11-18', null, 'Finance approved this classification for testing.', 6);
         $service->approve(1, $policy, 7);
         self::assertSame(0, $service->preview(1, '2026-11-18', 10000)['breakdown']['tax_minor']);
         try {
