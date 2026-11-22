@@ -27,6 +27,19 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
     {
         parent::setUp();
 
+        if (!Schema::hasTable('hotels')) {
+            Schema::create('hotels', function (Blueprint $table): void {
+                $table->id();
+            });
+        }
+        if (!Schema::hasTable('cashier_shifts')) {
+            Schema::create('cashier_shifts', function (Blueprint $table): void {
+                $table->id();
+                $table->unsignedBigInteger('hotel_id');
+                $table->string('status');
+            });
+        }
+
         // The finance integration contract creates its own minimal schema.
         // Drop stale fixtures in dependency order before recreating tables.
         foreach (['financial_folio_night_assessments','financial_tax_policies',
@@ -379,6 +392,21 @@ final class FinancialBusinessDayIntegrationTest extends TestCase
 
         DB::table('night_audit_reviews')->where('hotel_id', 1)->update(['status' => 'reviewed']);
         self::assertTrue($controller->show($hotel)->getData(true)['data']['canClose']);
+
+        $shiftId = DB::table('cashier_shifts')->insertGetId([
+            'hotel_id' => 1, 'status' => 'open',
+        ]);
+        $blocked = $controller->show($hotel)->getData(true)['data'];
+        self::assertFalse($blocked['canClose']);
+        self::assertSame([(string) $shiftId], $blocked['openShiftIds']);
+        try {
+            $controller->close($request, $hotel, $service);
+            self::fail('An open cashier shift must block close after the manager review.');
+        } catch (ValidationException $exception) {
+            self::assertArrayHasKey('cashier_shifts', $exception->errors());
+        }
+        self::assertSame(0, DB::table('financial_day_closes')->where('hotel_id', 1)->count());
+        DB::table('cashier_shifts')->where('id', $shiftId)->delete();
 
         $result = $controller->close($request, $hotel, $service)->getData(true)['data'];
         self::assertSame('2026-11-19', $result['nextBusinessDate']);

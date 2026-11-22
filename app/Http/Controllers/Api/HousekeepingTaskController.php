@@ -74,6 +74,8 @@ final class HousekeepingTaskController
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
         $input=$request->validate([
+            'q' => ['sometimes', 'string', 'max:120'],
+            'mine' => ['sometimes', 'boolean'],
             'page'=>['sometimes','integer','min:1'],
             'per_page'=>['sometimes','integer','min:1','max:100'],
             'status'=>['sometimes',Rule::in(self::STATUSES)],
@@ -82,13 +84,31 @@ final class HousekeepingTaskController
         $query=$this->scoped($hotel);
         if (isset($input['status'])) $query->where('t.status',$input['status']);
         if (isset($input['type'])) $query->where('t.type',$input['type']);
+        if ($request->boolean('mine')) {
+            $query->where('t.assigned_user_id', $request->user()->id);
+        }
+        if (isset($input['q']) && trim($input['q']) !== '') {
+            $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower(trim($input['q']))).'%';
+            $query->leftJoin('users as staff', 'staff.id', '=', 't.assigned_user_id')
+                ->where(function ($search) use ($term, $input): void {
+                    foreach (['r.number', 't.type', 't.status', 't.assigned_to', 'staff.name'] as $column) {
+                        $search->orWhereRaw("LOWER($column) LIKE ? ESCAPE '!'", [$term]);
+                    }
+                    if (preg_match('/^[1-9][0-9]{0,17}$/D', trim($input['q']))) {
+                        $search->orWhere('t.id', trim($input['q']));
+                    }
+                });
+        }
+        $pastDueCount = $this->scoped($hotel)->where('t.status', '!=', 'done')
+            ->where('t.due_at', '<', now($hotel->timezone ?: 'Asia/Manila')->toDateString())
+            ->count();
         $page=$query->orderByDesc('t.id')->paginate((int)($input['per_page']??20));
         return response()->json([
             'data'=>$page->getCollection()->map(fn (object $row): array=>$this->present($row))->values(),
             'meta'=>[
                 'page'=>$page->currentPage(), 'perPage'=>$page->perPage(),
                 'total'=>$page->total(), 'totalPages'=>$page->lastPage(),
-                'determinesRoomReadiness'=>false,
+                'determinesRoomReadiness'=>false, 'pastDueCount'=>$pastDueCount,
             ],
         ]);
     }

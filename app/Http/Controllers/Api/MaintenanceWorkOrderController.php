@@ -56,6 +56,8 @@ final class MaintenanceWorkOrderController
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
         $params = $request->validate([
+            'q' => ['sometimes', 'string', 'max:120'],
+            'mine' => ['sometimes', 'boolean'],
             'page' => ['sometimes','integer','min:1'],
             'per_page' => ['sometimes','integer','min:1','max:100'],
             'status' => ['sometimes',Rule::in(self::STATUSES)],
@@ -64,6 +66,21 @@ final class MaintenanceWorkOrderController
         $query = $this->orderQuery($hotel);
         if (isset($params['status'])) $query->where('wo.status', $params['status']);
         if (isset($params['priority'])) $query->where('wo.priority', $params['priority']);
+        if ($request->boolean('mine')) {
+            $query->where('wo.assigned_user_id', $request->user()->id);
+        }
+        if (isset($params['q']) && trim($params['q']) !== '') {
+            $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower(trim($params['q']))).'%';
+            $query->leftJoin('users as staff', 'staff.id', '=', 'wo.assigned_user_id')
+                ->where(function ($search) use ($term, $params): void {
+                    foreach (['r.number', 'wo.title', 'wo.description', 'wo.assigned_to', 'staff.name'] as $column) {
+                        $search->orWhereRaw("LOWER($column) LIKE ? ESCAPE '!'", [$term]);
+                    }
+                    if (preg_match('/^[1-9][0-9]{0,17}$/D', trim($params['q']))) {
+                        $search->orWhere('wo.id', trim($params['q']));
+                    }
+                });
+        }
         $page = $query->orderByDesc('wo.id')->paginate((int)($params['per_page']??20));
         return response()->json([
             'data'=>$page->getCollection()->map(fn(object $row):array=>$this->present($row))->values(),

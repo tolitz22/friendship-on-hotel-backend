@@ -196,6 +196,7 @@ final class NightAuditFinancialReportController
                 'unbalancedJournalCount' => $unbalanced,
                 'snapshotMatchesLedger' => $snapshotMatches,
             ],
+            'folioTaxAccountingEnabled' => (bool) config('financial_accounting.enable_live_folio_tax', false),
             'kpis' => [
                 // Observations reflect an independent dated inspection, not
                 // continuous overnight hotel occupancy. These are deliberately

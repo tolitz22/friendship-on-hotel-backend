@@ -15,6 +15,7 @@ final class FrontDeskReservationController
     public function manifest(Request $request, Hotel $hotel): JsonResponse
     {
         $input = $request->validate([
+            'q' => ['sometimes', 'string', 'max:120'],
             'date' => ['required', 'date_format:Y-m-d'],
             'kind' => ['sometimes', 'in:arrivals,departures,in_house'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
@@ -41,6 +42,28 @@ final class FrontDeskReservationController
                 ->where('r.check_out', '>', $date)->where('r.lifecycle_state', 'checked_in');
         }
 
+        $unassignedCount = (clone $query)->whereNull('r.assigned_room_id')->count();
+        $queueTotal = null;
+        if (isset($input['q']) && trim($input['q']) !== '') {
+            $queueTotal = (clone $query)->count();
+            $text = trim($input['q']);
+            $pattern = fn (string $value): string => '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($value)).'%';
+            $query->where(function ($search) use ($pattern, $text): void {
+                $term = $pattern($text);
+                foreach (['r.reference', 'rm.number', 'g.first_name', 'g.last_name'] as $column) {
+                    $search->orWhereRaw("LOWER($column) LIKE ? ESCAPE '!'", [$term]);
+                }
+                $parts = preg_split('/\s+/u', $text, 2);
+                if (count($parts) === 2) {
+                    $search->orWhere(fn ($name) => $name
+                        ->whereRaw("LOWER(g.first_name) LIKE ? ESCAPE '!'", [$pattern($parts[0])])
+                        ->whereRaw("LOWER(g.last_name) LIKE ? ESCAPE '!'", [$pattern($parts[1])]));
+                }
+                if (preg_match('/^[1-9][0-9]{0,17}$/D', $text)) {
+                    $search->orWhere('r.id', $text);
+                }
+            });
+        }
         $page = $query->orderBy('r.id')->select(
             'r.id', 'r.reference', 'r.check_in', 'r.check_out', 'r.lifecycle_state',
             'r.assigned_room_id', 'rm.number as room_number',
@@ -60,7 +83,8 @@ final class FrontDeskReservationController
                 'status' => $record->lifecycle_state,
             ])->values(),
             'meta' => [
-                'date' => $date, 'kind' => $kind,
+                'date' => $date, 'kind' => $kind, 'unassignedCount' => $unassignedCount,
+                'queueTotal' => $queueTotal ?? $page->total(),
                 'page' => $page->currentPage(), 'total' => $page->total(),
                 'perPage' => $page->perPage(), 'totalPages' => $page->lastPage(),
                 'determinesHousekeepingReadiness' => false,

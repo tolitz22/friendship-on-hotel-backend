@@ -15,7 +15,7 @@ final class ManagerApprovalController
     public function index(Request $request, Hotel $hotel, ManagerApprovalService $service): JsonResponse
     {
         $filters = $request->validate([
-            'status' => ['sometimes', Rule::in(['pending', 'rejected', 'executed'])],
+            'status' => ['sometimes', Rule::in(['pending', 'rejected', 'executed', 'expired', 'history'])],
             'bookingId' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'page' => ['sometimes', 'integer', 'min:1'],

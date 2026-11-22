@@ -24,6 +24,12 @@ final class FinancialBusinessDayCloseService
         }
 
         return DB::transaction(function () use ($hotelId, $expectedBusinessDate, $actorId): array {
+            // Serialize with cashier shift opening and count submission.
+            DB::table('hotels')->where('id', $hotelId)->lockForUpdate()->first();
+            if (DB::table('cashier_shifts')->where('hotel_id', $hotelId)->where('status', 'open')->exists()) {
+                throw ValidationException::withMessages(['cashier_shifts' => 'Submit cash counts for all open cashier shifts before closing this date.']);
+            }
+
             $clock = DB::table('financial_business_clocks')
                 ->where('hotel_id', $hotelId)->lockForUpdate()->first();
 

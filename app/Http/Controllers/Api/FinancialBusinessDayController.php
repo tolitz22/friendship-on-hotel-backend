@@ -33,7 +33,13 @@ final class FinancialBusinessDayController
             ->where('hotel_id', $hotel->id)->where('business_date', $date)
             ->first(['status', 'reviewed_by', 'reviewed_at']);
 
+        $openShiftIds = DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
+            ->where('status', 'open')->orderBy('id')->pluck('id')->map(fn ($id) => (string) $id);
+
         $blockers = [];
+        if ($openShiftIds->isNotEmpty()) {
+            $blockers[] = 'Submit cash counts for all open cashier shifts before closing this date.';
+        }
         if ($clock->status !== 'open') {
             $blockers[] = 'Financial business clock is not open.';
         }
@@ -168,6 +174,7 @@ final class FinancialBusinessDayController
                 'reviewedAt' => $review->reviewed_at,
             ],
             'blockers' => $blockers,
+            'openShiftIds' => $openShiftIds,
             'canClose' => $blockers === [],
             'readinessIsAdvisory' => true,
             'folioTaxAccountingEnabled' => (bool) config('financial_accounting.enable_live_folio_tax', false),

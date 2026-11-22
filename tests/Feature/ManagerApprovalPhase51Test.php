@@ -265,6 +265,12 @@ it('does not execute expired or revoked-staff approvals', function (): void {
         ->update(['expires_at' => now()->subMinute()]);
 
     Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $this->getJson($base.'/approval-requests?status=pending')
+        ->assertOk()->assertJsonPath('meta.total', 0);
+    $this->getJson($base.'/approval-requests?status=expired')
+        ->assertOk()->assertJsonPath('data.0.id', $one)->assertJsonPath('data.0.status', 'expired');
+    $this->getJson($base.'/approval-requests?status=history')
+        ->assertOk()->assertJsonPath('meta.total', 1);
     $this->postJson($base.'/approval-requests/'.$one.'/review', [
         'decision' => 'approve',
     ])->assertStatus(409);

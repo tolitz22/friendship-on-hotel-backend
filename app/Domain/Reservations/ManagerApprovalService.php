@@ -23,8 +23,17 @@ final class ManagerApprovalService
         if (! $manager) {
             $query->where('requested_by', $actor);
         }
-        if (isset($filters['status'])) {
-            $query->where('status', $filters['status']);
+        $asOf = now();
+        $status = $filters['status'] ?? null;
+        if ($status === 'pending') {
+            $query->where('status', 'pending')->where('expires_at', '>', $asOf);
+        } elseif ($status === 'expired') {
+            $query->where('status', 'pending')->where('expires_at', '<=', $asOf);
+        } elseif ($status === 'history') {
+            $query->where(fn ($history) => $history->where('status', '!=', 'pending')
+                ->orWhere('expires_at', '<=', $asOf));
+        } elseif ($status !== null) {
+            $query->where('status', $status);
         }
         if (isset($filters['bookingId'])) {
             $query->where('reservation_record_id', (int) $filters['bookingId']);
@@ -93,7 +102,7 @@ final class ManagerApprovalService
                 }
                 if (DB::table('manager_approval_requests')->where('hotel_id', $hotel->id)
                     ->where('reservation_record_id', $bookingId)->where('action', 'early_check_in')
-                    ->where('status', 'pending')->exists()) {
+                    ->where('status', 'pending')->where('expires_at', '>', now())->exists()) {
                     throw new HttpException(409, 'An early check-in request is already awaiting manager review.');
                 }
             }
@@ -104,7 +113,7 @@ final class ManagerApprovalService
                 }
                 if (DB::table('manager_approval_requests')->where('hotel_id', $hotel->id)
                     ->where('reservation_record_id', $bookingId)->where('action', 'early_check_out')
-                    ->where('status', 'pending')->exists()) {
+                    ->where('status', 'pending')->where('expires_at', '>', now())->exists()) {
                     throw new HttpException(409, 'An early checkout request is already awaiting manager review.');
                 }
             }
@@ -286,7 +295,8 @@ final class ManagerApprovalService
             'reviewedBy' => $row->reviewed_by === null ? null : (string) $row->reviewed_by,
             'executedBy' => $row->executed_by === null ? null : (string) $row->executed_by,
             'action' => $row->action,
-            'status' => $row->status,
+            'status' => $row->status === 'pending' && now()->greaterThanOrEqualTo($row->expires_at)
+                ? 'expired' : $row->status,
             'reason' => $row->reason,
             'payload' => $row->action === 'amend_dates'
                 ? json_decode($row->request_payload, true, 512, JSON_THROW_ON_ERROR)

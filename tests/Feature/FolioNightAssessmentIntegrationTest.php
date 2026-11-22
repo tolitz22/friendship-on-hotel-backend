@@ -36,6 +36,19 @@ final class FolioNightAssessmentIntegrationTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        if (!Schema::hasTable('hotels')) {
+            Schema::create('hotels', function (Blueprint $table): void {
+                $table->id();
+            });
+        }
+        if (!Schema::hasTable('cashier_shifts')) {
+            Schema::create('cashier_shifts', function (Blueprint $table): void {
+                $table->id();
+                $table->unsignedBigInteger('hotel_id');
+                $table->string('status');
+            });
+        }
         config()->set('financial_accounting.enable_live_folio_tax', true);
 
         Schema::create('financial_business_clocks', function (Blueprint $t): void {

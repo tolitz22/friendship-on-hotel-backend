@@ -145,10 +145,16 @@ final class OperationalExceptionsController
             })
             ->leftJoin('users as inspector', 'inspector.id', '=', 'inspection.inspected_by')
             ->where('inspection.hotel_id', $hotel->id)->where('inspection.status', 'submitted')
+            ->whereNotExists(function ($query): void {
+                $query->selectRaw('1')->from('room_readiness_inspections as newer')
+                    ->whereColumn('newer.hotel_id', 'inspection.hotel_id')
+                    ->whereColumn('newer.room_id', 'inspection.room_id')
+                    ->whereColumn('newer.id', '>', 'inspection.id');
+            })
             ->orderBy('inspection.id')->limit(self::MAX_SOURCE + 1)
             ->get(['inspection.id', 'inspection.room_id', 'inspection.inspected_by',
                 'inspection.created_at', 'room.number as room_number',
-                'inspector.name as inspector_name']), 'room inspections awaiting review');
+                'inspector.name as inspector_name']), 'rooms needing a repeat inspection');
         foreach ($inspections as $row) {
             $items[] = [
                 'id' => 'room_inspection:'.$row->id,
@@ -157,8 +163,8 @@ final class OperationalExceptionsController
                 'roomNumber' => (string) $row->room_number,
                 'reference' => 'Room '.$row->room_number,
                 'ownerName' => $row->inspector_name,
-                'reason' => 'Room inspection is waiting for a different authorized manager to review it.',
-                'suggestion' => 'Review the submitted checklist and active readiness blockers.',
+                'reason' => 'This room has a legacy inspection that did not complete room readiness.',
+                'suggestion' => 'Clear active room blockers and complete a new physical inspection.',
                 'recordDate' => (string) $row->created_at,
             ];
         }
