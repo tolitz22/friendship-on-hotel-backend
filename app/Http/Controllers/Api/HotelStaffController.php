@@ -17,6 +17,16 @@ use Illuminate\Validation\ValidationException;
 final class HotelStaffController
 {
     private const ROLES = ['admin','front_desk','housekeeping','maintenance'];
+    private const PERMISSION_DEPENDENCIES = [
+        'booking.create' => ['guest.read','reservation.read'],
+        'booking.assign_room' => ['reservation.read'],
+        'booking.check_in' => ['reservation.read'],
+        'booking.check_out' => ['reservation.read','finance.read'],
+        'booking.special_request' => ['reservation.read'],
+        'cashier.write' => ['cashier.read','finance.read'],
+        'approval.request' => ['approval.read','reservation.read'],
+        'keycard.request' => ['keycard.read'],
+    ];
 
     private function staffList(Hotel $hotel): array
     {
@@ -181,6 +191,14 @@ final class HotelStaffController
                 }
                 if (array_diff($data['permissions'],EnsureHotelPermission::forRole($m->role))) {
                     throw ValidationException::withMessages(['permissions'=>['Permissions must belong to the employee’s existing role.']]);
+                }
+                foreach (self::PERMISSION_DEPENDENCIES as $action => $required) {
+                    if (in_array($action, $data['permissions'], true)
+                        && array_diff($required, $data['permissions'])) {
+                        throw ValidationException::withMessages([
+                            'permissions'=>['An enabled action requires its related read permissions.'],
+                        ]);
+                    }
                 }
             }
             $nextRole=$data['role']??$m->role;
