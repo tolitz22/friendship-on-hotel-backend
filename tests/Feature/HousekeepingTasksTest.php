@@ -111,3 +111,31 @@ it('validates unsupported task types and pagination limits', function (): void {
         ->assertUnprocessable()->assertJsonValidationErrors(['type']);
     $this->getJson($base.'?per_page=101')->assertUnprocessable();
 });
+
+it('records final inspection inside the cleaned housekeeping task without independent approval', function (): void {
+    $hotel=Hotel::create(['name'=>'Housekeeping Combined']);
+    $room=housekeepingRoom($hotel);
+    housekeepingLogin($hotel);
+    $url='/api/v1/hotels/'.$hotel->id.'/housekeeping-tasks';
+    $id=$this->postJson($url,['roomId'=>(string)$room->id,'type'=>'checkout_clean'])
+        ->assertCreated()->json('data.id');
+    $checks=[
+        'expectedRevision'=>1,'cleaningVerified'=>true,
+        'safetyVerified'=>true,'amenitiesVerified'=>true,
+        'note'=>'Room clean, safe, and fully restocked',
+    ];
+    $this->postJson($url.'/'.$id.'/final-inspection',$checks)
+        ->assertUnprocessable()->assertJsonValidationErrors(['status']);
+    $this->patchJson($url.'/'.$id,['expectedRevision'=>1,'status'=>'done'])
+        ->assertOk()->assertJsonPath('data.revision',2);
+    $checks['expectedRevision']=2;
+    $this->postJson($url.'/'.$id.'/final-inspection',$checks)
+        ->assertOk()->assertJsonPath('data.revision',3);
+    $this->getJson('/api/v1/hotels/'.$hotel->id.'/rooms/'.$room->id.'/readiness')
+        ->assertOk()->assertJsonPath('data.advisoryReady',true)
+        ->assertJsonPath('data.inspection.status','approved');
+    $this->postJson($url.'/'.$id.'/final-inspection',$checks)->assertStatus(409);
+    $this->getJson($url.'/'.$id.'/history')->assertOk()
+        ->assertJsonPath('data.0.action','inspection_completed');
+    expect(DB::table('room_readiness_inspections')->where('room_id',$room->id)->count())->toBe(1);
+});
