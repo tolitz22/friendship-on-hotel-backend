@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\DB;
 
 final class FrontDeskReservationController
 {
+    public const CHECKOUT_CUTOFF = '12:00';
+
     public function manifest(Request $request, Hotel $hotel): JsonResponse
     {
         $input = $request->validate([
@@ -41,7 +43,7 @@ final class FrontDeskReservationController
         } elseif ($kind === 'overdue') {
             $clock = now($hotel->timezone ?: 'Asia/Manila');
             $query->where('r.lifecycle_state', 'checked_in')
-                ->where('r.check_out', $clock->format('H:i') >= '12:00' ? '<=' : '<', $clock->toDateString())
+                ->where('r.check_out', $clock->format('H:i') >= self::CHECKOUT_CUTOFF ? '<=' : '<', $clock->toDateString())
                 ->orderBy('r.check_out');
             $query->selectSub(DB::table('reservation_booking_events as event')
                 ->whereColumn('event.hotel_id', 'r.hotel_id')

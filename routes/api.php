@@ -24,6 +24,7 @@ use App\Http\Controllers\Api\ReservationBookingController;
 use App\Http\Controllers\Api\GroupReservationController;
 use App\Http\Controllers\Api\GroupAllotmentController;
 use App\Http\Controllers\Api\GroupFinanceController;
+use App\Http\Controllers\Api\FrontDeskNotificationController;
 use App\Http\Controllers\Api\FrontDeskReservationController;
 use App\Http\Controllers\Api\ReservationFinanceController;
 use App\Http\Controllers\Api\FolioAccountingController;
@@ -97,6 +98,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-demand', ReservationDemandReportController::class);
             Route::get('/room-type-availability', [RoomInventoryController::class, 'availability']);
             Route::get('/reports/booking-forecast', [RoomInventoryController::class, 'forecast'])
+                ->middleware('hotel.permission:reservation.read');
+            Route::get('/front-desk/notifications', FrontDeskNotificationController::class)
                 ->middleware('hotel.permission:reservation.read');
             Route::get('/front-desk/manifest', [FrontDeskReservationController::class, 'manifest'])->middleware('hotel.permission:reservation.read');
             Route::get('/rate-plans', [ReservationFinanceController::class, 'rates']);

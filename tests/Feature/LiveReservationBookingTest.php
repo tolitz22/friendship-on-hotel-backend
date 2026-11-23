@@ -202,3 +202,47 @@ it('quotes and extends a checked-in stay once and preserves its prior room night
     expect(DB::table('folio_entries')->where('hotel_id', $hotel->id)->count())->toBe(3);
     expect(DB::table('reservation_records')->where('id', $id)->value('lifecycle_state'))->toBe('checked_in');
 });
+
+it('shows actionable hotel notifications and moves due checkouts to overdue at noon', function (): void {
+    [$hotel, $type, $guest] = bookingTestHotel(3);
+    [$other, $otherType, $otherGuest] = bookingTestHotel();
+    bookingAdmin($hotel);
+    $this->travelTo(now('Asia/Manila')->setTime(11, 59));
+    $today = now('Asia/Manila');
+    $ownDeparture = DB::table('reservation_records')->insertGetId([
+        'hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'guest_id' => $guest->id,
+        'reference' => 'OWN-DEPARTURE', 'check_in' => $today->copy()->subDay()->toDateString(),
+        'check_out' => $today->toDateString(), 'lifecycle_state' => 'checked_in',
+        'created_at' => now()->subDays(2),
+    ]);
+    $arrival = DB::table('reservation_records')->insertGetId([
+        'hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'guest_id' => $guest->id,
+        'reference' => 'OWN-ARRIVAL', 'check_in' => $today->toDateString(),
+        'check_out' => $today->copy()->addDay()->toDateString(), 'lifecycle_state' => 'confirmed',
+        'created_at' => now(),
+    ]);
+    DB::table('reservation_records')->insert([
+        'hotel_id' => $other->id, 'room_type_id' => $otherType->id, 'guest_id' => $otherGuest->id,
+        'reference' => 'OTHER-ARRIVAL', 'check_in' => $today->toDateString(),
+        'check_out' => $today->copy()->addDay()->toDateString(), 'lifecycle_state' => 'confirmed',
+        'created_at' => now(),
+    ]);
+
+    $url = '/api/v1/hotels/'.$hotel->id.'/front-desk/notifications';
+    $this->getJson($url)->assertOk()->assertJsonCount(3, 'data.notifications')
+        ->assertJsonPath('data.notifications.0.kind', 'checkout_due')
+        ->assertJsonPath('data.notifications.0.bookingId', (string) $ownDeparture)
+        ->assertJsonPath('data.notifications.1.kind', 'room_assignment')
+        ->assertJsonPath('data.notifications.1.bookingId', (string) $arrival)
+        ->assertJsonPath('data.notifications.2.kind', 'new_booking')
+        ->assertJsonMissing(['reference' => 'OTHER-ARRIVAL']);
+
+    $this->travel(1)->minutes();
+    $this->getJson($url)->assertOk()->assertJsonCount(3, 'data.notifications')
+        ->assertJsonPath('data.notifications.0.kind', 'checkout_overdue')
+        ->assertJsonMissing(['kind' => 'checkout_due']);
+
+    DB::table('reservation_records')->where('id', $ownDeparture)->update(['lifecycle_state' => 'checked_out']);
+    $this->getJson($url)->assertOk()->assertJsonMissing(['bookingId' => (string) $ownDeparture]);
+    $this->travelBack();
+});
