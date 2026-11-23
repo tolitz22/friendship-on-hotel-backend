@@ -232,7 +232,7 @@ it('lets an admin revoke and restore a staff member’s role-scoped permissions'
     phase15Member($hotel,$worker,'front_desk');
     $base='/api/v1/hotels/'.$hotel->id;
     $role=\App\Http\Middleware\EnsureHotelPermission::forRole('front_desk');
-    $restricted=array_values(array_diff($role,['guest.read','finance.read']));
+    $restricted=array_values(array_diff($role,['guest.read','finance.read','booking.create','booking.check_out','cashier.write']));
     Sanctum::actingAs($admin,['hotel:read','hotel:write']);
     $this->patchJson($base.'/staff/'.$worker->id,[
         'permissions'=>$restricted,
