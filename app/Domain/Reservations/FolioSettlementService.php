@@ -472,10 +472,13 @@ final class FolioSettlementService
                     ->on('verification.hotel_id', '=', 'payment.hotel_id');
             })
             ->leftJoin('users as preparer', 'preparer.id', '=', 'verification.prepared_by')
+            ->leftJoin('users as payment_reviewer', 'payment_reviewer.id', '=', 'payment.reviewed_by')
+            ->leftJoin('users as evidence_reviewer', 'evidence_reviewer.id', '=', 'verification.reviewed_by')
             ->where('payment.hotel_id', $hotel->id)
             ->where('payment.folio_id', $folio->id)
             ->get(['payment.id', 'payment.recorded_by', 'recorder.name as recorder_name',
-                'preparer.name as preparer_name'])
+                'preparer.name as preparer_name', 'payment_reviewer.name as payment_reviewer_name',
+                'evidence_reviewer.name as evidence_reviewer_name'])
             ->keyBy('id') : collect();
         $paymentHandoff = array_values(array_map(function (array $payment) use ($cashShiftContexts, $paymentActors): array {
             $shift = $cashShiftContexts->get((int) $payment['id']);
@@ -486,6 +489,8 @@ final class FolioSettlementService
                 'paymentId' => $payment['id'],
                 'recordedBy' => $actors === null ? null : (string) $actors->recorded_by,
                 'recordedByName' => $actors?->recorder_name,
+                'paymentReviewedByName' => $actors?->payment_reviewer_name,
+                'evidenceReviewedByName' => $actors?->evidence_reviewer_name,
                 'verificationPreparedByName' => $actors?->preparer_name,
                 'cashShiftId' => $shift === null ? null : (string) $shift->shift_id,
                 'cashierId' => $shift === null ? null : (string) $shift->cashier_id,
