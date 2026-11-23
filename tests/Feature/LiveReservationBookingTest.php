@@ -161,3 +161,44 @@ it('rejects zero-night stays and invalid inputs without inserting reservations',
     ]))->assertUnprocessable();
     expect(DB::table('reservation_records')->count())->toBe(0);
 });
+
+it('quotes and extends a checked-in stay once and preserves its prior room nights', function (): void {
+    [$hotel, $type, $guest] = bookingTestHotel(2);
+    bookingAdmin($hotel);
+    $actorId = DB::table('hotel_memberships')->where('hotel_id', $hotel->id)->value('user_id');
+    $rate = DB::table('room_rate_plans')->insertGetId([
+        'hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'created_by' => $actorId,
+        'name' => 'Demo rate', 'nightly_minor' => 250000, 'currency' => 'PHP',
+    ]);
+    $today = now('Asia/Manila')->toImmutable()->startOfDay();
+    $due = $today->addDay()->toDateString();
+    $newDeparture = $today->addDays(3)->toDateString();
+    $path = '/api/v1/hotels/'.$hotel->id.'/bookings';
+    $id = $this->postJson($path, array_replace(bookingPayload($type, $guest), [
+        'checkIn' => $today->toDateString(), 'checkOut' => $due, 'ratePlanId' => $rate,
+    ]))->assertCreated()->json('data.id');
+    $room = DB::table('rooms')->where('hotel_id', $hotel->id)->orderBy('id')->value('id');
+    DB::table('reservation_records')->where('id', $id)->update([
+        'lifecycle_state' => 'checked_in', 'assigned_room_id' => $room,
+    ]);
+    $url = $path.'/'.$id.'/extend-stay';
+    $input = ['expectedCheckOut' => $due, 'checkOut' => $newDeparture];
+    $this->postJson($url, $input)->assertOk()->assertJsonPath('data.saved', false)
+        ->assertJsonPath('data.subtotalMinor', 500000);
+    expect(DB::table('folio_entries')->where('hotel_id', $hotel->id)->count())->toBe(1);
+
+    DB::table('room_inventory_blocks')->insert([
+        'hotel_id' => $hotel->id, 'room_type_id' => $type->id, 'room_id' => $room,
+        'check_in' => $due, 'check_out' => $newDeparture, 'reason' => 'Demo repair',
+        'created_by' => $actorId,
+    ]);
+    $this->postJson($url, $input + ['expectedNightlyMinor' => 250000])->assertStatus(409);
+    DB::table('room_inventory_blocks')->where('hotel_id', $hotel->id)->update(['is_active' => false]);
+
+    $this->postJson($url, $input + ['expectedNightlyMinor' => 240000])->assertStatus(409);
+    $this->postJson($url, $input + ['expectedNightlyMinor' => 250000])->assertOk()
+        ->assertJsonPath('data.saved', true)->assertJsonPath('data.checkOut', $newDeparture);
+    $this->postJson($url, $input + ['expectedNightlyMinor' => 250000])->assertStatus(409);
+    expect(DB::table('folio_entries')->where('hotel_id', $hotel->id)->count())->toBe(3);
+    expect(DB::table('reservation_records')->where('id', $id)->value('lifecycle_state'))->toBe('checked_in');
+});

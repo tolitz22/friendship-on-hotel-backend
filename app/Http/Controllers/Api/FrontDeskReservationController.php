@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Reservations\ReservationAmendmentService;
+use App\Domain\Reservations\ReservationExtensionService;
 use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -121,6 +122,17 @@ final class FrontDeskReservationController
         }, 3);
 
         return response()->json(['data' => ['note' => $input['note']]], 201);
+    }
+
+    public function extend(Request $request, Hotel $hotel, string $booking, ReservationExtensionService $service): JsonResponse
+    {
+        $input = $request->validate([
+            'expectedCheckOut' => ['required', 'date_format:Y-m-d'],
+            'checkOut' => ['required', 'date_format:Y-m-d', 'after:expectedCheckOut'],
+            'expectedNightlyMinor' => ['sometimes', 'required', 'integer', 'min:0'],
+        ]);
+
+        return response()->json(['data' => $service->extend($hotel, (int) $request->user()->id, (int) $booking, $input)]);
     }
 
     public function amend(Request $request, Hotel $hotel, string $booking, ReservationAmendmentService $amendments): JsonResponse

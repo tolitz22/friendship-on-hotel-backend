@@ -175,6 +175,8 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('booking')->middleware('hotel.permission:booking.assign_room');
             Route::post('/bookings/{booking}/check-in', [ReservationBookingController::class, 'checkIn'])
                 ->whereNumber('booking')->middleware('hotel.permission:booking.check_in');
+            Route::post('/bookings/{booking}/extend-stay', [FrontDeskReservationController::class, 'extend'])
+                ->whereNumber('booking')->middleware('hotel.permission:booking.check_out');
             Route::post('/bookings/{booking}/departure-follow-up', [FrontDeskReservationController::class, 'followUp'])
                 ->whereNumber('booking')->middleware('hotel.permission:booking.check_out');
             Route::post('/bookings/{booking}/check-out', [ReservationBookingController::class, 'checkOut'])
