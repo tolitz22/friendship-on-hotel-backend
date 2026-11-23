@@ -201,3 +201,25 @@ it('exposes server-enforced role profiles only to hotel administrators', functio
     expect($profiles['housekeeping']['permissions'])->toContain('housekeeping.assigned');
     expect($profiles['maintenance']['permissions'])->toContain('maintenance.assigned');
 });
+
+it('prevents managers from overwriting another manager’s newer staff access decision', function (): void {
+    $hotel=Hotel::create(['name'=>'Staff Conflict Hotel']);
+    $admin=phase15User('Concurrency Admin');
+    $worker=phase15User('Concurrency Worker');
+    phase15Member($hotel,$admin,'admin');
+    phase15Member($hotel,$worker,'front_desk');
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $url='/api/v1/hotels/'.$hotel->id.'/staff/'.$worker->id;
+
+    $this->patchJson($url,[
+        'role'=>'housekeeping','expectedRole'=>'front_desk','expectedIsActive'=>true,
+    ])->assertOk();
+
+    $this->patchJson($url,[
+        'role'=>'admin','expectedRole'=>'front_desk','expectedIsActive'=>true,
+    ])->assertStatus(409);
+
+    expect(HotelMembership::where('hotel_id',$hotel->id)->where('user_id',$worker->id)->first()->role)
+        ->toBe('housekeeping');
+    expect(DB::table('hotel_staff_events')->where('target_user_id',$worker->id)->count())->toBe(1);
+});
