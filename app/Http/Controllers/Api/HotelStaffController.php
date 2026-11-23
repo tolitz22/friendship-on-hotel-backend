@@ -31,6 +31,65 @@ final class HotelStaffController
             ])->all();
     }
 
+    /**
+     * Read-only role profiles from the same policy used by route authorization.
+     * This is not a grant editor: independent approval and task ownership still apply.
+     */
+    public function permissions(Hotel $hotel): JsonResponse
+    {
+        $capabilities = [
+            ['key'=>'booking.create','label'=>'Create bookings','group'=>'Bookings'],
+            ['key'=>'booking.assign_room','label'=>'Assign rooms','group'=>'Bookings'],
+            ['key'=>'booking.check_in','label'=>'Check in guests','group'=>'Bookings'],
+            ['key'=>'booking.check_out','label'=>'Check out guests','group'=>'Bookings'],
+            ['key'=>'reservation.read','label'=>'View reservations','group'=>'Bookings'],
+            ['key'=>'guest.read','label'=>'View guest information','group'=>'Guest records'],
+            ['key'=>'finance.read','label'=>'View guest bills','group'=>'Billing'],
+            ['key'=>'cashier.write','label'=>'Record routine guest payments','group'=>'Billing'],
+            ['key'=>'cashier.read','label'=>'View cashier shifts','group'=>'Billing'],
+            ['key'=>'approval.request','label'=>'Request exceptions','group'=>'Management'],
+            ['key'=>'approval.read','label'=>'View approval status','group'=>'Management'],
+            ['key'=>'occupancy.read','label'=>'View occupancy information','group'=>'Operations'],
+            ['key'=>'housekeeping.assigned','label'=>'Work on assigned housekeeping tasks','group'=>'Operations'],
+            ['key'=>'maintenance.assigned','label'=>'Work on assigned maintenance tasks','group'=>'Operations'],
+            ['key'=>'staff.manage','label'=>'Manage staff access','group'=>'Management'],
+            ['key'=>'finance.approve','label'=>'Authorize restricted financial actions','group'=>'Management'],
+        ];
+        $scoped = [
+            'admin'=>['housekeeping.assigned','maintenance.assigned','staff.manage','finance.approve'],
+            'front_desk'=>[],
+            'housekeeping'=>['housekeeping.assigned'],
+            'maintenance'=>['maintenance.assigned'],
+        ];
+        $labels = [
+            'admin'=>['label'=>'Manager','description'=>'Property administration, front desk and authorized financial reviews. Some operations require independent review.'],
+            'front_desk'=>['label'=>'Front Desk','description'=>'Reservations, check-in/out, guest billing and routine cashier operations; no manager authorizations.'],
+            'housekeeping'=>['label'=>'Housekeeping','description'=>'Update own assigned cleaning tasks and complete permitted physical inspections.'],
+            'maintenance'=>['label'=>'Maintenance','description'=>'Update own assigned work orders without booking or financial access.'],
+        ];
+        $roles = [];
+        foreach ($labels as $role => $details) {
+            $permissions = array_values(array_unique(array_merge(
+                \App\Http\\Middleware\\EnsureHotelPermission::forRole($role),
+                $scoped[$role]
+            )));
+            $roles[] = [
+                'key'=>$role,
+                ...$details,
+                'permissions'=>$permissions,
+                'activeStaff'=>$hotel->memberships()->where('role',$role)->where('is_active',true)->count(),
+            ];
+        }
+        return response()->json([
+            'data'=>[
+                'roles'=>$roles,
+                'capabilities'=>$capabilities,
+                'note'=>'Role defaults only. Actual access is checked against the active hotel membership, authentication capabilities, task assignment, transaction state and independent-review requirements on every action.',
+                'editable'=>false,
+            ],
+        ]);
+    }
+
     public function index(Hotel $hotel): JsonResponse
     {
         return response()->json(['data'=>$this->staffList($hotel)]);
