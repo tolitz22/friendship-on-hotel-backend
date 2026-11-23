@@ -80,6 +80,7 @@ final class HotelStaffController
                 'key'=>$role,
                 ...$details,
                 'permissions'=>$permissions,
+                'editablePermissions'=>EnsureHotelPermission::forRole($role),
                 'activeStaff'=>$hotel->memberships()->where('role',$role)->where('is_active',true)->count(),
             ];
         }
