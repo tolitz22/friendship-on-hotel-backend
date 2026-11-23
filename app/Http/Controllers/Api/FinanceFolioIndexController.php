@@ -68,7 +68,27 @@ final class FinanceFolioIndexController
                 ->pluck('folio_id')->map(fn ($id) => (string) $id)->flip()
             : collect();
 
-        $data = $rows->map(function (object $row) use ($accounting, $signedFolioIds, $hotel, $signoffAvailable): array {
+        $folioIds = $rows->pluck('folio_id')->all();
+        $reviewStatusAvailable = Schema::hasTable('folio_settlement_verifications')
+            && Schema::hasTable('folio_refund_requests');
+        $rejectedEvidence = $reviewStatusAvailable
+            ? DB::table('folio_payment_records as p')
+                ->join('folio_settlement_verifications as v', function ($join): void {
+                    $join->on('v.payment_record_id', '=', 'p.id')->on('v.hotel_id', '=', 'p.hotel_id');
+                })
+                ->where('p.hotel_id', $hotel->id)->whereIn('p.folio_id', $folioIds)
+                ->where('p.status', 'staff_confirmed')->where('v.status', 'rejected')
+                ->distinct()->pluck('p.folio_id')->flip()
+            : collect();
+        $refunds = $reviewStatusAvailable
+            ? DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)
+                ->whereIn('folio_id', $folioIds)->whereIn('status', ['requested', 'approved'])
+                ->distinct()->pluck('folio_id')->flip()
+            : collect();
+
+        $data = $rows->map(function (object $row) use (
+            $accounting, $signedFolioIds, $hotel, $signoffAvailable, $reviewStatusAvailable, $rejectedEvidence, $refunds
+        ): array {
             // Summary uses the same posted ledger data used by settlement.
             $summary = $accounting->summaryFor((object) [
                 'id' => $row->folio_id, 'hotel_id' => $hotel->id,
@@ -87,6 +107,13 @@ final class FinanceFolioIndexController
                 'netRecordedChargesMinor' => $summary['netRecordedChargesMinor'],
                 'staffConfirmedPaymentsMinor' => $summary['staffConfirmedPaymentsMinor'],
                 'pendingReviewPaymentsMinor' => $summary['pendingReviewPaymentsMinor'],
+                'guestBillSettled' => $reviewStatusAvailable
+                    ? $summary['netRecordedChargesMinor'] > 0
+                        && $summary['staffConfirmedPaymentsMinor'] === $summary['netRecordedChargesMinor']
+                        && $summary['pendingReviewPaymentsMinor'] === 0
+                        && ! $rejectedEvidence->has($row->folio_id)
+                        && ! $refunds->has($row->folio_id)
+                    : null,
                 'signed' => $signoffAvailable ? $signedFolioIds->has((string) $row->folio_id) : null,
                 'provisionalOnly' => true,
             ];
