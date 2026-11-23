@@ -7,11 +7,11 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 class HotelMembership extends Model
 {
-    protected $fillable = ['hotel_id', 'user_id', 'role', 'is_active'];
+    protected $fillable = ['hotel_id', 'user_id', 'role', 'is_active', 'permission_overrides'];
 
     protected function casts(): array
     {
-        return ['is_active' => 'boolean'];
+        return ['is_active' => 'boolean', 'permission_overrides' => 'array'];
     }
 
     public function hotel(): BelongsTo
