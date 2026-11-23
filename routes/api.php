@@ -296,6 +296,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/staff/invitations', [StaffInvitationController::class, 'store'])->middleware('throttle:10,1');
                 Route::patch('/staff/invitations/{invitation}/revoke', [StaffInvitationController::class, 'revoke'])->whereNumber('invitation');
                 Route::get('/staff/history', [HotelStaffController::class, 'history']);
+                Route::post('/staff/create-account', [HotelStaffController::class, 'createAccount'])->middleware('throttle:5,1');
                 Route::post('/staff', [HotelStaffController::class, 'attach']);
                 Route::patch('/staff/{userId}', [HotelStaffController::class, 'update'])->whereNumber('userId');
                 Route::post('/inventory-blocks', [RoomInventoryController::class, 'block']);
