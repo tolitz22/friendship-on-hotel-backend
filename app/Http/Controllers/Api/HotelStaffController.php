@@ -146,6 +146,8 @@ final class HotelStaffController
         $data=$request->validate([
             'role'=>['sometimes','required',Rule::in(self::ROLES)],
             'isActive'=>['sometimes','required','boolean'],
+            'expectedRole'=>['sometimes','required',Rule::in(self::ROLES)],
+            'expectedIsActive'=>['sometimes','required','boolean'],
         ]);
 
         DB::transaction(function () use ($request,$hotel,$userId,$data): void {
@@ -153,6 +155,13 @@ final class HotelStaffController
             DB::table('hotels')->where('id',$hotel->id)->lockForUpdate()->first();
             $m=HotelMembership::where('hotel_id',$hotel->id)
                 ->where('user_id',$userId)->lockForUpdate()->firstOrFail();
+            // Fail closed if another manager changed this staff membership after
+            // the editor loaded. Prevents silent permission overwrites.
+            if ((array_key_exists('expectedRole',$data) && $data['expectedRole']!==$m->role)
+                || (array_key_exists('expectedIsActive',$data)
+                    && (bool)$data['expectedIsActive']!==(bool)$m->is_active)) {
+                abort(409, 'This employee’s access changed. Refresh staff before saving.');
+            }
             $nextRole=$data['role']??$m->role;
             $nextActive=$data['isActive']??$m->is_active;
             if ((string)$request->user()->id===(string)$m->user_id
