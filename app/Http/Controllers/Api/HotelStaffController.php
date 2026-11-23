@@ -11,6 +11,8 @@ use App\Http\Middleware\EnsureHotelPermission;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -108,6 +110,60 @@ final class HotelStaffController
     public function index(Hotel $hotel): JsonResponse
     {
         return response()->json(['data'=>$this->staffList($hotel)]);
+    }
+
+    /**
+     * Administrator-created accounts have an initial password that the
+     * employee must replace before any hotel operation is authorized.
+     * Never return, log or audit the password or its hash.
+     */
+    public function createAccount(Request $request, Hotel $hotel): JsonResponse
+    {
+        $data = $request->validate([
+            'name' => ['required', 'string', 'min:2', 'max:120'],
+            'email' => ['required', 'email', 'max:255'],
+            'role' => ['required', Rule::in(self::ROLES)],
+            'password' => ['required', 'confirmed', PasswordRule::min(12)->mixedCase()->numbers()],
+        ]);
+
+        $name = trim($data['name']);
+        $email = strtolower(trim($data['email']));
+        if ($name === '') {
+            throw ValidationException::withMessages(['name' => ['A full name is required.']]);
+        }
+
+        DB::transaction(function () use ($hotel, $request, $data, $name, $email): void {
+            // Serialize administrator onboarding for this property.
+            DB::table('hotels')->where('id', $hotel->id)->lockForUpdate()->first();
+            if (User::whereRaw('LOWER(email) = ?', [$email])->exists()) {
+                throw ValidationException::withMessages([
+                    'email' => ['This email already has an account. Attach the existing user instead.'],
+                ]);
+            }
+
+            $user = User::create([
+                'name' => $name,
+                'email' => $email,
+                'password' => Hash::make($data['password']),
+                'is_active' => true,
+                'must_change_password' => true,
+            ]);
+            HotelMembership::create([
+                'hotel_id' => $hotel->id,
+                'user_id' => $user->id,
+                'role' => $data['role'],
+                'is_active' => true,
+            ]);
+            $this->audit($hotel, (int) $request->user()->id, (int) $user->id,
+                'account_created', null, [
+                    'role' => $data['role'], 'isActive' => true, 'passwordChangeRequired' => true,
+                ]);
+        }, 3);
+
+        return response()->json([
+            'message' => 'Staff account created. The employee must change their initial password when they first sign in.',
+            'data' => $this->staffList($hotel),
+        ], 201);
     }
 
     public function attach(Request $request, Hotel $hotel): JsonResponse
