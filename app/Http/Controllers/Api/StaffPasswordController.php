@@ -59,6 +59,7 @@ final class StaffPasswordController
 
             $user->forceFill([
                 'password' => Hash::make($password),
+                'must_change_password' => false,
                 'remember_token' => Str::random(60),
             ])->save();
 
@@ -100,6 +101,7 @@ final class StaffPasswordController
 
         $user->forceFill([
             'password' => Hash::make($data['password']),
+            'must_change_password' => false,
             'remember_token' => Str::random(60),
         ])->save();
 
