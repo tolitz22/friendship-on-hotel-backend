@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\Hotel;
 use App\Models\HotelMembership;
 use App\Models\User;
+use App\Http\Middleware\EnsureHotelPermission;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -28,6 +29,8 @@ final class HotelStaffController
                 'role'=>$m->role,
                 'isActive'=>(bool)$m->is_active,
                 'accountActive'=>(bool)$m->user->is_active,
+                'permissions'=>EnsureHotelPermission::effectiveForMembership($m),
+                'customPermissions'=>$m->permission_overrides !== null,
             ])->all();
     }
 
@@ -85,7 +88,8 @@ final class HotelStaffController
                 'roles'=>$roles,
                 'capabilities'=>$capabilities,
                 'note'=>'Role defaults only. Actual access is checked against the active hotel membership, authentication capabilities, task assignment, transaction state and independent-review requirements on every action.',
-                'editable'=>false,
+                'editable'=>true,
+                'editScope'=>'Individual non-manager staff may use any subset of their role permissions. Manager privileges and sensitive finance approvals cannot be delegated.',
             ],
         ]);
     }
@@ -148,6 +152,10 @@ final class HotelStaffController
             'isActive'=>['sometimes','required','boolean'],
             'expectedRole'=>['sometimes','required',Rule::in(self::ROLES)],
             'expectedIsActive'=>['sometimes','required','boolean'],
+            'permissions'=>['sometimes','array','max:30'],
+            'permissions.*'=>['string','distinct','max:80'],
+            'expectedPermissions'=>['sometimes','array','max:30'],
+            'expectedPermissions.*'=>['string','distinct','max:80'],
         ]);
 
         DB::transaction(function () use ($request,$hotel,$userId,$data): void {
@@ -162,6 +170,18 @@ final class HotelStaffController
                     && (bool)$data['expectedIsActive']!==(bool)$m->is_active)) {
                 abort(409, 'This employee’s access changed. Refresh staff before saving.');
             }
+            if (array_key_exists('expectedPermissions',$data)
+                && array_values($data['expectedPermissions']) !== EnsureHotelPermission::effectiveForMembership($m)) {
+                abort(409, 'This employee’s permissions changed. Refresh staff before saving.');
+            }
+            if (array_key_exists('permissions',$data)) {
+                if ($m->role === 'admin' || (string)$request->user()->id === (string)$m->user_id) {
+                    throw ValidationException::withMessages(['permissions'=>['Manager permissions cannot be customized.']]);
+                }
+                if (array_diff($data['permissions'],EnsureHotelPermission::forRole($m->role))) {
+                    throw ValidationException::withMessages(['permissions'=>['Permissions must belong to the employee’s existing role.']]);
+                }
+            }
             $nextRole=$data['role']??$m->role;
             $nextActive=$data['isActive']??$m->is_active;
             if ((string)$request->user()->id===(string)$m->user_id
@@ -175,11 +195,18 @@ final class HotelStaffController
                     throw ValidationException::withMessages(['role'=>['The hotel must keep an active administrator.']]);
                 }
             }
-            $before=['role'=>$m->role,'isActive'=>(bool)$m->is_active];
-            $after=['role'=>$nextRole,'isActive'=>(bool)$nextActive];
+            $base = EnsureHotelPermission::forRole($nextRole);
+            $chosen = array_key_exists('permissions',$data)
+                ? array_values(array_intersect($base,$data['permissions']))
+                : ($nextRole !== $m->role ? $base : EnsureHotelPermission::effectiveForMembership($m));
+            $override = $nextRole === 'admin' || $chosen === $base ? null : $chosen;
+            $before=['role'=>$m->role,'isActive'=>(bool)$m->is_active,
+                'permissions'=>EnsureHotelPermission::effectiveForMembership($m)];
+            $after=['role'=>$nextRole,'isActive'=>(bool)$nextActive,'permissions'=>$chosen];
             if ($before!==$after) {
-                $m->update(['role'=>$nextRole,'is_active'=>$nextActive]);
-                $this->audit($hotel,(int)$request->user()->id,(int)$m->user_id,'updated',$before,$after);
+                $m->update(['role'=>$nextRole,'is_active'=>$nextActive,'permission_overrides'=>$override]);
+                $this->audit($hotel,(int)$request->user()->id,(int)$m->user_id,
+                    array_key_exists('permissions',$data)?'permissions_updated':'updated',$before,$after);
             }
         });
 
