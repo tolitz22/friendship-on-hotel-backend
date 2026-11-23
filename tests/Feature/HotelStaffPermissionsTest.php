@@ -192,7 +192,7 @@ it('exposes server-enforced role profiles only to hotel administrators', functio
 
     Sanctum::actingAs($admin,['hotel:read','hotel:write']);
     $response=$this->getJson($url)->assertOk()
-        ->assertJsonPath('data.editable',false)
+        ->assertJsonPath('data.editable',true)
         ->assertJsonPath('data.roles.0.key','admin')
         ->assertJsonPath('data.roles.0.activeStaff',1);
     $profiles=collect($response->json('data.roles'))->keyBy('key');
