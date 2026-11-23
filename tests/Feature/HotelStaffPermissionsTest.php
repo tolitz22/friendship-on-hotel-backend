@@ -316,3 +316,65 @@ it('revokes assigned housekeeping actions immediately without losing task owners
         'expectedRevision'=>1,'status'=>'in_progress',
     ])->assertOk();
 });
+
+it('allows an administrator to create a hotel staff login with an initial password that must be changed', function (): void {
+    $hotel=Hotel::create(['name'=>'Manual Staff Hotel']);
+    $admin=phase15User('Manual Account Admin');
+    phase15Member($hotel,$admin,'admin');
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $base='/api/v1/hotels/'.$hotel->id;
+    $initial='StrongInitialPass123';
+    $this->postJson($base.'/staff/create-account',[
+        'name'=>'Desk Operator','email'=>'MANUAL-DESK@example.test','role'=>'front_desk',
+        'password'=>$initial,'password_confirmation'=>$initial,
+    ])->assertCreated()
+        ->assertJsonMissing(['password'=>$initial])
+        ->assertJsonPath('message','Staff account created. The employee must change their initial password when they first sign in.');
+
+    $staff=User::where('email','manual-desk@example.test')->firstOrFail();
+    expect(\Illuminate\Support\Facades\Hash::check($initial,$staff->password))->toBeTrue();
+    expect($staff->must_change_password)->toBeTrue();
+    expect($staff->memberships()->where('hotel_id',$hotel->id)->first()->role)->toBe('front_desk');
+    $this->postJson($base.'/staff/create-account',[
+        'name'=>'Duplicate','email'=>'manual-desk@example.test','role'=>'housekeeping',
+        'password'=>$initial,'password_confirmation'=>$initial,
+    ])->assertUnprocessable()->assertJsonValidationErrors(['email']);
+    $this->getJson($base.'/staff/history')->assertOk()
+        ->assertJsonPath('data.0.action','account_created');
+    expect(DB::table('hotel_staff_events')->where('target_user_id',$staff->id)->first()->after_state)
+        ->not->toContain($initial);
+
+    Sanctum::actingAs($staff,['hotel:read','booking:write']);
+    $this->getJson('/api/v1/auth/me')->assertOk()->assertJsonPath('data.mustChangePassword',true);
+    $this->getJson($base.'/reservation-records')->assertForbidden();
+    $this->postJson('/api/v1/auth/change-password',[
+        'currentPassword'=>$initial,
+        'password'=>'NewPrivatePassword456',
+        'password_confirmation'=>'NewPrivatePassword456',
+    ])->assertOk();
+    $staff->refresh();
+    expect($staff->must_change_password)->toBeFalse();
+    Sanctum::actingAs($staff,['hotel:read','booking:write']);
+    $this->getJson($base.'/reservation-records')->assertOk();
+});
+
+it('rejects manual account creation by non-admins and weak initial passwords', function (): void {
+    $hotel=Hotel::create(['name'=>'Manual Staff Permissions']);
+    $admin=phase15User('Manual Security Admin');
+    $reception=phase15User('Manual Security Reception');
+    phase15Member($hotel,$admin,'admin');
+    phase15Member($hotel,$reception,'front_desk');
+    $url='/api/v1/hotels/'.$hotel->id.'/staff/create-account';
+    $payload=[
+        'name'=>'New Employee','email'=>'new-staff@example.test','role'=>'housekeeping',
+        'password'=>'StrongTemporary123','password_confirmation'=>'StrongTemporary123',
+    ];
+    Sanctum::actingAs($reception,['hotel:read','booking:write']);
+    $this->postJson($url,$payload)->assertForbidden();
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $this->postJson($url,[...$payload,'password'=>'weak','password_confirmation'=>'weak'])
+        ->assertUnprocessable()->assertJsonValidationErrors(['password']);
+    $this->postJson($url,[...$payload,'password_confirmation'=>'MismatchPassword123'])
+        ->assertUnprocessable()->assertJsonValidationErrors(['password']);
+    expect(User::where('email','new-staff@example.test')->exists())->toBeFalse();
+});
