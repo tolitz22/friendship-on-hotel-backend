@@ -70,7 +70,7 @@ final class HotelStaffController
         $roles = [];
         foreach ($labels as $role => $details) {
             $permissions = array_values(array_unique(array_merge(
-                \App\Http\\Middleware\\EnsureHotelPermission::forRole($role),
+                \App\Http\Middleware\EnsureHotelPermission::forRole($role),
                 $scoped[$role]
             )));
             $roles[] = [
