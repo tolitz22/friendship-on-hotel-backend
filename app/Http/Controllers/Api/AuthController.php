@@ -61,6 +61,7 @@ class AuthController
                     'id' => (string) $membership->hotel_id,
                     'name' => $membership->hotel->name,
                     'role' => $membership->role,
+                    'permissions' => \App\Http\Middleware\EnsureHotelPermission::effectiveForMembership($membership),
                 ])->values(),
         ]]);
     }
