@@ -212,7 +212,7 @@ final class HousekeepingTaskController
             'note' => ['required', 'string', 'min:5', 'max:2000'],
         ]);
         $result = DB::transaction(function () use ($request, $hotel, $task, $data): array {
-            app(\App\Domain\\Reservations\\ReadinessWriteGuard::class)->lockHotel($hotel);
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $row = DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)
                 ->where('id', $task)->lockForUpdate()->first();
             abort_if($row === null, 404);
@@ -225,7 +225,7 @@ final class HousekeepingTaskController
                     'status' => ['Complete the cleaning stage before final room inspection.'],
                 ]);
             }
-            $service = app(\App\Domain\\Reservations\\RoomReadinessService::class);
+            $service = app(\App\Domain\Reservations\RoomReadinessService::class);
             $prior = $service->show($hotel, (int) $row->room_id);
             if ($prior['advisoryReady']) {
                 throw ValidationException::withMessages([
