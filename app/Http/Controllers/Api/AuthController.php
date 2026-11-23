@@ -55,6 +55,7 @@ class AuthController
             'id' => (string) $user->id,
             'name' => $user->name,
             'email' => $user->email,
+            'mustChangePassword' => (bool) $user->must_change_password,
             'hotels' => $user->memberships()->where('is_active', true)
                 ->with('hotel:id,name')->get()
                 ->map(fn ($membership): array => [
