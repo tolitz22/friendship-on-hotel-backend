@@ -57,6 +57,14 @@ it('consumes capacity, replays idempotently, and frees capacity on release', fun
     $query = '?roomTypeId='.$type->id.'&checkIn='.$payload['checkIn'].'&checkOut='.$payload['checkOut'];
     $this->getJson($base.'/room-type-availability'.$query)->assertOk()
         ->assertJsonPath('data.nights.0.remaining', 0);
+    $this->getJson($base.'/reports/booking-forecast')->assertOk()
+        ->assertJsonCount(14, 'data.nights')
+        ->assertJsonPath('data.hotelId', (string) $hotel->id)
+        ->assertJsonPath('data.nights.1.date', $payload['checkIn'])
+        ->assertJsonPath('data.nights.1.sellable', 2)
+        ->assertJsonPath('data.nights.1.groupHeld', 2)
+        ->assertJsonPath('data.nights.1.remaining', 0)
+        ->assertJsonPath('data.nights.2.remaining', 2);
     $changed = $payload;
     $changed['quantity'] = 1;
     $this->postJson($base.'/group-allotments', $changed)->assertStatus(409);
@@ -126,6 +134,14 @@ it('converts an entire hold atomically into individual bookings with no double c
         ->assertJsonPath('data.operations.checkedOutCount', 0)
         ->assertJsonPath('data.operations.checkoutCleaningCompleteCount', 0)
         ->assertJsonPath('data.operations.readinessIsAdvisoryOnly', true);
+
+    $this->getJson($base.'/reports/booking-forecast')->assertOk()
+        ->assertJsonPath('data.nights.1.arrivals', 2)
+        ->assertJsonPath('data.nights.1.reserved', 2)
+        ->assertJsonPath('data.nights.1.groupHeld', 0)
+        ->assertJsonPath('data.nights.2.departures', 2)
+        ->assertJsonPath('data.nights.2.reserved', 0)
+        ->assertJsonPath('data.nights.2.remaining', 2);
 
     // Unassigned group rooms are visible by guest and group reference,
     // but are never treated as occupied physical rooms.

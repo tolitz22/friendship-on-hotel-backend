@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Reservations\RoomInventoryService;
+use App\Domain\Reservations\StayPeriod;
+use Carbon\CarbonImmutable;
 use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -30,6 +32,52 @@ final class RoomInventoryController
                 'housekeepingReadinessVerified' => false,
                 'pricingIncluded' => false,
             ],
+        ]);
+    }
+
+    public function forecast(Hotel $hotel, RoomInventoryService $inventory): JsonResponse
+    {
+        $today = CarbonImmutable::today($hotel->timezone ?: 'Asia/Manila');
+        $stay = new StayPeriod($today->toDateString(), $today->addDays(14)->toDateString());
+        $nights = [];
+        for ($offset = 0; $offset < 14; $offset++) {
+            $date = $today->addDays($offset)->toDateString();
+            $nights[$date] = [
+                'date' => $date, 'sellable' => 0, 'reserved' => 0, 'blocked' => 0, 'groupHeld' => 0,
+                'remaining' => 0, 'arrivals' => 0, 'departures' => 0, 'overcommitted' => false,
+            ];
+        }
+
+        foreach ($hotel->roomTypes()->pluck('id') as $typeId) {
+            foreach ($inventory->availability($hotel, (int) $typeId, $stay)['nights'] as $night) {
+                $row = &$nights[$night['date']];
+                $row['sellable'] += max(0, $night['physicalRooms'] - $night['blocked']);
+                foreach (['reserved', 'blocked', 'groupHeld', 'remaining'] as $field) {
+                    $row[$field] += $night[$field];
+                }
+                $row['overcommitted'] = $row['overcommitted'] || $night['overcommitted'];
+                unset($row);
+            }
+        }
+
+        $movements = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+            ->whereIn('lifecycle_state', ['confirmed', 'checked_in']);
+        foreach (['arrivals' => 'check_in', 'departures' => 'check_out'] as $field => $column) {
+            $query = clone $movements;
+            if ($field === 'arrivals') {
+                $query->where('lifecycle_state', 'confirmed');
+            }
+            $countByDate = $query
+                ->where($column, '>=', $stay->arrival)->where($column, '<', $stay->departure)
+                ->select($column)->selectRaw('COUNT(*) AS booking_count')->groupBy($column)
+                ->pluck('booking_count', $column);
+            foreach ($countByDate as $date => $count) {
+                $nights[$date][$field] = (int) $count;
+            }
+        }
+
+        return response()->json([
+            'data' => ['hotelId' => (string) $hotel->id, 'nights' => array_values($nights)],
         ]);
     }
 

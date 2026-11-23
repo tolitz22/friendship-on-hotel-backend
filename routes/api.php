@@ -96,6 +96,8 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/bookings/{booking}/turnover', ReservationTurnoverController::class)->whereNumber('booking')->middleware('hotel.permission:reservation.read');
             Route::get('/reservation-demand', ReservationDemandReportController::class);
             Route::get('/room-type-availability', [RoomInventoryController::class, 'availability']);
+            Route::get('/reports/booking-forecast', [RoomInventoryController::class, 'forecast'])
+                ->middleware('hotel.permission:reservation.read');
             Route::get('/front-desk/manifest', [FrontDeskReservationController::class, 'manifest'])->middleware('hotel.permission:reservation.read');
             Route::get('/rate-plans', [ReservationFinanceController::class, 'rates']);
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
