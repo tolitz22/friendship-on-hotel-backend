@@ -198,6 +198,65 @@ final class HousekeepingTaskController
         return $this->show($hotel,$task);
     }
 
+    /**
+     * Final inspection is stage two of the SAME housekeeping task.
+     * The existing readiness service writes the canonical inspected-room evidence.
+     */
+    public function inspect(Request $request, Hotel $hotel, string $task): JsonResponse
+    {
+        $data = $request->validate([
+            'expectedRevision' => ['required', 'integer', 'min:1'],
+            'cleaningVerified' => ['required', 'accepted'],
+            'safetyVerified' => ['required', 'accepted'],
+            'amenitiesVerified' => ['required', 'accepted'],
+            'note' => ['required', 'string', 'min:5', 'max:2000'],
+        ]);
+        $result = DB::transaction(function () use ($request, $hotel, $task, $data): array {
+            app(\App\Domain\\Reservations\\ReadinessWriteGuard::class)->lockHotel($hotel);
+            $row = DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)
+                ->where('id', $task)->lockForUpdate()->first();
+            abort_if($row === null, 404);
+            if (! TaskStaffAccess::canOperate($request, $hotel, $row, 'housekeeping')) abort(403);
+            if ((int) $row->revision !== (int) $data['expectedRevision']) {
+                return ['conflict' => true];
+            }
+            if ($row->status !== 'done') {
+                throw ValidationException::withMessages([
+                    'status' => ['Complete the cleaning stage before final room inspection.'],
+                ]);
+            }
+            $service = app(\App\Domain\\Reservations\\RoomReadinessService::class);
+            $prior = $service->show($hotel, (int) $row->room_id);
+            if ($prior['advisoryReady']) {
+                throw ValidationException::withMessages([
+                    'status' => ['This room already has a current inspection. Refresh the task.'],
+                ]);
+            }
+            $inspection = $service->inspect($hotel, (int) $row->room_id, (int) $request->user()->id, [
+                'cleaningVerified' => true,
+                'safetyVerified' => true,
+                'amenitiesVerified' => true,
+                'note' => trim($data['note']),
+            ]);
+            DB::table('housekeeping_tasks')->where('id', $row->id)->update([
+                'revision' => (int) $row->revision + 1, 'updated_at' => now(),
+            ]);
+            $this->event($hotel, (int) $row->id, (int) $request->user()->id,
+                'inspection_completed', $this->state($row), [
+                    ...$this->state($row),
+                    'inspectionId' => $inspection['inspection']['id'],
+                    'inspectionStatus' => 'approved',
+                ], trim($data['note']));
+            return ['conflict' => false];
+        }, 3);
+        if ($result['conflict']) {
+            return response()->json(['message' => 'The housekeeping task changed. Reload before inspection.'], 409);
+        }
+        return response()->json([
+            'data' => $this->present($this->scoped($hotel)->where('t.id', $task)->first()),
+        ]);
+    }
+
     public function history(Request $request, Hotel $hotel, string $task): JsonResponse
     {
         abort_unless(DB::table('housekeeping_tasks')->where('hotel_id',$hotel->id)->where('id',$task)->exists(),404);
