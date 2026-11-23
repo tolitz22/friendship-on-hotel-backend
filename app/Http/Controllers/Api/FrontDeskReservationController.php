@@ -17,7 +17,7 @@ final class FrontDeskReservationController
         $input = $request->validate([
             'q' => ['sometimes', 'string', 'max:120'],
             'date' => ['required', 'date_format:Y-m-d'],
-            'kind' => ['sometimes', 'in:arrivals,departures,in_house'],
+            'kind' => ['sometimes', 'in:arrivals,departures,in_house,overdue'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'page' => ['sometimes', 'integer', 'min:1'],
         ]);
@@ -37,6 +37,16 @@ final class FrontDeskReservationController
             $query->where('r.check_in', $date)->where('r.lifecycle_state', 'confirmed');
         } elseif ($kind === 'departures') {
             $query->where('r.check_out', $date)->where('r.lifecycle_state', 'checked_in');
+        } elseif ($kind === 'overdue') {
+            $clock = now($hotel->timezone ?: 'Asia/Manila');
+            $query->where('r.lifecycle_state', 'checked_in')
+                ->where('r.check_out', $clock->format('H:i') >= '12:00' ? '<=' : '<', $clock->toDateString())
+                ->orderBy('r.check_out');
+            $query->selectSub(DB::table('reservation_booking_events as event')
+                ->whereColumn('event.hotel_id', 'r.hotel_id')
+                ->whereColumn('event.reservation_record_id', 'r.id')
+                ->where('event.event_type', 'departure_follow_up')
+                ->latest('event.id')->limit(1)->select('event.note'), 'departure_follow_up');
         } else {
             $query->where('r.check_in', '<=', $date)
                 ->where('r.check_out', '>', $date)->where('r.lifecycle_state', 'checked_in');
@@ -64,7 +74,7 @@ final class FrontDeskReservationController
                 }
             });
         }
-        $page = $query->orderBy('r.id')->select(
+        $page = $query->orderBy('r.id')->addSelect(
             'r.id', 'r.reference', 'r.check_in', 'r.check_out', 'r.lifecycle_state',
             'r.assigned_room_id', 'rm.number as room_number',
             'r.guest_id', 'g.first_name', 'g.last_name'
@@ -81,6 +91,7 @@ final class FrontDeskReservationController
                 'checkIn' => $record->check_in,
                 'checkOut' => $record->check_out,
                 'status' => $record->lifecycle_state,
+                'departureFollowUp' => $record->departure_follow_up ?? null,
             ])->values(),
             'meta' => [
                 'date' => $date, 'kind' => $kind, 'unassignedCount' => $unassignedCount,
@@ -90,6 +101,26 @@ final class FrontDeskReservationController
                 'determinesHousekeepingReadiness' => false,
             ],
         ]);
+    }
+
+    public function followUp(Request $request, Hotel $hotel, string $booking): JsonResponse
+    {
+        $input = $request->validate(['note' => ['required', 'string', 'max:500']]);
+        abort_if(trim($input['note']) === '', 422, 'Enter a follow-up note.');
+        DB::transaction(function () use ($request, $hotel, $booking, $input): void {
+            $stay = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $booking)->lockForUpdate()->first();
+            abort_unless($stay, 404);
+            abort_unless($stay->lifecycle_state === 'checked_in', 409, 'Only checked-in stays can be flagged.');
+            DB::table('reservation_booking_events')->insert([
+                'hotel_id' => $hotel->id, 'reservation_record_id' => $stay->id,
+                'actor_id' => $request->user()->id, 'event_type' => 'departure_follow_up',
+                'old_state' => 'checked_in', 'new_state' => 'checked_in', 'note' => $input['note'],
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }, 3);
+
+        return response()->json(['data' => ['note' => $input['note']]], 201);
     }
 
     public function amend(Request $request, Hotel $hotel, string $booking, ReservationAmendmentService $amendments): JsonResponse

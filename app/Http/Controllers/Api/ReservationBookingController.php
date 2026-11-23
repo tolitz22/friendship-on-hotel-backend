@@ -41,8 +41,10 @@ final class ReservationBookingController
 
     public function checkOut(Request $request, Hotel $hotel, string $booking, ReservationStayLifecycleService $lifecycle): JsonResponse
     {
+        $input = $request->validate(['confirmedDepartureAt' => ['nullable', 'date_format:Y-m-d\TH:i']]);
         return response()->json(['data' => $lifecycle->transition(
-            $hotel, (int) $request->user()->id, (int) $booking, 'check_out'
+            $hotel, (int) $request->user()->id, (int) $booking, 'check_out',
+            confirmedDepartureAt: $input['confirmedDepartureAt'] ?? null
         )]);
     }
 

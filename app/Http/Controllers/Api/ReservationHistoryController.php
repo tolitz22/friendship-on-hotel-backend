@@ -37,6 +37,11 @@ final class ReservationHistoryController
                 'actorId' => (string) $event->actor_id,
                 'actorName' => $event->actor_name,
                 'createdAt' => $event->created_at,
+                'note' => $event->note ?? null,
+                'confirmedDepartureAt' => isset($event->confirmed_departure_at)
+                    ? \Carbon\CarbonImmutable::parse($event->confirmed_departure_at, 'UTC')
+                        ->setTimezone($hotel->timezone ?: 'Asia/Manila')->format('Y-m-d H:i')
+                    : null,
             ])->values(),
             'meta' => [
                 'page' => $page->currentPage(),

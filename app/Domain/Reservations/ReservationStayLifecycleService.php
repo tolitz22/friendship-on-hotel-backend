@@ -14,13 +14,13 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
  */
 final class ReservationStayLifecycleService
 {
-    public function transition(Hotel $hotel, int $actor, int $bookingId, string $operation, ?int $earlyApprovalId = null): array
+    public function transition(Hotel $hotel, int $actor, int $bookingId, string $operation, ?int $earlyApprovalId = null, ?string $confirmedDepartureAt = null): array
     {
         if (! in_array($operation, ['check_in', 'check_out'], true)) {
             throw new \InvalidArgumentException('Unsupported reservation transition.');
         }
 
-        return DB::transaction(function () use ($hotel, $actor, $bookingId, $operation, $earlyApprovalId): array {
+        return DB::transaction(function () use ($hotel, $actor, $bookingId, $operation, $earlyApprovalId, $confirmedDepartureAt): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $snapshot = DB::table('reservation_records')
                 ->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
@@ -43,6 +43,12 @@ final class ReservationStayLifecycleService
             // Default front-desk policy: no advance check-in and no
             // premature checkout (early departures need an amendment workflow).
             $hotelDate = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
+            $departure = $confirmedDepartureAt === null ? null : \Carbon\CarbonImmutable::createFromFormat(
+                '!Y-m-d\TH:i', $confirmedDepartureAt, $hotel->timezone ?: 'Asia/Manila'
+            );
+            if ($departure !== null && ($departure->isFuture() || $departure->toDateString() < $record->check_in)) {
+                throw new HttpException(422, 'Confirmed departure must be during the stay and cannot be in the future.');
+            }
             $early = $operation === 'check_in' && $hotelDate < $record->check_in;
             $earlyApproval = null;
             if ($early) {
@@ -108,6 +114,13 @@ final class ReservationStayLifecycleService
             if ($operation === 'check_in') {
                 if ($record->assigned_room_id === null) {
                     throw new HttpException(409, 'Assign a physical room before check-in.');
+                }
+
+                $stillOccupied = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                    ->where('assigned_room_id', $record->assigned_room_id)->where('id', '!=', $record->id)
+                    ->where('lifecycle_state', 'checked_in')->exists();
+                if ($stillOccupied) {
+                    throw new HttpException(409, 'Another guest is still checked in to this room. Resolve their departure before checking in a new guest.');
                 }
 
                 if (app(ReadinessWriteGuard::class)->enabled($hotel)) {
@@ -218,6 +231,7 @@ final class ReservationStayLifecycleService
                 'event_type' => $early ? 'early_check_in' : ($earlyDeparture ? 'early_check_out' : $operation),
                 'old_state' => $expected,
                 'new_state' => $next,
+                ...($departure === null ? [] : ['confirmed_departure_at' => $departure->utc()->toDateTimeString()]),
                 'created_at' => now(),
                 'updated_at' => now(),
             ]);
