@@ -178,3 +178,26 @@ it('rejects assignees who belong only to a different hotel or the wrong operatio
     expect(DB::table('housekeeping_tasks')->count())->toBe(0);
     expect(DB::table('maintenance_work_orders')->count())->toBe(0);
 });
+
+it('exposes server-enforced role profiles only to hotel administrators', function (): void {
+    $hotel=Hotel::create(['name'=>'Role Profile Hotel']);
+    $admin=phase15User('Permissions Administrator');
+    $reception=phase15User('Permissions Receptionist');
+    phase15Member($hotel,$admin,'admin');
+    phase15Member($hotel,$reception,'front_desk');
+    $url='/api/v1/hotels/'.$hotel->id.'/staff/permissions';
+
+    Sanctum::actingAs($reception,['hotel:read','booking:write']);
+    $this->getJson($url)->assertForbidden();
+
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $response=$this->getJson($url)->assertOk()
+        ->assertJsonPath('data.editable',false)
+        ->assertJsonPath('data.roles.0.key','admin')
+        ->assertJsonPath('data.roles.0.activeStaff',1);
+    $profiles=collect($response->json('data.roles'))->keyBy('key');
+    expect($profiles['front_desk']['permissions'])->toContain('booking.create','cashier.write');
+    expect($profiles['front_desk']['permissions'])->not->toContain('staff.manage','finance.approve');
+    expect($profiles['housekeeping']['permissions'])->toContain('housekeeping.assigned');
+    expect($profiles['maintenance']['permissions'])->toContain('maintenance.assigned');
+});
