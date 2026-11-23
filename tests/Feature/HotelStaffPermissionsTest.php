@@ -270,13 +270,49 @@ it('rejects privilege escalation, manager customization and stale permission edi
     ])->assertUnprocessable()->assertJsonValidationErrors(['permissions']);
     $this->patchJson($base.$worker->id,[
         'permissions'=>[],'expectedRole'=>'housekeeping',
-        'expectedPermissions'=>['occupancy.read','occupancy.observe'],
+        'expectedPermissions'=>['occupancy.read','occupancy.observe','housekeeping.assigned'],
     ])->assertOk();
     $this->patchJson($base.$worker->id,[
         'permissions'=>['occupancy.read'],
-        'expectedPermissions'=>['occupancy.read','occupancy.observe'],
+        'expectedPermissions'=>['occupancy.read','occupancy.observe','housekeeping.assigned'],
     ])->assertStatus(409);
     expect(\App\Models\HotelMembership::where('hotel_id',$hotel->id)
         ->where('user_id',$worker->id)->first()->permission_overrides)->toBe([]);
     expect(DB::table('hotel_staff_events')->where('target_user_id',$worker->id)->count())->toBe(1);
+});
+
+it('revokes assigned housekeeping actions immediately without losing task ownership audit', function (): void {
+    $hotel=Hotel::create(['name'=>'Assigned Task Privileges']);
+    $room=phase15Room($hotel);
+    $admin=phase15User('HK Permissions Admin');
+    $cleaner=phase15User('HK Permissions Cleaner');
+    phase15Member($hotel,$admin,'admin');
+    phase15Member($hotel,$cleaner,'housekeeping');
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $base='/api/v1/hotels/'.$hotel->id;
+    $id=$this->postJson($base.'/housekeeping-tasks',[
+        'roomId'=>(string)$room->id,'type'=>'checkout_clean',
+        'assignedUserId'=>(string)$cleaner->id,
+    ])->assertCreated()->json('data.id');
+    $this->patchJson($base.'/staff/'.$cleaner->id,[
+        'permissions'=>['occupancy.read','occupancy.observe'],
+        'expectedRole'=>'housekeeping',
+        'expectedPermissions'=>['occupancy.read','occupancy.observe','housekeeping.assigned'],
+    ])->assertOk();
+
+    Sanctum::actingAs($cleaner,['hotel:read']);
+    $this->patchJson($base.'/housekeeping-tasks/'.$id,[
+        'expectedRevision'=>1,'status'=>'in_progress',
+    ])->assertForbidden();
+
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $this->patchJson($base.'/staff/'.$cleaner->id,[
+        'permissions'=>['occupancy.read','occupancy.observe','housekeeping.assigned'],
+        'expectedRole'=>'housekeeping',
+        'expectedPermissions'=>['occupancy.read','occupancy.observe'],
+    ])->assertOk();
+    Sanctum::actingAs($cleaner,['hotel:read']);
+    $this->patchJson($base.'/housekeeping-tasks/'.$id,[
+        'expectedRevision'=>1,'status'=>'in_progress',
+    ])->assertOk();
 });
