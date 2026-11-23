@@ -42,7 +42,7 @@ final class EnsureHotelPermission
             abort(404);
         }
 
-        $allowed = in_array($permission, self::ROLE_PERMISSIONS[$membership->role] ?? [], true);
+        $allowed = in_array($permission, self::effectiveForMembership($membership), true);
 
         // Admin tokens require the legacy write ability. Receptionist tokens
         // require an explicitly issued booking capability (never read alone).
@@ -54,6 +54,21 @@ final class EnsureHotelPermission
         }
 
         return $next($request);
+    }
+
+    /**
+     * Staff overrides are a subset of the role template, never a way to
+     * become a manager. NULL inherits the template; [] revokes every listed
+     * delegated capability. Permissions are read from the current membership
+     * for every API request, including long-lived sessions.
+     */
+    public static function effectiveForMembership(\App\Models\\HotelMembership $membership): array
+    {
+        $base = self::forRole($membership->role);
+        if ($membership->role === 'admin') return $base;
+        $overrides = $membership->permission_overrides;
+        if ($overrides === null) return $base;
+        return array_values(array_intersect($base, $overrides));
     }
 
     public static function forRole(string $role): array
