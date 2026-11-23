@@ -223,3 +223,60 @@ it('prevents managers from overwriting another manager’s newer staff access de
         ->toBe('housekeeping');
     expect(DB::table('hotel_staff_events')->where('target_user_id',$worker->id)->count())->toBe(1);
 });
+
+it('lets an admin revoke and restore a staff member’s role-scoped permissions', function (): void {
+    $hotel=Hotel::create(['name'=>'Editable Staff Grants']);
+    $admin=phase15User('Permission Editor Admin');
+    $worker=phase15User('Permission Editor Reception');
+    phase15Member($hotel,$admin,'admin');
+    phase15Member($hotel,$worker,'front_desk');
+    $base='/api/v1/hotels/'.$hotel->id;
+    $role=\App\Http\Middleware\EnsureHotelPermission::forRole('front_desk');
+    $restricted=array_values(array_diff($role,['guest.read','finance.read']));
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $this->patchJson($base.'/staff/'.$worker->id,[
+        'permissions'=>$restricted,
+        'expectedRole'=>'front_desk','expectedPermissions'=>$role,
+    ])->assertOk()->assertJsonPath('data.1.customPermissions',true);
+    Sanctum::actingAs($worker,['hotel:read','booking:write']);
+    $this->getJson($base.'/guests')->assertForbidden();
+    $this->getJson($base.'/finance/folios')->assertForbidden();
+    $this->getJson($base.'/reservation-records')->assertOk();
+    $this->getJson('/api/v1/auth/me')->assertOk()
+        ->assertJsonMissing(['permissions'=>$role]);
+
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $this->patchJson($base.'/staff/'.$worker->id,[
+        'permissions'=>$role,
+        'expectedRole'=>'front_desk','expectedPermissions'=>$restricted,
+    ])->assertOk()->assertJsonPath('data.1.customPermissions',false);
+    Sanctum::actingAs($worker,['hotel:read','booking:write']);
+    $this->getJson($base.'/guests')->assertOk();
+});
+
+it('rejects privilege escalation, manager customization and stale permission edits', function (): void {
+    $hotel=Hotel::create(['name'=>'Locked Staff Privileges']);
+    $admin=phase15User('Privilege Admin');
+    $worker=phase15User('Privilege Housekeeper');
+    phase15Member($hotel,$admin,'admin');
+    phase15Member($hotel,$worker,'housekeeping');
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $base='/api/v1/hotels/'.$hotel->id.'/staff/';
+    $this->patchJson($base.$worker->id,[
+        'permissions'=>['booking.create'],'expectedRole'=>'housekeeping',
+    ])->assertUnprocessable()->assertJsonValidationErrors(['permissions']);
+    $this->patchJson($base.$admin->id,[
+        'permissions'=>[],
+    ])->assertUnprocessable()->assertJsonValidationErrors(['permissions']);
+    $this->patchJson($base.$worker->id,[
+        'permissions'=>[],'expectedRole'=>'housekeeping',
+        'expectedPermissions'=>['occupancy.read','occupancy.observe'],
+    ])->assertOk();
+    $this->patchJson($base.$worker->id,[
+        'permissions'=>['occupancy.read'],
+        'expectedPermissions'=>['occupancy.read','occupancy.observe'],
+    ])->assertStatus(409);
+    expect(\App\Models\HotelMembership::where('hotel_id',$hotel->id)
+        ->where('user_id',$worker->id)->first()->permission_overrides)->toBe([]);
+    expect(DB::table('hotel_staff_events')->where('target_user_id',$worker->id)->count())->toBe(1);
+});
