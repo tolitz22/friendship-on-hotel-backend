@@ -124,6 +124,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'show']);
             Route::get('/reservation-policy-readiness', ReservationPolicyReadinessController::class);
             Route::patch('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'update'])->whereNumber('task');
+            Route::post('/housekeeping-tasks/{task}/final-inspection', [HousekeepingTaskController::class, 'inspect'])->whereNumber('task')->middleware('throttle:20,1');
             Route::patch('/maintenance-work-orders/{order}', [MaintenanceWorkOrderController::class, 'update'])->whereNumber('order');
             Route::get('/housekeeping/handoff', HousekeepingHandoffController::class)
                 ->middleware('hotel.admin');
