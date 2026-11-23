@@ -62,7 +62,7 @@ final class EnsureHotelPermission
      * delegated capability. Permissions are read from the current membership
      * for every API request, including long-lived sessions.
      */
-    public static function effectiveForMembership(\App\Models\\HotelMembership $membership): array
+    public static function effectiveForMembership(\App\Models\HotelMembership $membership): array
     {
         $base = self::forRole($membership->role);
         if ($membership->role === 'admin') return $base;
