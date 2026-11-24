@@ -131,6 +131,7 @@ jobs:
           php artisan migrate --force --no-interaction
           php scripts/real-engine-booking-race.php
           php scripts/real-engine-group-race.php
+          php scripts/real-engine-supplier-payment-race.php
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
 
@@ -193,5 +194,6 @@ jobs:
           php artisan migrate --force --no-interaction
           php scripts/real-engine-booking-race.php
           php scripts/real-engine-group-race.php
+          php scripts/real-engine-supplier-payment-race.php
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
