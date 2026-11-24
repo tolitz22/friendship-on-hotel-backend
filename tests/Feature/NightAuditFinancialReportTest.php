@@ -69,11 +69,31 @@ final class NightAuditFinancialReportTest extends TestCase
             $table->bigInteger('debit_minor');
             $table->bigInteger('credit_minor');
         });
+        Schema::create('employee_expense_claims', function (Blueprint $table): void {
+            $table->id();
+            $table->unsignedBigInteger('hotel_id');
+            $table->unsignedBigInteger('employee_id');
+            $table->string('employee_name_snapshot');
+            $table->bigInteger('amount_minor');
+        });
+        Schema::create('employee_expense_claim_decisions', function (Blueprint $table): void {
+            $table->unsignedBigInteger('hotel_id');
+            $table->unsignedBigInteger('claim_id');
+            $table->string('decision');
+            $table->date('business_date')->nullable();
+        });
+        Schema::create('employee_reimbursement_payments', function (Blueprint $table): void {
+            $table->unsignedBigInteger('hotel_id');
+            $table->unsignedBigInteger('claim_id');
+            $table->bigInteger('amount_minor');
+            $table->date('business_date');
+        });
     }
 
     protected function tearDown(): void
     {
-        foreach (['financial_posting_lines', 'financial_posting_journals',
+        foreach (['employee_reimbursement_payments', 'employee_expense_claim_decisions', 'employee_expense_claims',
+            'financial_posting_lines', 'financial_posting_journals',
             'financial_day_closes', 'night_audit_reviews',
             'cashier_shifts', 'occupancy_verifications', 'rooms'] as $table) {
             Schema::dropIfExists($table);
