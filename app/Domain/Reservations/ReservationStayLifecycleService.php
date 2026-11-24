@@ -96,19 +96,47 @@ final class ReservationStayLifecycleService
                 app(SimplifiedCashCheckoutPolicy::class)->recordCheckout($hotel, $bookingId, $actor);
             } elseif ($operation === 'check_out'
                 && config('financial_accounting.enable_verified_settlement', false)) {
-                // Operational checkout needs verified, fully allocated funds,
-                // not a separate manager signature. Continue enforcing signed
-                // snapshot integrity and unresolved financial blockers.
+                // Operational checkout does not require final settlement sign-off.
+                // Keep unresolved payment, refund and integrity controls intact.
                 $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
                     ->where('reservation_record_id', $bookingId)->lockForUpdate()->first();
                 if ($folio === null) {
                     throw new HttpException(409, 'Review the guest bill before checkout.');
                 }
                 $settlement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
-                if (!$settlement['canSignOff']
-                    || ($settlement['signed'] && !$settlement['signedSnapshotIntegrity'])) {
-                    throw new HttpException(409,
-                        'Guest billing is not ready for checkout. Resolve the financial blockers in Billing.');
+                if ($settlement['signed'] && !$settlement['signedSnapshotIntegrity']) {
+                    throw new HttpException(409, 'The signed bill needs financial investigation.');
+                }
+                if (!$settlement['canSignOff']) {
+                    // Departure and final financial settlement are different operations.
+                    // Only defer verification/allocation for fully covered, staff-confirmed
+                    // bills; never treat pending or rejected payment evidence as received.
+                    $confirmed = 0;
+                    $unconfirmed = false;
+                    foreach ($settlement['payments'] as $payment) {
+                        if ($payment['status'] === 'voided') {
+                            continue;
+                        }
+                        if ($payment['status'] !== 'staff_confirmed'
+                            || $payment['verificationStatus'] === 'rejected') {
+                            $unconfirmed = true;
+                            continue;
+                        }
+                        $confirmed += $payment['amountMinor'];
+                    }
+                    $remainingBlockers = array_values(array_diff($settlement['blockers'], [
+                        'Unverified or rejected payment evidence remains.',
+                        'Verified payment allocations do not equal recorded charges.',
+                        'Unallocated verified deposit remains; apply it or review a documented refund.',
+                    ]));
+                    $charges = $settlement['netRecordedChargesMinor'];
+                    if ($settlement['signed'] || $unconfirmed || $charges <= 0
+                        || $confirmed !== $charges || $settlement['refunds'] !== []
+                        || $remainingBlockers !== []) {
+                        throw new HttpException(409, $unconfirmed
+                            ? 'A recorded payment still needs confirmation or has been rejected. Review it in Billing.'
+                            : ($remainingBlockers[0] ?? 'The confirmed payments do not cover the bill exactly, or a refund needs review.'));
+                    }
                 }
             }
 
