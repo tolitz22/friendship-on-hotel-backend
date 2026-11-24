@@ -132,8 +132,31 @@ final class CashierShiftService
             }
             $supplierTotal = $this->checkedAdd($supplierTotal, (int) $payment->amount_minor);
         }
-        $amount -= $this->checkedAdd($payoutTotal, $supplierTotal);
+        $reimbursements = DB::table('employee_reimbursement_payments as p')
+            ->leftJoin('employee_expense_claims as c', 'c.id', '=', 'p.claim_id')
+            ->where('p.hotel_id', $hotel->id)->where('p.shift_id', $shift->id)
+            ->orderBy('p.id')->get(['p.id', 'p.claim_id', 'p.amount_minor', 'p.payment_source',
+                'p.recorded_by', 'p.evidence_reference', 'p.created_at', 'c.hotel_id as claim_hotel_id',
+                'c.currency', 'c.employee_name_snapshot', 'c.description']);
+        $reimbursementTotal = 0;
+        foreach ($reimbursements as $payment) {
+            abort_unless((int) $payment->claim_hotel_id === (int) $hotel->id
+                && (int) $payment->recorded_by === (int) $shift->cashier_id
+                && $payment->payment_source === 'cashier_drawer'
+                && $payment->currency === $shift->currency && (int) $payment->amount_minor > 0,
+                409, 'Employee reimbursement is inconsistent. Investigate before reconciliation.');
+            $reimbursementTotal = $this->checkedAdd($reimbursementTotal, (int) $payment->amount_minor);
+        }
+        $amount -= $this->checkedAdd($this->checkedAdd($payoutTotal, $supplierTotal), $reimbursementTotal);
         return [
+            'employeeReimbursementTotalMinor' => $reimbursementTotal,
+            'employeeReimbursementCount' => $reimbursements->count(),
+            'employeeReimbursements' => $reimbursements->map(fn ($p) => [
+                'id' => (string) $p->id, 'claimId' => (string) $p->claim_id,
+                'amountMinor' => (int) $p->amount_minor, 'employeeName' => $p->employee_name_snapshot,
+                'description' => $p->description, 'evidenceReference' => $p->evidence_reference,
+                'createdAt' => $p->created_at,
+            ])->all(),
             'supplierPaymentTotalMinor' => $supplierTotal,
             'supplierPaymentCount' => $supplierPayments->count(),
             'supplierPayments' => $supplierPayments->map(fn ($p) => [
@@ -201,6 +224,8 @@ final class CashierShiftService
             'expectedCashMinor' => $shift->status === 'open' ? null : (int) $shift->expected_cash_minor,
             'countedCashMinor' => $shift->counted_cash_minor === null ? null : (int) $shift->counted_cash_minor,
             'varianceMinor' => $shift->variance_minor === null ? null : (int) $shift->variance_minor,
+            'employeeReimbursementTotalMinor' => $calc['employeeReimbursementTotalMinor'],
+            'employeeReimbursementCount' => $calc['employeeReimbursementCount'],
             'supplierPaymentTotalMinor' => $calc['supplierPaymentTotalMinor'],
             'supplierPaymentCount' => $calc['supplierPaymentCount'],
             'expenseCashReturnTotalMinor' => $calc['expenseCashReturnTotalMinor'],
@@ -214,7 +239,7 @@ final class CashierShiftService
             'reviewedBy' => $shift->reviewed_by === null ? null : (string) $shift->reviewed_by,
             'openedAt' => $shift->opened_at, 'submittedAt' => $shift->submitted_at,
             'reconciledAt' => $shift->reconciled_at,
-            ...($includeReceipts ? ['receipts' => $calc['receipts'], 'expensePayouts' => $calc['expensePayouts'], 'expenseCashReturns' => $calc['expenseCashReturns'], 'supplierPayments' => $calc['supplierPayments']] : []),
+            ...($includeReceipts ? ['receipts' => $calc['receipts'], 'expensePayouts' => $calc['expensePayouts'], 'expenseCashReturns' => $calc['expenseCashReturns'], 'supplierPayments' => $calc['supplierPayments'], 'employeeReimbursements' => $calc['employeeReimbursements']] : []),
         ];
     }
 
@@ -410,7 +435,9 @@ final class CashierShiftService
                 'varianceMinor' => $variance, 'receiptCount' => $calc['receiptCount'],
                 'expensePayoutTotalMinor' => $calc['expensePayoutTotalMinor'],
                 'expensePayoutCount' => $calc['expensePayoutCount'],
-                'supplierPaymentTotalMinor' => $calc['supplierPaymentTotalMinor'],
+                'employeeReimbursementTotalMinor' => $calc['employeeReimbursementTotalMinor'],
+            'employeeReimbursementCount' => $calc['employeeReimbursementCount'],
+            'supplierPaymentTotalMinor' => $calc['supplierPaymentTotalMinor'],
                 'supplierPaymentCount' => $calc['supplierPaymentCount'],
                 'unconfirmedReceiptCount' => $calc['unconfirmedReceiptCount'],
             ]);
