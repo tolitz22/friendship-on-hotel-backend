@@ -147,9 +147,10 @@ final class ReservationBookingService
         }, 3);
     }
 
-    public function cancel(Hotel $hotel, int $actorId, int $reservationId): array
+    public function cancel(Hotel $hotel, int $actorId, int $reservationId, bool $noShow = false): array
     {
-        return DB::transaction(function () use ($hotel, $actorId, $reservationId): array {
+        return DB::transaction(function () use ($hotel, $actorId, $reservationId, $noShow): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $record = DB::table('reservation_records')
                 ->where('hotel_id', $hotel->id)->where('id', $reservationId)->first();
             abort_unless($record !== null, 404);
@@ -170,11 +171,15 @@ final class ReservationBookingService
                 throw new HttpException(409, 'Priced reservations require a financial reversal policy before cancellation.');
             }
 
+            if ($noShow && now($hotel->timezone ?: 'Asia/Manila')->toDateString() < $record->check_out) {
+                throw new HttpException(409, 'A no-show can only be recorded once the scheduled stay has ended.');
+            }
+            $state = $noShow ? 'no_show' : 'cancelled';
             // This starter workflow does not compute refunds or cancellation fees.
             DB::table('reservation_records')->where('id', $record->id)->update([
-                'lifecycle_state' => 'cancelled', 'updated_at' => now(),
+                'lifecycle_state' => $state, 'updated_at' => now(),
             ]);
-            $this->audit($hotel->id, (int) $record->id, $actorId, 'cancelled', 'confirmed', 'cancelled');
+            $this->audit($hotel->id, (int) $record->id, $actorId, $state, 'confirmed', $state);
 
             return $this->present($hotel->id, (int) $record->id, false);
         }, 3);
