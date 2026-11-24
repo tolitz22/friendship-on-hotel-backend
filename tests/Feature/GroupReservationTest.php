@@ -292,3 +292,22 @@ it('searches linked guest and booking records and filters assigned room inventor
         ->assertJsonPath('meta.total', 0);
     $this->getJson($endpoint.'?assignment=invalid')->assertUnprocessable();
 });
+
+
+it('rejects partially reviewed dynamic groups without writing any bookings', function (): void {
+    [$hotel, $type, $guests] = groupFixture();
+    $payload = groupPayload($type, $guests);
+    $payload['rooms'][0]['ratePlanId'] = 1;
+    $payload['rooms'][0]['dynamicQuoteToken'] = str_repeat('a', 64);
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/group-reservations', $payload)->assertUnprocessable();
+    expect(DB::table('group_reservations')->where('hotel_id', $hotel->id)->count())->toBe(0);
+    expect(DB::table('reservation_records')->where('hotel_id', $hotel->id)->count())->toBe(0);
+});
+
+it('rejects group eligibility codes without a reviewed quote', function (): void {
+    [$hotel, $type, $guests] = groupFixture();
+    $payload = groupPayload($type, $guests);
+    $payload['rooms'][0]['promoCode'] = 'PROMO';
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/group-reservations', $payload)->assertUnprocessable();
+    expect(DB::table('group_reservations')->where('hotel_id', $hotel->id)->count())->toBe(0);
+});
