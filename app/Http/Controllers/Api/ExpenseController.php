@@ -46,7 +46,7 @@ final class ExpenseController
     {
         $filters = $request->validate([
             'from' => ['sometimes', 'date_format:Y-m-d'],
-            'to' => ['sometimes', 'date_format:Y-m-d', 'after_or_equal:from'],
+            'to' => array_merge(['sometimes', 'date_format:Y-m-d'], $request->filled('from') ? ['after_or_equal:from'] : []),
             'department' => ['sometimes', 'in:rooms,maintenance,administration,utilities,food_beverage'],
             'reviewStatus' => ['sometimes', 'in:pending,approved,flagged,not_required'],
             'search' => ['sometimes', 'string', 'max:120'],
@@ -123,10 +123,10 @@ final class ExpenseController
             ->whereNotNull('correction_id')->selectRaw('correction_id, SUM(amount_minor) as settled')->groupBy('correction_id');
         $clearing = (clone $corrections)->where('c.kind', 'amount_correction')->where('d.decision', 'approve')
             ->leftJoinSub($settlements, 's', fn ($join) => $join->on('s.correction_id', '=', 'c.id'))
-            ->whereRaw('e.amount_minor - c.corrected_amount_minor - COALESCE(s.settled, 0) <> 0');
+            ->whereRaw('CAST(e.amount_minor AS DECIMAL(20,0)) - CAST(c.corrected_amount_minor AS DECIMAL(20,0)) - COALESCE(s.settled, 0) <> 0');
         $clearingCount = (clone $clearing)->count();
         foreach ($clearing->orderBy('c.id')->limit(50)->get(['c.id', 'c.expense_id', 'e.description', 'e.business_date',
-            DB::raw('e.amount_minor - c.corrected_amount_minor - COALESCE(s.settled, 0) as balance')]) as $row) {
+            DB::raw('CAST(e.amount_minor AS DECIMAL(20,0)) - CAST(c.corrected_amount_minor AS DECIMAL(20,0)) - COALESCE(s.settled, 0) as balance')]) as $row) {
             $items[] = ['kind' => 'unresolved_clearing', 'id' => (string) $row->id, 'expenseId' => (string) $row->expense_id,
                 'description' => $row->description, 'businessDate' => (string) $row->business_date, 'amountMinor' => (int) $row->balance];
         }
