@@ -106,3 +106,35 @@ it('records ordinary supplier refunds once and preserves signed negative drawer 
     $closed = app(CashierShiftService::class)->close($hotel, $cashier->id, $shift, 0, null);
     expect($closed['expectedCashMinor'])->toBe(-45000)->and($closed['varianceMinor'])->toBe(45000);
 });
+
+it('lists current expense exceptions independently of historical dates and protects hotel boundaries', function (): void {
+    [$hotel, $cashier, $requester, $reviewer, $shift, $expense] = correction65Fixture();
+    $corrections = app(ExpenseCorrectionService::class);
+    $returns = app(ExpenseCashReturnService::class);
+    $path = '/api/v1/hotels/'.$hotel->id.'/expenses/exceptions';
+    $id = (int) $corrections->request($hotel, $requester->id, $expense, [
+        'requestKey' => 'queue-correction-65', 'kind' => 'amount_correction',
+        'correctedAmountMinor' => 35000, 'reason' => 'Correct supplier amount',
+    ])['correctionId'];
+    \Laravel\Sanctum\Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $this->getJson($path)->assertForbidden();
+    \Laravel\Sanctum\Sanctum::actingAs($reviewer, ['hotel:read', 'hotel:write']);
+    $this->getJson($path)->assertOk()->assertJsonPath('data.pendingCorrectionCount', 1)
+        ->assertJsonPath('data.items.0.expenseId', (string) $expense);
+    $corrections->decide($hotel, $reviewer->id, $id, ['decision' => 'approve', 'note' => 'Receipt verified']);
+    $this->getJson($path)->assertOk()->assertJsonPath('data.pendingCorrectionCount', 0)
+        ->assertJsonPath('data.unresolvedClearingCount', 1)->assertJsonPath('data.items.0.amountMinor', 15000);
+    $refund = $returns->record($hotel, $cashier->id, $expense, $shift, [
+        'requestKey' => 'queue-return-65', 'amountMinor' => 15000, 'correctionId' => $id,
+        'evidenceReference' => 'QUEUE-REF', 'reason' => 'Physical cash returned',
+    ]);
+    $this->getJson($path)->assertOk()->assertJsonPath('data.unresolvedClearingCount', 0)
+        ->assertJsonPath('data.pendingReturnCount', 1);
+    $returns->review($hotel, $reviewer->id, (int) $refund['cashReturnId'], ['decision' => 'flag', 'note' => 'Evidence needs investigation']);
+    $this->getJson($path)->assertOk()->assertJsonPath('data.pendingReturnCount', 0)
+        ->assertJsonPath('data.flaggedReturnCount', 1);
+    $other = Hotel::create(['name' => 'Separate exception hotel', 'currency' => 'PHP']);
+    HotelMembership::create(['hotel_id' => $other->id, 'user_id' => $reviewer->id, 'role' => 'admin', 'is_active' => true]);
+    $this->getJson('/api/v1/hotels/'.$other->id.'/expenses/exceptions')->assertOk()->assertJsonCount(0, 'data.items')
+        ->assertJsonPath('data.flaggedReturnCount', 0);
+});
