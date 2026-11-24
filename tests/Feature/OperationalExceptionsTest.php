@@ -182,3 +182,31 @@ it('rejects oversized in-house assignment queues instead of returning partial to
     expect($response->json('message'))->toContain('in-house assignments');
     expect($response->json('data'))->toBeNull();
 });
+
+it('identifies each pending payment on the same guest folio', function (): void {
+    $hotel = Hotel::create(['name' => 'Payment review demo', 'timezone' => 'Asia/Manila']);
+    $manager = User::create(['name' => 'Review manager', 'email' => 'payment-alert@example.test',
+        'password' => 'synthetic-password', 'is_active' => true]);
+    $hotel->memberships()->create(['user_id' => $manager->id, 'role' => 'admin', 'is_active' => true]);
+    $type = $hotel->roomTypes()->create(['name' => 'Standard', 'max_occupancy' => 2]);
+    $booking = DB::table('reservation_records')->insertGetId(['hotel_id' => $hotel->id,
+        'room_type_id' => $type->id, 'reference' => 'DEMO-PAYMENTS', 'check_in' => '2026-11-23',
+        'check_out' => '2026-11-26', 'lifecycle_state' => 'confirmed']);
+    $folio = DB::table('reservation_folios')->insertGetId(['hotel_id' => $hotel->id,
+        'reservation_record_id' => $booking, 'currency' => 'PHP', 'created_by' => $manager->id]);
+    $pending = [];
+    foreach (['TRANSFER-A', 'TRANSFER-B'] as $reference) {
+        $pending[] = (string) DB::table('folio_payment_records')->insertGetId([
+            'hotel_id' => $hotel->id, 'folio_id' => $folio, 'request_key' => $reference,
+            'payload_sha256' => hash('sha256', $reference), 'method' => 'bank_transfer',
+            'reference' => $reference, 'amount_minor' => 250000, 'status' => 'pending_review',
+            'recorded_by' => $manager->id, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+    }
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $items = $this->getJson('/api/v1/hotels/'.$hotel->id.'/operational-exceptions')
+        ->assertOk()->json('data.items');
+    $alerts = collect($items)->where('type', 'payment_pending_review');
+    expect($alerts->pluck('paymentId')->all())->toEqualCanonicalizing($pending);
+    expect($alerts->pluck('bookingId')->unique()->values()->all())->toBe([(string) $booking]);
+});

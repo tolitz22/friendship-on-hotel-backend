@@ -104,7 +104,7 @@ final class OperationalExceptionsController
             ->get(['pay.id', 'pay.amount_minor', 'pay.created_at', 'booking.id as booking_id',
                 'booking.reference']), 'payment reviews');
         foreach ($pending as $payment) {
-            $items[] = $this->signal('payment_pending_review', 'review',
+            $items[] = ['paymentId' => (string) $payment->id] + $this->signal('payment_pending_review', 'review',
                 $payment->booking_id, $payment->reference,
                 'Payment evidence #'.$payment->id.' is awaiting staff review.',
                 'Review supporting evidence and the folio; this is not gateway-verified settlement.',
