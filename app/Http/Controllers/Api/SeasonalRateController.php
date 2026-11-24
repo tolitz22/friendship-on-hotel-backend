@@ -16,10 +16,10 @@ final class SeasonalRateController
     public function index(Hotel $hotel, string $plan, SeasonalRateService $rates): JsonResponse
     {
         abort_unless(DB::table('room_rate_plans')->where('hotel_id', $hotel->id)->where('id', $plan)->exists(), 404);
-        return response()->json(['data' => $rates->rules($hotel, (int) $plan)->orderBy('starts_on')->orderBy('id')->paginate(50)]);
+        return response()->json(['data' => $rates->rules($hotel, (int) $plan)->orderByRaw('CASE WHEN retired_at IS NULL THEN 0 ELSE 1 END')->orderBy('starts_on')->orderBy('id')->paginate(50)]);
     }
 
-    public function store(Request $request, Hotel $hotel, string $plan, SeasonalRateService $rates): JsonResponse
+    private function validatedRule(Request $request): array
     {
         $input = $request->validate([
             'name' => ['required', 'string', 'max:100'],
@@ -31,7 +31,25 @@ final class SeasonalRateController
         if ($input['kind'] === 'date_override' && $input['startsOn'] !== $input['endsOn']) {
             throw \Illuminate\Validation\ValidationException::withMessages(['endsOn' => ['A date override applies to a single night.']]);
         }
+        return $input;
+    }
+
+    public function store(Request $request, Hotel $hotel, string $plan, SeasonalRateService $rates): JsonResponse
+    {
+        $input = $this->validatedRule($request);
         return response()->json(['data' => ['id' => (string) $rates->create($hotel, (int) $request->user()->id, (int) $plan, $input)]], 201);
+    }
+
+    public function update(Request $request, Hotel $hotel, string $plan, string $rule, SeasonalRateService $rates): JsonResponse
+    {
+        $id = $rates->replace($hotel, (int) $request->user()->id, (int) $plan, (int) $rule, $this->validatedRule($request));
+        return response()->json(['data' => ['id' => (string) $id]]);
+    }
+
+    public function retire(Request $request, Hotel $hotel, string $plan, string $rule, SeasonalRateService $rates): JsonResponse
+    {
+        $rates->replace($hotel, (int) $request->user()->id, (int) $plan, (int) $rule, null);
+        return response()->json(['data' => ['id' => $rule, 'retired' => true]]);
     }
 
     public function preview(Request $request, Hotel $hotel, string $plan, SeasonalRateService $rates): JsonResponse

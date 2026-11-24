@@ -24,7 +24,7 @@ final class SeasonalRateService
             abort_unless($plan !== null, 404);
             DB::table('room_types')->where('hotel_id', $hotel->id)
                 ->where('id', $plan->room_type_id)->lockForUpdate()->firstOrFail();
-            if ($this->rules($hotel, $planId)->where('kind', $input['kind'])
+            if ($this->rules($hotel, $planId)->whereNull('retired_at')->where('kind', $input['kind'])
                 ->where('starts_on', '<=', $input['endsOn'])
                 ->where('ends_on', '>=', $input['startsOn'])->exists()) {
                 throw ValidationException::withMessages(['startsOn' => ['A rule of this kind already overlaps these dates.']]);
@@ -39,10 +39,30 @@ final class SeasonalRateService
         }, 3);
     }
 
+    public function replace(Hotel $hotel, int $actor, int $planId, int $ruleId, ?array $input): ?int
+    {
+        return DB::transaction(function () use ($hotel, $actor, $planId, $ruleId, $input): ?int {
+            $plan = DB::table('room_rate_plans')->where('hotel_id', $hotel->id)->where('id', $planId)->first();
+            abort_unless($plan !== null, 404);
+            DB::table('room_types')->where('hotel_id', $hotel->id)
+                ->where('id', $plan->room_type_id)->lockForUpdate()->firstOrFail();
+            $rule = $this->rules($hotel, $planId)->where('id', $ruleId)->lockForUpdate()->first();
+            abort_unless($rule !== null, 404);
+            abort_if($rule->retired_at !== null, 409, 'This rule was already retired. Reload the list.');
+            $this->rules($hotel, $planId)->where('id', $ruleId)->update([
+                'retired_at' => now(), 'retired_by' => $actor, 'updated_at' => now(),
+            ]);
+            if ($input === null) return null;
+            $newId = $this->create($hotel, $actor, $planId, $input);
+            $this->rules($hotel, $planId)->where('id', $newId)->update(['replaces_rule_id' => $ruleId]);
+            return $newId;
+        }, 3);
+    }
+
     public function preview(Hotel $hotel, int $typeId, int $planId, StayPeriod $stay): array
     {
         $base = app(RoomRateQuoteService::class)->quote($hotel, $typeId, $planId, $stay);
-        $rules = $this->rules($hotel, $planId)->where('starts_on', '<', $stay->departure)
+        $rules = $this->rules($hotel, $planId)->whereNull('retired_at')->where('starts_on', '<', $stay->departure)
             ->where('ends_on', '>=', $stay->arrival)->get();
         $total = 0;
         $nightlyRates = [];
