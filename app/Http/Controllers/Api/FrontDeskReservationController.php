@@ -138,6 +138,17 @@ final class FrontDeskReservationController
         return response()->json(['data' => $service->extend($hotel, (int) $request->user()->id, (int) $booking, $input)]);
     }
 
+    public function previewAmendment(Request $request, Hotel $hotel, string $booking, ReservationAmendmentService $amendments): JsonResponse
+    {
+        $data = $request->validate([
+            'checkIn' => ['required', 'date_format:Y-m-d'],
+            'checkOut' => ['required', 'date_format:Y-m-d', 'after:checkIn'],
+        ]);
+        return response()->json(['data' => $amendments->amend(
+            $hotel, (int) $request->user()->id, (int) $booking, $data, true
+        )]);
+    }
+
     public function amend(Request $request, Hotel $hotel, string $booking, ReservationAmendmentService $amendments): JsonResponse
     {
         $data = $request->validate([
