@@ -102,6 +102,16 @@ final class SupplierBillController
             'summary' => $summary, 'postingEnabled' => (bool) config('financial_accounting.enable_supplier_billing', false)]);
     }
 
+    public function aging(Request $request, Hotel $hotel): JsonResponse
+    {
+        $filters = $request->validate(['date' => ['sometimes', 'date_format:Y-m-d']]);
+        $current = $this->date($hotel);
+        abort_unless($current !== null, 409, 'Financial business date is not configured.');
+        $date = $filters['date'] ?? $current;
+        abort_if($date > $current, 422, 'Report date cannot exceed the financial business date.');
+        return response()->json(['data' => app(\App\Services\Finance\SupplierPayableAging::class)->report((int) $hotel->id, $date)]);
+    }
+
     public function show(Hotel $hotel, string $bill): JsonResponse
     {
         $row = $this->query($hotel)->where('b.id', $bill)->select('b.*')
