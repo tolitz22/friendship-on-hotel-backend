@@ -1,0 +1,3 @@
+# Phase 66B — seasonal pricing foundation
+Admin-only creation and listing of inclusive seasonal rules and single-date overrides. Equal-kind overlaps are rejected under the room-type lock; date overrides supersede seasonal rules, then base rates. Preview returns exact integer per-night amounts and subtotal. Rules retain creator and creation time. No existing folio is modified.
+This is deliberately preview-only: existing booking and extension clients assume a single nightly price and must not silently charge different amounts. Activate dynamic pricing only after quote display, stale quote validation, booking/group/extension snapshots, and regression coverage are integrated. Rule editing, retirement, and UI are not yet implemented.

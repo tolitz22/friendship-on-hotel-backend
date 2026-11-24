@@ -337,6 +337,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/inventory-blocks', [RoomInventoryController::class, 'block']);
                 Route::post('/inventory-blocks/{block}/release', [RoomInventoryController::class, 'release'])->whereNumber('block');
                 Route::post('/rate-plans', [ReservationFinanceController::class, 'createRate']);
+                Route::get('/rate-plans/{plan}/rules', [\App\Http\Controllers\Api\SeasonalRateController::class, 'index'])->whereNumber('plan');
+                Route::post('/rate-plans/{plan}/rules', [\App\Http\Controllers\Api\SeasonalRateController::class, 'store'])->whereNumber('plan')->middleware('throttle:20,1');
+                Route::get('/rate-plans/{plan}/seasonal-preview', [\App\Http\Controllers\Api\SeasonalRateController::class, 'preview'])->whereNumber('plan');
                 Route::post('/finance/charge-policy-drafts', [FinancePolicyController::class, 'draft']);
                 Route::post('/finance/charge-policy-drafts/{policy}/review', [FinancePolicyController::class, 'reviewDraft'])->whereNumber('policy');
                 Route::get('/finance/events', [FinanceEventReviewController::class, 'inbox']);
