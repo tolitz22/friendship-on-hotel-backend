@@ -95,3 +95,53 @@ it('protects night audit review from non-managers, other hotels and missing atte
     $this->postJson('/api/v1/hotels/'.$another->id.'/night-audit/review',$input)->assertNotFound();
     $this->assertDatabaseCount('night_audit_reviews',0);
 });
+
+it('initializes an isolated property and advances its clock exactly once after a cleared review', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-11-24T10:00:00+08:00'));
+    config(['financial_accounting.enable_live_folio_tax' => false]);
+    $fx = phase58Actors();
+    $base = '/api/v1/hotels/'.$fx['hotel']->id;
+    $clock = $base.'/finance/business-day';
+    $opening = ['businessDate' => '2026-11-23'];
+    $otherHotel = Hotel::create(['name' => 'Separate demo property']);
+    Sanctum::actingAs($fx['desk'], ['hotel:read', 'hotel:write']);
+    $this->postJson($clock.'/initialize', $opening)->assertForbidden();
+    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
+    $this->postJson('/api/v1/hotels/'.$otherHotel->id.'/finance/business-day/initialize', $opening)->assertNotFound();
+    $this->getJson($clock)->assertConflict()->assertJsonPath('code', 'BUSINESS_DATE_NOT_CONFIGURED');
+    $this->postJson($clock.'/initialize', $opening)->assertCreated();
+    $this->getJson($clock)->assertOk()->assertJsonPath('data.businessDate', '2026-11-23')
+        ->assertJsonPath('data.canClose', false)->assertJsonPath('data.version', 0);
+    $this->postJson($base.'/night-audit/review', [
+        'date' => '2026-11-23', 'decision' => 'clear', 'acknowledged' => true,
+        'note' => 'Reviewed the isolated demo property and cleared the preflight.',
+    ])->assertCreated();
+    $this->getJson($clock)->assertOk()->assertJsonPath('data.canClose', true);
+    $close = $opening + ['acknowledged' => true];
+    $this->postJson($clock.'/close', $close)->assertOk()->assertJsonPath('data.nextBusinessDate', '2026-11-24');
+    $this->postJson($clock.'/close', $close)->assertUnprocessable();
+    $this->postJson($clock.'/initialize', $opening)->assertConflict();
+    $this->getJson($clock)->assertOk()->assertJsonPath('data.businessDate', '2026-11-24')
+        ->assertJsonPath('data.version', 1)->assertJsonPath('data.folioTaxAccountingEnabled', false);
+    $this->assertDatabaseCount('financial_day_closes', 1);
+    $this->assertDatabaseCount('financial_accounting_periods', 1);
+    $this->assertDatabaseMissing('financial_business_clocks', ['hotel_id' => $otherHotel->id]);
+});
+
+it('rolls back setup against a closed next period and supports a month-end opening', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-01T10:00:00+08:00'));
+    $fx = phase58Actors();
+    Sanctum::actingAs($fx['manager'], ['hotel:read', 'hotel:write']);
+    $hotelId = $fx['hotel']->id;
+    $clock = '/api/v1/hotels/'.$hotelId.'/finance/business-day';
+    $opening = ['businessDate' => '2026-11-30'];
+    $periods = DB::table('financial_accounting_periods')->where('hotel_id', $hotelId);
+    $periods->insert(['hotel_id' => $hotelId, 'starts_on' => '2026-12-01', 'ends_on' => '2026-12-31', 'status' => 'closed']);
+    $this->postJson($clock.'/initialize', $opening)->assertUnprocessable();
+    $this->assertDatabaseCount('financial_accounting_periods', 1);
+    $this->assertDatabaseCount('financial_business_clocks', 0);
+    $periods->update(['status' => 'open']);
+    $this->postJson($clock.'/initialize', $opening)->assertCreated();
+    $this->assertDatabaseCount('financial_accounting_periods', 2);
+    $this->getJson($clock)->assertOk()->assertJsonPath('data.nextBusinessDate', '2026-12-01');
+});

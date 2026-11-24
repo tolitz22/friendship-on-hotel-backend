@@ -25,7 +25,7 @@ final class FinancialBusinessDayController
             ->where('hotel_id', $hotel->id)->first();
 
         if ($clock === null) {
-            return response()->json(['message' => 'Financial business clock is not configured.'], 409);
+            return response()->json(['code' => 'BUSINESS_DATE_NOT_CONFIGURED', 'message' => 'Financial business clock is not configured.'], 409);
         }
 
         $date = CarbonImmutable::parse($clock->business_date)->toDateString();
@@ -179,6 +179,58 @@ final class FinancialBusinessDayController
             'readinessIsAdvisory' => true,
             'folioTaxAccountingEnabled' => (bool) config('financial_accounting.enable_live_folio_tax', false),
         ]]);
+    }
+
+    public function initialize(Request $request, Hotel $hotel): JsonResponse
+    {
+        $today = CarbonImmutable::now($hotel->timezone)->toDateString();
+        $date = $request->validate([
+            'businessDate' => ['required', 'date_format:Y-m-d', 'before_or_equal:'.$today],
+        ])['businessDate'];
+
+        return DB::transaction(function () use ($hotel, $date, $request): JsonResponse {
+            Hotel::whereKey($hotel->id)->lockForUpdate()->firstOrFail();
+            $clocks = DB::table('financial_business_clocks')->where('hotel_id', $hotel->id);
+            if ($clocks->exists()) {
+                return response()->json(['message' => 'This hotel already has a business date. Refresh readiness to see it.'], 409);
+            }
+            if (DB::table('financial_day_closes')->where('hotel_id', $hotel->id)->exists()
+                || DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->exists()) {
+                throw ValidationException::withMessages(['businessDate' => 'Existing financial history requires administrator reconciliation before setup.']);
+            }
+
+            $start = CarbonImmutable::parse($date);
+            foreach ([$start, $start->addDay()] as $day) {
+                $periods = DB::table('financial_accounting_periods')->where('hotel_id', $hotel->id);
+                $covering = (clone $periods)->whereDate('starts_on', '<=', $day->toDateString())
+                    ->whereDate('ends_on', '>=', $day->toDateString())->get();
+                if ($covering->count() === 1 && $covering->first()->status === 'open') {
+                    continue;
+                }
+                $from = $day->startOfMonth()->toDateString();
+                $until = $day->endOfMonth()->toDateString();
+                if ($periods->whereDate('starts_on', '<=', $until)->whereDate('ends_on', '>=', $from)->exists()) {
+                    throw ValidationException::withMessages(['businessDate' => 'Ask the hotel administrator to review the existing accounting periods for '.$day->toDateString().'.']);
+                }
+                DB::table('financial_accounting_periods')->insert([
+                    'hotel_id' => $hotel->id, 'starts_on' => $from, 'ends_on' => $until,
+                    'status' => 'open', 'created_at' => now(), 'updated_at' => now(),
+                ]);
+            }
+
+            $clockId = DB::table('financial_business_clocks')->insertGetId([
+                'hotel_id' => $hotel->id, 'business_date' => $date, 'status' => 'open',
+                'version' => 0, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            DB::table('catalog_audit_logs')->insert([
+                'hotel_id' => $hotel->id, 'actor_id' => $request->user()->id,
+                'subject_type' => 'business_clock', 'subject_id' => $clockId,
+                'changes_before' => '{}', 'changes_after' => json_encode(['businessDate' => $date], JSON_THROW_ON_ERROR),
+                'created_at' => now(),
+            ]);
+
+            return response()->json(['data' => ['businessDate' => $date]], 201);
+        }, 3);
     }
 
     public function close(Request $request, Hotel $hotel, FinancialBusinessDayCloseService $service): JsonResponse

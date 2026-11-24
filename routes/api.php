@@ -264,6 +264,8 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('policy')->middleware('throttle:5,1');
                 Route::get('/finance/tax-preview', [FinancialTaxPolicyController::class, 'preview']);
                 Route::get('/finance/business-day', [FinancialBusinessDayController::class, 'show']);
+                Route::post('/finance/business-day/initialize', [FinancialBusinessDayController::class, 'initialize'])
+                    ->middleware('throttle:5,1,business-date-setup');
                 Route::post('/finance/business-day/close', [FinancialBusinessDayController::class, 'close'])
                     ->middleware('throttle:5,1');
                 Route::get('/night-audit/preview', NightAuditPreviewController::class);
