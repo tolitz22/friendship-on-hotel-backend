@@ -17,9 +17,9 @@ final class SupplierBillPaymentService
         $data = Validator::make($input, [
             'requestKey' => ['required', 'string', 'min:8', 'max:100'],
             'amountMinor' => ['required', 'integer', 'min:1', 'max:100000000000'],
-            'paymentSource' => ['required', 'in:hotel_bank'],
+            'paymentSource' => ['required', 'in:hotel_bank,cashier_drawer'],
             'evidenceReference' => ['required', 'string', 'max:160', 'regex:/\\S/u'],
-            'shiftId' => ['prohibited'],
+            'shiftId' => ['required_if:paymentSource,cashier_drawer', 'prohibited_if:paymentSource,hotel_bank', 'nullable', 'integer', 'min:1'],
         ])->validate();
 
         return DB::transaction(function () use ($hotel, $actor, $billId, $data): array {
@@ -34,7 +34,7 @@ final class SupplierBillPaymentService
             $facts = [
                 'hotel_id' => (int) $hotel->id, 'bill_id' => $billId, 'recorded_by' => $actor,
                 'request_key' => $data['requestKey'], 'amount_minor' => (int) $data['amountMinor'],
-                'payment_source' => 'hotel_bank', 'shift_id' => null,
+                'payment_source' => $data['paymentSource'], 'shift_id' => isset($data['shiftId']) ? (int) $data['shiftId'] : null,
                 'evidence_reference' => trim($data['evidenceReference']),
             ];
             $base = DB::table('supplier_bill_payments')->where('hotel_id', $hotel->id);
@@ -50,8 +50,13 @@ final class SupplierBillPaymentService
                 return $this->result($bill, (int) $existing->id, (int) $existing->journal_id, $paid, true);
             }
             abort_if($facts['amount_minor'] > $outstanding, 409, 'Payment exceeds the outstanding invoice balance.');
-            // Bank-only until drawer integration is tested. This records a payment
-            // already executed outside the PMS; it does not initiate a transfer.
+            if ($facts['payment_source'] === 'cashier_drawer') {
+                $shift = DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
+                    ->where('id', $facts['shift_id'])->lockForUpdate()->first();
+                abort_unless($shift !== null && (int) $shift->cashier_id === $actor, 404);
+                abort_unless($shift->status === 'open' && $shift->currency === 'PHP', 409, 'An open PHP cashier shift is required.');
+            }
+            // Record only a payment already made; no bank transfer is initiated.
             // Evidence references may cover several invoices, but reuse against
             // the same bill requires investigation rather than silent duplication.
             abort_if((clone $base)->where('bill_id', $billId)
@@ -59,15 +64,25 @@ final class SupplierBillPaymentService
                 409, 'This payment evidence is already recorded for the invoice.');
             $journal = app(FinancialJournalPostingService::class)->post(
                 (int) $hotel->id, 'supplier-payment:'.$data['requestKey'], 'supplier_bill_payment',
-                $data['requestKey'], 'Supplier payment recorded from bank evidence', [
+                $data['requestKey'], 'Supplier payment recorded from evidence', [
                     ['account_code' => 'accounts_payable', 'debit_minor' => $facts['amount_minor'], 'credit_minor' => 0],
-                    ['account_code' => 'hotel_bank', 'debit_minor' => 0, 'credit_minor' => $facts['amount_minor']],
+                    ['account_code' => $facts['payment_source'] === 'cashier_drawer' ? 'cashier_cash' : 'hotel_bank', 'debit_minor' => 0, 'credit_minor' => $facts['amount_minor']],
                 ], $actor
             );
             $date = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('id', $journal)->value('business_date');
             $payment = DB::table('supplier_bill_payments')->insertGetId($facts + [
                 'journal_id' => $journal, 'business_date' => $date, 'created_at' => now(),
             ]);
+            if ($facts['shift_id'] !== null) {
+                DB::table('cashier_shift_events')->insert([
+                    'hotel_id' => $hotel->id, 'shift_id' => $facts['shift_id'], 'actor_id' => $actor,
+                    'event' => 'supplier_bill_payment', 'details' => json_encode([
+                        'billId' => (string) $billId, 'paymentId' => (string) $payment,
+                        'amountMinor' => $facts['amount_minor'], 'supplierName' => $bill->supplier_name_snapshot,
+                        'invoiceReference' => $bill->invoice_reference,
+                    ], JSON_THROW_ON_ERROR), 'created_at' => now(),
+                ]);
+            }
             return $this->result($bill, (int) $payment, $journal, $paid + $facts['amount_minor'], false);
         }, 3);
     }
