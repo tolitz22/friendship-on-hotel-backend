@@ -199,6 +199,7 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('throttle:20,1');
 
             Route::get('/expenses', [ExpenseController::class, 'index'])->middleware('hotel.permission:expense.read');
+            Route::get('/expenses/exceptions', [ExpenseController::class, 'exceptions'])->middleware('hotel.permission:expense.read');
             Route::get('/expenses/policy', [ExpenseController::class, 'policy'])->middleware('hotel.permission:expense.read');
             Route::put('/expenses/policy', [ExpenseController::class, 'updatePolicy'])->middleware('hotel.permission:expense.policy')->middleware('throttle:10,1');
             Route::get('/expenses/{expense}', [ExpenseController::class, 'show'])->whereNumber('expense')->middleware('hotel.permission:expense.read');
