@@ -95,10 +95,38 @@ final class CashierShiftService
             }
             $payoutTotal = $this->checkedAdd($payoutTotal, (int) $payout->amount_minor);
         }
+        $returns = DB::table('expense_cash_returns as r')
+            ->leftJoin('hotel_expenses as e', 'e.id', '=', 'r.expense_id')
+            ->leftJoin('expense_cash_return_reviews as v', function ($join): void {
+                $join->on('v.cash_return_id', '=', 'r.id')->on('v.hotel_id', '=', 'r.hotel_id');
+            })
+            ->where('r.hotel_id', $hotel->id)->where('r.shift_id', $shift->id)
+            ->orderBy('r.id')->get(['r.id', 'r.expense_id', 'r.amount_minor', 'r.recorded_by',
+                'r.evidence_reference', 'r.created_at', 'e.hotel_id as expense_hotel_id',
+                'e.currency', 'e.payee', 'v.decision']);
+        $returnTotal = 0;
+        foreach ($returns as $return) {
+            if ((int) $return->expense_hotel_id !== (int) $hotel->id
+                || (int) $return->recorded_by !== (int) $shift->cashier_id
+                || $return->currency !== $shift->currency || (int) $return->amount_minor <= 0) {
+                throw new HttpException(409, 'Cash return is inconsistent. Investigate before reconciliation.');
+            }
+            $returnTotal = $this->checkedAdd($returnTotal, (int) $return->amount_minor);
+        }
+        $amount = $this->checkedAdd($amount, $returnTotal);
         // Preserve an impossible negative expectation as a discrepancy rather
         // than hiding actual payouts or preventing the cashier from counting.
         $amount -= $payoutTotal;
         return [
+            'expenseCashReturnTotalMinor' => $returnTotal,
+            'expenseCashReturnCount' => $returns->count(),
+            'unreviewedExpenseCashReturnCount' => $returns->filter(fn ($r) => $r->decision !== 'approve')->count(),
+            'expenseCashReturns' => $returns->map(fn ($r) => [
+                'id' => (string) $r->id, 'expenseId' => (string) $r->expense_id,
+                'amountMinor' => (int) $r->amount_minor, 'payee' => $r->payee,
+                'evidenceReference' => $r->evidence_reference, 'reviewStatus' => $r->decision === 'approve' ? 'approved' : ($r->decision === 'flag' ? 'flagged' : 'pending'),
+                'createdAt' => $r->created_at,
+            ])->all(),
             'expensePayoutTotalMinor' => $payoutTotal,
             'expensePayoutCount' => $payouts->count(),
             'expensePayouts' => $payouts->map(fn (object $p): array => [
@@ -148,6 +176,9 @@ final class CashierShiftService
             'expectedCashMinor' => $shift->status === 'open' ? null : (int) $shift->expected_cash_minor,
             'countedCashMinor' => $shift->counted_cash_minor === null ? null : (int) $shift->counted_cash_minor,
             'varianceMinor' => $shift->variance_minor === null ? null : (int) $shift->variance_minor,
+            'expenseCashReturnTotalMinor' => $calc['expenseCashReturnTotalMinor'],
+            'expenseCashReturnCount' => $calc['expenseCashReturnCount'],
+            'unreviewedExpenseCashReturnCount' => $calc['unreviewedExpenseCashReturnCount'],
             'expensePayoutTotalMinor' => $calc['expensePayoutTotalMinor'],
             'expensePayoutCount' => $calc['expensePayoutCount'],
             'receiptCount' => $calc['receiptCount'],
@@ -156,7 +187,7 @@ final class CashierShiftService
             'reviewedBy' => $shift->reviewed_by === null ? null : (string) $shift->reviewed_by,
             'openedAt' => $shift->opened_at, 'submittedAt' => $shift->submitted_at,
             'reconciledAt' => $shift->reconciled_at,
-            ...($includeReceipts ? ['receipts' => $calc['receipts'], 'expensePayouts' => $calc['expensePayouts']] : []),
+            ...($includeReceipts ? ['receipts' => $calc['receipts'], 'expensePayouts' => $calc['expensePayouts'], 'expenseCashReturns' => $calc['expenseCashReturns']] : []),
         ];
     }
 
@@ -370,7 +401,7 @@ final class CashierShiftService
                 throw new HttpException(409, 'Shift receipts or payouts changed after submission.');
             }
             if ($decision === 'reconcile'
-                && ((int) $shift->expected_cash_minor < 0 || (int) $shift->variance_minor !== 0 || $calc['unconfirmedReceiptCount'] > 0)) {
+                && ((int) $shift->expected_cash_minor < 0 || (int) $shift->variance_minor !== 0 || $calc['unconfirmedReceiptCount'] > 0 || $calc['unreviewedExpenseCashReturnCount'] > 0)) {
                 throw new HttpException(409, 'Variance or unreviewed/rejected payments require a flagged investigation.');
             }
             $status = $decision === 'reconcile' ? 'reconciled' : 'flagged';
