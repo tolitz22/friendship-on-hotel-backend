@@ -131,7 +131,8 @@ final class FrontDeskReservationController
         $input = $request->validate([
             'expectedCheckOut' => ['required', 'date_format:Y-m-d'],
             'checkOut' => ['required', 'date_format:Y-m-d', 'after:expectedCheckOut'],
-            'expectedNightlyMinor' => ['sometimes', 'required', 'integer', 'min:0'],
+            'expectedNightlyMinor' => ['sometimes', 'required', 'integer', 'min:0', 'prohibits:expectedQuoteToken'],
+            'expectedQuoteToken' => ['sometimes', 'required', 'string', 'regex:/^[a-f0-9]{64}$/'],
         ]);
 
         return response()->json(['data' => $service->extend($hotel, (int) $request->user()->id, (int) $booking, $input)]);
