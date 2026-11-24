@@ -212,7 +212,20 @@ final class GroupReservationController
             'rooms.*.guestId' => ['required', 'integer', 'min:1'],
             'rooms.*.roomTypeId' => ['required', 'integer', 'min:1'],
             'rooms.*.ratePlanId' => ['nullable', 'integer', 'min:1'],
+            'rooms.*.dynamicQuoteToken' => ['sometimes', 'required', 'string', 'regex:/^[a-f0-9]{64}$/'],
+            'rooms.*.corporateCode' => ['nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'rooms.*.promoCode' => ['nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/'],
         ])->validate();
+
+        $dynamicCount = 0;
+        foreach ($data['rooms'] as $room) {
+            $hasToken = isset($room['dynamicQuoteToken']);
+            abort_if(isset($room['corporateCode'], $room['promoCode']), 422, 'Choose one eligibility code per room.');
+            abort_if((isset($room['corporateCode']) || isset($room['promoCode'])) && ! $hasToken, 422, 'Review the dynamic quote for every eligibility code.');
+            abort_if($hasToken && ! isset($room['ratePlanId']), 422, 'Select a rate plan for every dynamic quote.');
+            $dynamicCount += (int) $hasToken;
+        }
+        abort_if($dynamicCount > 0 && $dynamicCount !== count($data['rooms']), 422, 'Review dynamic pricing for every room in the group.');
 
         $data['name'] = trim($data['name']);
         if ($data['name'] === '') {
@@ -227,6 +240,11 @@ final class GroupReservationController
             'rooms' => array_map(static fn (array $room): array => [
                 'guestId' => (int) $room['guestId'], 'roomTypeId' => (int) $room['roomTypeId'],
                 'ratePlanId' => isset($room['ratePlanId']) ? (int) $room['ratePlanId'] : null,
+                ... (isset($room['dynamicQuoteToken']) ? [
+                    'dynamicQuoteToken' => $room['dynamicQuoteToken'],
+                    'corporateCode' => $room['corporateCode'] ?? null,
+                    'promoCode' => $room['promoCode'] ?? null,
+                ] : []),
             ], $data['rooms']),
         ], JSON_THROW_ON_ERROR));
 
@@ -294,6 +312,11 @@ final class GroupReservationController
                     'roomTypeId' => (int) $room['roomTypeId'],
                     'checkIn' => $data['checkIn'], 'checkOut' => $data['checkOut'],
                     ... (isset($room['ratePlanId']) ? ['ratePlanId' => (int) $room['ratePlanId']] : []),
+                    ... (isset($room['dynamicQuoteToken']) ? [
+                        'dynamicQuoteToken' => $room['dynamicQuoteToken'],
+                        'corporateCode' => $room['corporateCode'] ?? null,
+                        'promoCode' => $room['promoCode'] ?? null,
+                    ] : []),
                 ]);
                 DB::table('group_reservation_members')->insert([
                     'hotel_id' => $hotel->id, 'group_reservation_id' => $groupId,
