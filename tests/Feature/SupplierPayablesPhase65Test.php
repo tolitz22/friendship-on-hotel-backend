@@ -101,3 +101,43 @@ it('posts invoices and settles them once while preserving historical payable and
     $this->assertDatabaseCount('financial_posting_journals', 3);
     $this->assertDatabaseCount('folio_payment_records', 0);
 });
+
+
+it('rejects new postings on closed dates but recovers committed transactions and settles inactive suppliers', function (): void {
+    $hotel = Hotel::create(['name' => 'Supplier recovery', 'currency' => 'PHP']);
+    $admin = supplier65User($hotel, 'admin');
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $path = $base.'/supplier-bills';
+    config(['financial_accounting.enable_supplier_billing' => true]);
+    Sanctum::actingAs($admin, ['hotel:read', 'hotel:write']);
+    DB::table('financial_business_clocks')->insert(['hotel_id' => $hotel->id, 'business_date' => '2026-11-24', 'status' => 'open']);
+    DB::table('financial_accounting_periods')->insert(['hotel_id' => $hotel->id, 'starts_on' => '2026-11-01', 'ends_on' => '2026-11-30', 'status' => 'open']);
+    $supplierInput = ['name' => 'Recovery Laundry', 'paymentTermsDays' => 0, 'isActive' => true];
+    $supplier = $this->postJson($base.'/suppliers', $supplierInput)->assertCreated()->json('data');
+    $invoice = ['requestKey' => 'recovery-invoice-65', 'supplierId' => $supplier['id'], 'invoiceReference' => 'REC-65',
+        'description' => 'Laundry', 'department' => 'rooms', 'category' => 'laundry',
+        'invoiceDate' => '2026-11-24', 'serviceDate' => '2026-11-24', 'dueDate' => '2026-11-24', 'amountMinor' => 480000];
+    $bill = $this->postJson($path, $invoice)->assertCreated()->json('data.billId');
+    $pay = $path.'/'.$bill.'/payments';
+    $payment = ['requestKey' => 'recovery-payment-65', 'amountMinor' => 200000, 'paymentSource' => 'hotel_bank', 'evidenceReference' => 'BANK-REC-65'];
+    $this->postJson($pay, $payment)->assertCreated();
+    DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['status' => 'closed']);
+    $newInvoice = array_replace($invoice, ['requestKey' => 'recovery-new-65', 'invoiceReference' => 'REC-66']);
+    $newPayment = array_replace($payment, ['requestKey' => 'recovery-new-pay-65', 'amountMinor' => 280000, 'evidenceReference' => 'BANK-REC-66']);
+    $this->postJson($path, $newInvoice)->assertStatus(409);
+    $this->postJson($pay, $newPayment)->assertUnprocessable();
+    $this->postJson($path, $invoice)->assertOk()->assertJsonPath('data.replayed', true);
+    $this->postJson($pay, $payment)->assertOk()->assertJsonPath('data.replayed', true);
+    $this->postJson($pay, array_replace($payment, ['amountMinor' => 1]))->assertStatus(409);
+    $this->assertDatabaseCount('financial_posting_journals', 2);
+    DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['status' => 'open', 'business_date' => '2026-11-25']);
+    $this->putJson($base.'/suppliers/'.$supplier['id'], array_replace($supplierInput, ['isActive' => false, 'version' => $supplier['version']]))->assertOk();
+    $this->postJson($path, $newInvoice)->assertStatus(409);
+    $this->postJson($pay, $newPayment)->assertCreated()->assertJsonPath('data.paymentStatus', 'paid');
+    $this->getJson($path.'/aging?date=2026-11-26')->assertUnprocessable();
+    $this->getJson($path.'/aging?date=2026-11-24')->assertOk()->assertJsonPath('data.outstandingMinor', 280000);
+    $this->getJson($path.'/aging')->assertOk()->assertJsonPath('data.outstandingMinor', 0)->assertJsonPath('data.reconciled', true);
+    $this->assertDatabaseCount('supplier_bills', 1);
+    $this->assertDatabaseCount('supplier_bill_payments', 2);
+    $this->assertDatabaseCount('financial_posting_journals', 3);
+});
