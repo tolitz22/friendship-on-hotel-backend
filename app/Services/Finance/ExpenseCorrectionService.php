@@ -59,6 +59,9 @@ final class ExpenseCorrectionService
                 }
                 return ['correctionId' => (string) $existing->id, 'replayed' => true];
             }
+            abort_if($data['kind'] === 'amount_correction' && DB::table('expense_cash_returns')
+                ->where('hotel_id', $hotel->id)->where('expense_id', $expenseId)->exists(), 409,
+                'Amount corrections after a cash return require a separate controlled adjustment.');
             // One approved correction per voucher in this initial release.
             // Rejected requests can be replaced; no concurrent pending requests.
             $unresolved = DB::table('hotel_expense_corrections as c')
