@@ -5,6 +5,8 @@ declare(strict_types=1);
 return [
     // Keep new expense writes disabled until staging acceptance and finance sign-off.
     'enable_expense_posting' => (bool) env('FINANCE_ENABLE_EXPENSE_POSTING', false),
+    // Separate rollout control; never enable until correction and refund acceptance passes.
+    'enable_expense_corrections' => (bool) env('FINANCE_ENABLE_EXPENSE_CORRECTIONS', false),
     /*
      * OFF by default. Requires staging validation, tax registration review,
      * historical folio assessment/backfill and formal finance sign-off.
