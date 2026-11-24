@@ -161,7 +161,29 @@ final class NightAuditFinancialReportController
             ->where('l.account_code', 'operating_expense')
             ->selectRaw('COALESCE(SUM(l.debit_minor), 0) as debits, COALESCE(SUM(l.credit_minor), 0) as credits')
             ->first();
+        $expenseSources = DB::table('financial_posting_journals as j')
+            ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
+            ->where('j.hotel_id', $hotel->id)->where('j.business_date', $date)
+            ->whereIn('j.source_type', ['cash_expense', 'cash_expense_adjustment', 'cash_expense_reversal', 'cash_expense_refund', 'expense_clearing_cash_return'])
+            ->selectRaw('j.source_type, l.account_code, SUM(l.debit_minor) as debits, SUM(l.credit_minor) as credits')
+            ->groupBy('j.source_type', 'l.account_code')->get();
+        $movement = static function (string $source, string $account) use ($expenseSources): int {
+            $row = $expenseSources->first(fn ($r) => $r->source_type === $source && $r->account_code === $account);
+            return (int) ($row->debits ?? 0) - (int) ($row->credits ?? 0);
+        };
+        // Cumulative signed clearing balance through the chosen accounting date.
+        $clearing = DB::table('financial_posting_journals as j')
+            ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
+            ->where('j.hotel_id', $hotel->id)->where('j.business_date', '<=', $date)
+            ->where('l.account_code', 'expense_correction_clearing')
+            ->selectRaw('COALESCE(SUM(l.debit_minor), 0) as debits, COALESCE(SUM(l.credit_minor), 0) as credits')->first();
         $expenses = [
+            'grossExpenseMinor' => $movement('cash_expense', 'operating_expense'),
+            'accountingAdjustmentMinor' => $movement('cash_expense_adjustment', 'operating_expense') + $movement('cash_expense_reversal', 'operating_expense'),
+            'supplierRefundMinor' => -$movement('cash_expense_refund', 'operating_expense'),
+            'clearingCashReturnMinor' => $movement('expense_clearing_cash_return', 'cashier_cash'),
+            'physicalCashReturnMinor' => $movement('cash_expense_refund', 'cashier_cash') + $movement('expense_clearing_cash_return', 'cashier_cash'),
+            'clearingBalanceMinor' => (int) $clearing->debits - (int) $clearing->credits,
             'postedExpenseMinor' => (int) $expenseAccounts->debits,
             'reversedExpenseMinor' => (int) $expenseAccounts->credits,
             // Credits include downward corrections, not necessarily cash refunds.
