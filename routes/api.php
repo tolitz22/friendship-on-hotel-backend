@@ -58,6 +58,7 @@ use App\Http\Controllers\Api\RoomConflictDiagnosticsController;
 use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
+use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\GuestIncidentalChargeController;
 use App\Http\Controllers\Api\OccupancyVerificationController;
 use App\Http\Controllers\Api\OccupancyInvestigationController;
@@ -196,6 +197,12 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('booking')->middleware('hotel.permission:approval.request')
                 ->middleware('throttle:20,1');
 
+            Route::get('/expenses', [ExpenseController::class, 'index'])->middleware('hotel.permission:expense.read');
+            Route::get('/expenses/policy', [ExpenseController::class, 'policy'])->middleware('hotel.permission:expense.read');
+            Route::put('/expenses/policy', [ExpenseController::class, 'updatePolicy'])->middleware('hotel.permission:expense.policy')->middleware('throttle:10,1');
+            Route::get('/expenses/{expense}', [ExpenseController::class, 'show'])->whereNumber('expense')->middleware('hotel.permission:expense.read');
+            Route::post('/expenses/{expense}/review', [ExpenseController::class, 'review'])->whereNumber('expense')->middleware('hotel.permission:expense.review')->middleware('throttle:20,1');
+            Route::post('/cashier-shifts/{shift}/expense-payouts', [ExpenseController::class, 'record'])->whereNumber('shift')->middleware('hotel.permission:cashier.write')->middleware('hotel.permission:expense.record')->middleware('throttle:20,1');
             Route::get('/cashier-shifts', [CashierShiftController::class, 'index'])->middleware('hotel.permission:cashier.read');
             Route::get('/cashier-shifts/current', [CashierShiftController::class, 'current'])->middleware('hotel.permission:cashier.read');
             Route::get('/cashier-shifts/{shift}', [CashierShiftController::class, 'show'])->whereNumber('shift')->middleware('hotel.permission:cashier.read');
