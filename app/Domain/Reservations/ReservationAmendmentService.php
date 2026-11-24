@@ -44,8 +44,8 @@ final class ReservationAmendmentService
             }
 
             $today = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
-            if ($today >= $booking->check_in || $newStay->arrival < $today) {
-                throw new HttpException(409, 'Stay dates can only be amended before planned arrival.');
+            if ($newStay->arrival < $today || ($today >= $booking->check_in && $today < $booking->check_out)) {
+                throw new HttpException(409, 'Choose dates on or after today. A confirmed stay currently in its scheduled arrival window cannot be amended here.');
             }
 
             if ($booking->check_in === $newStay->arrival && $booking->check_out === $newStay->departure) {
