@@ -62,8 +62,12 @@ final class EmployeeReimbursementPaymentService
                 return $this->result($claim, (int) $existing->id, (int) $existing->journal_id, $paid, true);
             }
             abort_if($facts['amount_minor'] > $outstanding, 409, 'Payment exceeds the outstanding claim balance.');
-            // Drawer recording is deliberately disabled until shift reconciliation supports this source.
-            abort_if($facts['payment_source'] === 'cashier_drawer', 409, 'Cashier reimbursement integration is not yet enabled.');
+            if ($facts['payment_source'] === 'cashier_drawer') {
+                $shift = DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
+                    ->where('id', $facts['shift_id'])->lockForUpdate()->first();
+                abort_unless($shift !== null && (int) $shift->cashier_id === $actor, 404);
+                abort_unless($shift->status === 'open' && $shift->currency === 'PHP', 409, 'An open PHP cashier shift is required.');
+            }
             // Initial release: a single evidence reference per payment in this property.
             // Bulk allocations require a separately controlled workflow.
             abort_if((clone $base)->where('payment_source', $facts['payment_source'])
@@ -76,13 +80,23 @@ final class EmployeeReimbursementPaymentService
                 (int) $hotel->id, 'employee-payment:'.$data['requestKey'], 'employee_reimbursement_payment',
                 (string) $claimId, 'Employee reimbursement recorded from payment evidence', [
                     ['account_code' => 'employee_payable', 'debit_minor' => $facts['amount_minor'], 'credit_minor' => 0],
-                    ['account_code' => 'hotel_bank', 'debit_minor' => 0, 'credit_minor' => $facts['amount_minor']],
+                    ['account_code' => $facts['payment_source'] === 'cashier_drawer' ? 'cashier_cash' : 'hotel_bank', 'debit_minor' => 0, 'credit_minor' => $facts['amount_minor']],
                 ], $actor
             );
             $date = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('id', $journal)->value('business_date');
             $payment = DB::table('employee_reimbursement_payments')->insertGetId($facts + [
                 'journal_id' => $journal, 'business_date' => $date, 'created_at' => now(),
             ]);
+            if ($facts['shift_id'] !== null) {
+                DB::table('cashier_shift_events')->insert([
+                    'hotel_id' => $hotel->id, 'shift_id' => $facts['shift_id'], 'actor_id' => $actor,
+                    'event' => 'employee_reimbursement_payment', 'details' => json_encode([
+                        'claimId' => (string) $claimId, 'paymentId' => (string) $payment,
+                        'amountMinor' => $facts['amount_minor'], 'employeeName' => $claim->employee_name_snapshot,
+                        'description' => $claim->description,
+                    ], JSON_THROW_ON_ERROR), 'created_at' => now(),
+                ]);
+            }
             return $this->result($claim, (int) $payment, $journal, $paid + $facts['amount_minor'], false);
         }, 3);
     }
