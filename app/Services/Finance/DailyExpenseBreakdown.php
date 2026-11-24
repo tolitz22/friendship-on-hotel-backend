@@ -56,18 +56,27 @@ final class DailyExpenseBreakdown
                     $join->on('e.journal_id', '=', 'j.id')->on('e.hotel_id', '=', 'j.hotel_id');
                 });
         }
+        if (Schema::hasTable('employee_expense_claims') && Schema::hasTable('employee_expense_claim_decisions')) {
+            $queries['employee_claim'] = (clone $base)->where('j.source_type', 'employee_expense_claim')
+                ->join('employee_expense_claim_decisions as d', function ($join): void {
+                    $join->on('d.journal_id', '=', 'j.id')->on('d.hotel_id', '=', 'j.hotel_id');
+                })->join('employee_expense_claims as e', function ($join): void {
+                    $join->on('e.id', '=', 'd.claim_id')->on('e.hotel_id', '=', 'j.hotel_id');
+                })->where('d.decision', 'approve');
+        }
         foreach ($queries as $kind => $query) {
+            $originalDate = $kind === 'employee_claim' ? 'd.business_date' : 'e.business_date';
             // Historical movement attribution uses the immutable original classification.
             // Later classification overlays belong to voucher history, not closed-day totals.
-            $rows = $query->selectRaw('j.id as journal_id, e.id as expense_id, e.department, e.description, e.business_date as original_date, SUM(CAST(l.debit_minor AS DECIMAL(20,0))) - SUM(CAST(l.credit_minor AS DECIMAL(20,0))) as net')
-                ->groupBy('j.id', 'e.id', 'e.department', 'e.description', 'e.business_date')
+            $rows = $query->selectRaw("j.id as journal_id, e.id as expense_id, e.department, e.description, {$originalDate} as original_date, SUM(CAST(l.debit_minor AS DECIMAL(20,0))) - SUM(CAST(l.credit_minor AS DECIMAL(20,0))) as net")
+                ->groupBy('j.id', 'e.id', 'e.department', 'e.description', $originalDate)
                 ->orderBy('j.id')->cursor();
             foreach ($rows as $row) {
                 $net = (int) $row->net;
                 $department = $row->department;
                 $departments[$department] ??= ['department' => $department, 'grossMinor' => 0, 'adjustmentMinor' => 0, 'refundMinor' => 0, 'netMinor' => 0];
                 $departments[$department][match ($kind) {
-                    'expense', 'supplier_bill' => 'grossMinor', 'adjustment' => 'adjustmentMinor', default => 'refundMinor',
+                    'expense', 'supplier_bill', 'employee_claim' => 'grossMinor', 'adjustment' => 'adjustmentMinor', default => 'refundMinor',
                 }] += $kind === 'refund' ? -$net : $net;
                 $departments[$department]['netMinor'] += $net;
                 $attributed += $net;
