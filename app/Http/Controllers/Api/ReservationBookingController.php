@@ -52,6 +52,11 @@ final class ReservationBookingController
         )]);
     }
 
+    public function noShow(Request $request, Hotel $hotel, string $booking, ReservationBookingService $bookings): JsonResponse
+    {
+        return response()->json(['data' => $bookings->cancel($hotel, (int) $request->user()->id, (int) $booking, true)]);
+    }
+
     public function cancel(Request $request, Hotel $hotel, string $booking, ReservationBookingService $bookings): JsonResponse
     {
         $result = $bookings->cancel($hotel, (int) $request->user()->id, (int) $booking);
