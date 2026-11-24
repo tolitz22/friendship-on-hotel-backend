@@ -14,14 +14,14 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
  */
 final class ReservationAmendmentService
 {
-    public function amend(Hotel $hotel, int $actor, int $bookingId, array $input): array
+    public function amend(Hotel $hotel, int $actor, int $bookingId, array $input, bool $preview = false): array
     {
         $newStay = new StayPeriod($input['checkIn'], $input['checkOut']);
         if ($newStay->nights() > (int) config('booking.maximum_nights', 31)) {
             throw new HttpException(422, 'Requested stay exceeds the maximum nights.');
         }
 
-        return DB::transaction(function () use ($hotel, $actor, $bookingId, $newStay): array {
+        return DB::transaction(function () use ($hotel, $actor, $bookingId, $newStay, $preview): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $snapshot = DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
             abort_unless($snapshot !== null, 404);
@@ -38,7 +38,7 @@ final class ReservationAmendmentService
 
             // Prevent changing priced nights without an approved repricing
             // and charge-reversal workflow. Original folio stays immutable.
-            if (DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+            if (! $preview && DB::table('reservation_folios')->where('hotel_id', $hotel->id)
                 ->where('reservation_record_id', $bookingId)->exists()) {
                 throw new HttpException(409, 'Priced reservations require the future repricing workflow to amend dates.');
             }
@@ -48,7 +48,7 @@ final class ReservationAmendmentService
                 throw new HttpException(409, 'Choose dates on or after today. A confirmed stay currently in its scheduled arrival window cannot be amended here.');
             }
 
-            if ($booking->check_in === $newStay->arrival && $booking->check_out === $newStay->departure) {
+            if (! $preview && $booking->check_in === $newStay->arrival && $booking->check_out === $newStay->departure) {
                 return ['id' => (string) $bookingId, 'checkIn' => $booking->check_in,
                     'checkOut' => $booking->check_out, 'unchanged' => true];
             }
@@ -89,6 +89,38 @@ final class ReservationAmendmentService
                 if ($blocked || $collision) {
                     throw new HttpException(409, 'Assigned physical room conflicts with amended nights.');
                 }
+            }
+
+            if ($preview) {
+                $folioService = app(FolioAccountingService::class);
+                $folio = $folioService->findFolio($hotel, $bookingId, true);
+                $folioService->assertNotSigned($hotel, $folio);
+                $entries = DB::table('folio_entries')->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
+                    ->where('entry_type', 'room_night')->orderBy('stay_date')->orderBy('id')->get();
+                $planIds = $entries->pluck('rate_plan_id')->unique()->values();
+                abort_if($entries->isEmpty() || $planIds->count() !== 1 || $planIds->first() === null, 409, 'A single original rate plan is required for automatic repricing.');
+                $snapshot = DB::table('booking_pricing_snapshots')->where('hotel_id', $hotel->id)->where('reservation_record_id', $bookingId)->first();
+                $original = $snapshot === null ? [] : json_decode($snapshot->snapshot, true, 512, JSON_THROW_ON_ERROR);
+                $rate = $snapshot !== null
+                    ? app(BookingDynamicQuoteService::class)->quote($hotel, (int) $booking->room_type_id, (int) $planIds->first(), $newStay, $original['corporateCode'] ?? null, $original['promoCode'] ?? null)
+                    : app(RoomRateQuoteService::class)->quote($hotel, (int) $booking->room_type_id, (int) $planIds->first(), $newStay);
+                abort_if($rate['currency'] !== $folio->currency, 409, 'The new rate currency differs from the guest folio.');
+                $oldSubtotal = (int) $entries->sum('amount_minor');
+                $summary = $folioService->summaryFor($folio);
+                $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->first();
+                $earliest = min($booking->check_in, $newStay->arrival);
+                $latest = max($booking->check_out, $newStay->departure);
+                $closed = ($clock !== null && $earliest < $clock->business_date) || DB::table('financial_day_closes')->where('hotel_id', $hotel->id)
+                    ->where('status', 'completed')->where('business_date', '>=', $earliest)->where('business_date', '<', $latest)->exists();
+                return [
+                    'id' => (string) $bookingId, 'oldCheckIn' => $booking->check_in, 'oldCheckOut' => $booking->check_out,
+                    'checkIn' => $newStay->arrival, 'checkOut' => $newStay->departure, 'currency' => $folio->currency,
+                    'originalRoomSubtotalMinor' => $oldSubtotal, 'proposedRoomSubtotalMinor' => $rate['roomSubtotalMinor'],
+                    'differenceMinor' => $rate['roomSubtotalMinor'] - $oldSubtotal,
+                    'nightlyRates' => $rate['nightlyRates'] ?? array_map(fn ($date) => ['date' => $date, 'amountMinor' => $rate['nightlyMinor'], 'source' => 'base', 'ruleId' => null], $rate['nights']),
+                    'policyTerms' => $rate['policyTerms'] ?? null, 'currentFolioSummary' => $summary,
+                    'closedPeriodAffected' => $closed, 'previewOnly' => true, 'saved' => false,
+                ];
             }
 
             DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->update([
