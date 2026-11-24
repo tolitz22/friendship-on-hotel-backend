@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Supplier financial posting requires separate acceptance and finance sign-off.
+    'enable_supplier_billing' => (bool) env('FINANCE_ENABLE_SUPPLIER_BILLING', false),
     // Keep new expense writes disabled until staging acceptance and finance sign-off.
     'enable_expense_posting' => (bool) env('FINANCE_ENABLE_EXPENSE_POSTING', false),
     // Separate rollout control; never enable until correction and refund acceptance passes.
