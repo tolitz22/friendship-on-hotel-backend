@@ -45,6 +45,45 @@ final class ExpenseCorrectionController
         return response()->json(['data' => $service->review($hotel, (int) $request->user()->id, (int) $cashReturn, $request->all())]);
     }
 
+    // Exact voucher lookup only; do not expose the management register or reviewer notes.
+    public function returnQuote(Request $request, Hotel $hotel, string $shift, string $expense): JsonResponse
+    {
+        $this->enabled();
+        abort_unless(DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
+            ->where('id', (int) $shift)->where('cashier_id', $request->user()->id)
+            ->where('status', 'open')->where('currency', 'PHP')->exists(), 404);
+        $row = DB::table('hotel_expenses')->where('hotel_id', $hotel->id)->where('id', (int) $expense)
+            ->where('currency', 'PHP')->where('payment_source', 'cashier_drawer')->first();
+        abort_unless($row !== null, 404);
+        $returns = DB::table('expense_cash_returns')->where('hotel_id', $hotel->id)->where('expense_id', $row->id);
+        $remaining = max(0, (int) $row->amount_minor - (int) (clone $returns)->sum('amount_minor'));
+        $correction = DB::table('hotel_expense_corrections as c')
+            ->leftJoin('hotel_expense_correction_decisions as d', function ($join): void {
+                $join->on('d.correction_id', '=', 'c.id')->on('d.hotel_id', '=', 'c.hotel_id');
+            })
+            ->where('c.hotel_id', $hotel->id)->where('c.expense_id', $row->id)
+            ->where('c.kind', 'amount_correction')
+            ->where(fn ($q) => $q->whereNull('d.id')->orWhere('d.decision', 'approve'))
+            ->first(['c.id', 'c.corrected_amount_minor', 'd.decision', 'd.journal_id']);
+        $correctionId = null;
+        $blocked = null;
+        if ($correction !== null) {
+            if ($correction->decision !== 'approve' || $correction->journal_id === null) {
+                $remaining = 0;
+                $blocked = 'Amount correction is awaiting approval.';
+            } else {
+                $correctionId = (string) $correction->id;
+                $settled = (int) (clone $returns)->where('correction_id', $correction->id)->sum('amount_minor');
+                $remaining = min($remaining, max(0, (int) $row->amount_minor - (int) $correction->corrected_amount_minor - $settled));
+            }
+        }
+        return response()->json(['data' => [
+            'hotelId' => (string) $hotel->id, 'shiftId' => $shift, 'expenseId' => (string) $row->id,
+            'payee' => $row->payee, 'description' => $row->description, 'originalAmountMinor' => (int) $row->amount_minor,
+            'maximumReturnMinor' => $remaining, 'correctionId' => $correctionId, 'blockedReason' => $blocked,
+        ]]);
+    }
+
     public function history(Hotel $hotel, string $expense): JsonResponse
     {
         $original = DB::table('hotel_expenses')->where('hotel_id', $hotel->id)->where('id', (int) $expense)->first();
