@@ -132,6 +132,7 @@ jobs:
           php scripts/real-engine-booking-race.php
           php scripts/real-engine-group-race.php
           php scripts/real-engine-supplier-payment-race.php
+          php scripts/real-engine-reimbursement-race.php
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
 
@@ -195,5 +196,6 @@ jobs:
           php scripts/real-engine-booking-race.php
           php scripts/real-engine-group-race.php
           php scripts/real-engine-supplier-payment-race.php
+          php scripts/real-engine-reimbursement-race.php
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'

@@ -270,11 +270,11 @@ it('rejects privilege escalation, manager customization and stale permission edi
     ])->assertUnprocessable()->assertJsonValidationErrors(['permissions']);
     $this->patchJson($base.$worker->id,[
         'permissions'=>[],'expectedRole'=>'housekeeping',
-        'expectedPermissions'=>['occupancy.read','occupancy.observe','housekeeping.assigned'],
+        'expectedPermissions'=>\App\Http\Middleware\EnsureHotelPermission::forRole('housekeeping'),
     ])->assertOk();
     $this->patchJson($base.$worker->id,[
         'permissions'=>['occupancy.read'],
-        'expectedPermissions'=>['occupancy.read','occupancy.observe','housekeeping.assigned'],
+        'expectedPermissions'=>\App\Http\Middleware\EnsureHotelPermission::forRole('housekeeping'),
     ])->assertStatus(409);
     expect(\App\Models\HotelMembership::where('hotel_id',$hotel->id)
         ->where('user_id',$worker->id)->first()->permission_overrides)->toBe([]);
@@ -297,7 +297,7 @@ it('revokes assigned housekeeping actions immediately without losing task owners
     $this->patchJson($base.'/staff/'.$cleaner->id,[
         'permissions'=>['occupancy.read','occupancy.observe'],
         'expectedRole'=>'housekeeping',
-        'expectedPermissions'=>['occupancy.read','occupancy.observe','housekeeping.assigned'],
+        'expectedPermissions'=>\App\Http\Middleware\EnsureHotelPermission::forRole('housekeeping'),
     ])->assertOk();
 
     Sanctum::actingAs($cleaner,['hotel:read']);

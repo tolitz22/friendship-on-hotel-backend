@@ -28,6 +28,7 @@ final class HotelStaffController
         'cashier.write' => ['cashier.read','finance.read'],
         'approval.request' => ['approval.read','reservation.read'],
         'keycard.request' => ['keycard.read'],
+        'reimbursement.submit' => ['reimbursement.read_own'],
     ];
 
     private function staffList(Hotel $hotel): array
@@ -67,6 +68,11 @@ final class HotelStaffController
             ['key'=>'occupancy.read','label'=>'View occupancy information','group'=>'Operations'],
             ['key'=>'housekeeping.assigned','label'=>'Work on assigned housekeeping tasks','group'=>'Operations'],
             ['key'=>'maintenance.assigned','label'=>'Work on assigned maintenance tasks','group'=>'Operations'],
+            ['key'=>'reimbursement.read_own','label'=>'View own expense claims','group'=>'Reimbursements'],
+            ['key'=>'reimbursement.submit','label'=>'Submit own expense claims','group'=>'Reimbursements'],
+            ['key'=>'reimbursement.read_all','label'=>'View all employee claims','group'=>'Reimbursements'],
+            ['key'=>'reimbursement.review','label'=>'Review employee claims','group'=>'Reimbursements'],
+            ['key'=>'reimbursement.pay','label'=>'Record employee reimbursements','group'=>'Reimbursements'],
             ['key'=>'staff.manage','label'=>'Manage staff access','group'=>'Management'],
             ['key'=>'finance.approve','label'=>'Authorize restricted financial actions','group'=>'Management'],
         ];
