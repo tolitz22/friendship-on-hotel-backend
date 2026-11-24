@@ -201,6 +201,7 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('throttle:20,1');
 
             Route::get('/supplier-bills', [SupplierBillController::class, 'index'])->middleware('hotel.permission:supplier.read');
+            Route::get('/supplier-bills/aging', [SupplierBillController::class, 'aging'])->middleware('hotel.permission:supplier.read');
             Route::get('/supplier-bills/{bill}', [SupplierBillController::class, 'show'])->whereNumber('bill')->middleware('hotel.permission:supplier.read');
             Route::post('/supplier-bills', [SupplierBillController::class, 'store'])->middleware('hotel.permission:supplier.bill.post')->middleware('throttle:20,1');
             Route::post('/supplier-bills/{bill}/payments', [SupplierBillController::class, 'pay'])->whereNumber('bill')->middleware('hotel.permission:supplier.bill.pay')->middleware('throttle:20,1');
