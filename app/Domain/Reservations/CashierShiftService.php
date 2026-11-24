@@ -76,7 +76,45 @@ final class CashierShiftService
                 $unconfirmed++;
             }
         }
+        $payouts = DB::table('cashier_expense_payouts as p')
+            ->leftJoin('hotel_expenses as e', 'e.id', '=', 'p.expense_id')
+            ->where('p.hotel_id', $hotel->id)->where('p.shift_id', $shift->id)
+            ->orderBy('p.id')->get(['p.id', 'p.expense_id', 'p.amount_minor',
+                'e.hotel_id as expense_hotel_id', 'e.amount_minor as expense_amount_minor',
+                'e.payment_source', 'e.currency', 'e.recorded_by', 'e.payee', 'e.description',
+                'e.department', 'e.category', 'e.review_status', 'p.created_at']);
+        $payoutTotal = 0;
+        foreach ($payouts as $payout) {
+            if ((int) $payout->expense_hotel_id !== (int) $hotel->id
+                || (int) $payout->recorded_by !== (int) $shift->cashier_id
+                || $payout->payment_source !== 'cashier_drawer'
+                || $payout->currency !== $shift->currency
+                || (int) $payout->amount_minor <= 0
+                || (int) $payout->amount_minor !== (int) $payout->expense_amount_minor) {
+                throw new HttpException(409, 'Expense payout is inconsistent. Investigate before reconciliation.');
+            }
+            $payoutTotal = $this->checkedAdd($payoutTotal, (int) $payout->amount_minor);
+        }
+        // The existing expected-cash column is unsigned. Do not fabricate a
+        // zero balance when recorded payouts exceed all known cash receipts.
+        if ($payoutTotal > $amount) {
+            throw new HttpException(409, 'Recorded payouts exceed available recorded cash. Investigate before reconciliation.');
+        }
+        $amount -= $payoutTotal;
         return [
+            'expensePayoutTotalMinor' => $payoutTotal,
+            'expensePayoutCount' => $payouts->count(),
+            'expensePayouts' => $payouts->map(fn (object $p): array => [
+                'id' => (string) $p->id,
+                'expenseId' => (string) $p->expense_id,
+                'amountMinor' => (int) $p->amount_minor,
+                'payee' => $p->payee,
+                'description' => $p->description,
+                'department' => $p->department,
+                'category' => $p->category,
+                'reviewStatus' => $p->review_status,
+                'createdAt' => $p->created_at,
+            ])->all(),
             'expectedCashMinor' => $amount,
             'receiptCount' => $receipts->where('status', '!=', 'voided')->count(),
             'unconfirmedReceiptCount' => $unconfirmed,
@@ -111,13 +149,15 @@ final class CashierShiftService
             'expectedCashMinor' => $shift->status === 'open' ? null : (int) $shift->expected_cash_minor,
             'countedCashMinor' => $shift->counted_cash_minor === null ? null : (int) $shift->counted_cash_minor,
             'varianceMinor' => $shift->variance_minor === null ? null : (int) $shift->variance_minor,
+            'expensePayoutTotalMinor' => $calc['expensePayoutTotalMinor'],
+            'expensePayoutCount' => $calc['expensePayoutCount'],
             'receiptCount' => $calc['receiptCount'],
             'unconfirmedReceiptCount' => $calc['unconfirmedReceiptCount'],
             'closingNote' => $shift->closing_note, 'managerNote' => $shift->manager_note,
             'reviewedBy' => $shift->reviewed_by === null ? null : (string) $shift->reviewed_by,
             'openedAt' => $shift->opened_at, 'submittedAt' => $shift->submitted_at,
             'reconciledAt' => $shift->reconciled_at,
-            ...($includeReceipts ? ['receipts' => $calc['receipts']] : []),
+            ...($includeReceipts ? ['receipts' => $calc['receipts'], 'expensePayouts' => $calc['expensePayouts']] : []),
         ];
     }
 
@@ -311,6 +351,8 @@ final class CashierShiftService
             $this->event($hotel, $id, $actor, 'submitted', [
                 'expectedCashMinor' => $expected, 'countedCashMinor' => $count,
                 'varianceMinor' => $variance, 'receiptCount' => $calc['receiptCount'],
+                'expensePayoutTotalMinor' => $calc['expensePayoutTotalMinor'],
+                'expensePayoutCount' => $calc['expensePayoutCount'],
                 'unconfirmedReceiptCount' => $calc['unconfirmedReceiptCount'],
             ]);
             return $this->present($hotel, $this->shift($hotel, $id), true);
@@ -326,7 +368,7 @@ final class CashierShiftService
             if ((int) $shift->cashier_id === $manager) throw new HttpException(403, 'A cashier cannot reconcile their own shift.');
             $calc = $this->expected($hotel, $shift);
             if ($calc['expectedCashMinor'] !== (int) $shift->expected_cash_minor) {
-                throw new HttpException(409, 'Shift receipts changed after submission.');
+                throw new HttpException(409, 'Shift receipts or payouts changed after submission.');
             }
             if ($decision === 'reconcile'
                 && ((int) $shift->variance_minor !== 0 || $calc['unconfirmedReceiptCount'] > 0)) {
