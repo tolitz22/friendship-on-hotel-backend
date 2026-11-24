@@ -34,6 +34,7 @@ final class SeasonalRateService
                 'name' => $input['name'], 'kind' => $input['kind'],
                 'starts_on' => $input['startsOn'], 'ends_on' => $input['endsOn'],
                 'nightly_minor' => $input['nightlyMinor'], 'created_by' => $actor,
+                'weekend_days' => $input['kind'] === 'weekend' ? json_encode($input['weekendDays'], JSON_THROW_ON_ERROR) : null,
                 'created_at' => now(), 'updated_at' => now(),
             ]);
         }, 3);
@@ -68,7 +69,13 @@ final class SeasonalRateService
         $nightlyRates = [];
         foreach ($base['nights'] as $date) {
             $matches = $rules->filter(fn ($rule) => $rule->starts_on <= $date && $rule->ends_on >= $date);
-            $rule = $matches->firstWhere('kind', 'date_override') ?? $matches->firstWhere('kind', 'seasonal');
+            $weekday = (int) (new \DateTimeImmutable($date))->format('N');
+            $weekend = $matches->first(fn ($rule) => $rule->kind === 'weekend'
+                && in_array($weekday, json_decode($rule->weekend_days ?? '[]', true, 512, JSON_THROW_ON_ERROR), true));
+            $rule = $matches->firstWhere('kind', 'date_override')
+                ?? $matches->firstWhere('kind', 'holiday')
+                ?? $matches->firstWhere('kind', 'seasonal')
+                ?? $weekend;
             $amount = $rule === null ? $base['nightlyMinor'] : (int) $rule->nightly_minor;
             if ($amount < 0 || $amount > PHP_INT_MAX - $total) {
                 throw ValidationException::withMessages(['nightlyMinor' => ['Quote exceeds accounting limits.']]);

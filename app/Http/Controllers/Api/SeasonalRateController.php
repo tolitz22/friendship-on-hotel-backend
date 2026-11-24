@@ -23,13 +23,19 @@ final class SeasonalRateController
     {
         $input = $request->validate([
             'name' => ['required', 'string', 'max:100'],
-            'kind' => ['required', 'in:seasonal,date_override'],
+            'kind' => ['required', 'in:seasonal,date_override,weekend,holiday'],
             'startsOn' => ['required', 'date_format:Y-m-d'],
             'endsOn' => ['required', 'date_format:Y-m-d', 'after_or_equal:startsOn'],
+            'weekendDays' => ['required_if:kind,weekend', 'exclude_unless:kind,weekend', 'array', 'min:1', 'max:7'],
+            'weekendDays.*' => ['integer', 'distinct', 'between:1,7'],
             'nightlyMinor' => ['required', 'integer', 'min:0', 'max:100000000000'],
         ]);
         if ($input['kind'] === 'date_override' && $input['startsOn'] !== $input['endsOn']) {
             throw \Illuminate\Validation\ValidationException::withMessages(['endsOn' => ['A date override applies to a single night.']]);
+        }
+        if ($input['kind'] === 'weekend') {
+            $input['weekendDays'] = array_map('intval', $input['weekendDays']);
+            sort($input['weekendDays']);
         }
         return $input;
     }
