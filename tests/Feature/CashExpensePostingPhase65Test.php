@@ -13,7 +13,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 function expense65Fixture(bool $clock = true): array
 {
     $hotel = Hotel::create(['name' => 'Expense 65', 'currency' => 'PHP']);
-    $cashier = User::factory()->create();
+    $cashier = User::create(['name' => 'Expense Cashier', 'email' => uniqid('expense-', true).'@example.test', 'password' => 'Password123456!']);
     $shifts = app(CashierShiftService::class);
     $shift = (int) $shifts->open($hotel, $cashier->id, 500000)['id'];
     if ($clock) {
@@ -99,5 +99,35 @@ it('leaves no expense or payout when the financial clock is missing', function (
     $this->assertDatabaseCount('financial_posting_journals', 0);
     $this->assertDatabaseCount('financial_posting_lines', 0);
     $closed = app(CashierShiftService::class)->close($hotel, $cashier->id, $shift, 500000, null);
+    expect($closed['varianceMinor'])->toBe(0);
+});
+
+it('snapshots routine limits and requires an independent manager for above-limit cash', function (): void {
+    [$hotel, $cashier, $shift, $input] = expense65Fixture();
+    $manager = User::create(['name' => 'Expense Manager', 'email' => 'manager65@example.test', 'password' => 'Password123456!']);
+    foreach ([$cashier, $manager] as $user) {
+        \App\Models\HotelMembership::create([
+            'hotel_id' => $hotel->id, 'user_id' => $user->id, 'role' => 'admin', 'is_active' => true,
+        ]);
+    }
+    $policy = app(\App\Services\Finance\ExpensePolicyService::class);
+    $posting = app(CashExpensePostingService::class);
+    $policy->update($hotel, $manager->id, ['routineLimitMinor' => 35000, 'reason' => 'Initial limit']);
+    $routine = $posting->record($hotel, $cashier->id, $shift, $input);
+    $this->assertDatabaseHas('hotel_expenses', ['id' => $routine['expenseId'], 'review_status' => 'not_required', 'policy_limit_minor' => 35000]);
+    $exception = $posting->record($hotel, $cashier->id, $shift, array_replace($input, [
+        'requestKey' => 'expense-65-exception', 'amountMinor' => 36000,
+    ]));
+    $id = (int) $exception['expenseId'];
+    $review = ['decision' => 'approve', 'note' => 'Invoice inspected'];
+    expect(fn () => $policy->review($hotel, $cashier->id, $id, $review))->toThrow(HttpException::class);
+    $outsider = User::create(['name' => 'Other Staff', 'email' => 'other65@example.test', 'password' => 'Password123456!']);
+    expect(fn () => $policy->review($hotel, $outsider->id, $id, $review))->toThrow(HttpException::class);
+    expect($policy->review($hotel, $manager->id, $id, $review)['reviewStatus'])->toBe('approved');
+    expect($policy->review($hotel, $manager->id, $id, $review)['replayed'])->toBeTrue();
+    $this->assertDatabaseCount('hotel_expense_reviews', 1);
+    $this->assertDatabaseCount('financial_posting_journals', 2);
+    $this->assertDatabaseCount('cashier_expense_payouts', 2);
+    $closed = app(CashierShiftService::class)->close($hotel, $cashier->id, $shift, 429000, null);
     expect($closed['varianceMinor'])->toBe(0);
 });
