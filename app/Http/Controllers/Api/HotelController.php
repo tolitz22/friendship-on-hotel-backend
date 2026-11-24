@@ -6,6 +6,8 @@ use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class HotelController
 {
@@ -35,16 +37,42 @@ class HotelController
             'contactPhone' => ['sometimes', 'nullable', 'string', 'max:40'],
         ])->validate();
 
-        $hotel->fill([
-            ...array_intersect_key($attributes, ['name' => true, 'address' => true]),
-        ]);
-        if (array_key_exists('contactEmail', $attributes)) {
-            $hotel->contact_email = $attributes['contactEmail'];
-        }
-        if (array_key_exists('contactPhone', $attributes)) {
-            $hotel->contact_phone = $attributes['contactPhone'];
-        }
-        $hotel->save();
+        DB::transaction(function () use ($request, $hotel, $attributes): void {
+            $locked = Hotel::whereKey($hotel->id)->lockForUpdate()->firstOrFail();
+            $before = [
+                'name' => $locked->name,
+                'address' => $locked->address,
+                'contactEmail' => $locked->contact_email,
+                'contactPhone' => $locked->contact_phone,
+            ];
+            $values = [];
+            foreach (['name', 'address', 'contactEmail', 'contactPhone'] as $field) {
+                if (!array_key_exists($field, $attributes)) continue;
+                $value = is_string($attributes[$field]) ? trim($attributes[$field]) : null;
+                if ($field === 'name' && ($value === null || strlen($value) < 2)) {
+                    throw ValidationException::withMessages(['name' => ['Enter a hotel name with at least two characters.']]);
+                }
+                $values[$field] = $value === '' ? null : $value;
+            }
+            $after = [...$before, ...$values];
+            if ($before === $after) return;
+
+            $locked->name = $after['name'];
+            $locked->address = $after['address'];
+            $locked->contact_email = $after['contactEmail'];
+            $locked->contact_phone = $after['contactPhone'];
+            $locked->save();
+
+            DB::table('catalog_audit_logs')->insert([
+                'hotel_id' => $hotel->id,
+                'actor_id' => $request->user()->id,
+                'subject_type' => 'hotel',
+                'subject_id' => $hotel->id,
+                'changes_before' => json_encode($before, JSON_THROW_ON_ERROR),
+                'changes_after' => json_encode($after, JSON_THROW_ON_ERROR),
+                'created_at' => now(),
+            ]);
+        }, 3);
 
         return $this->show($hotel->refresh());
     }
