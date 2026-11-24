@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -38,6 +39,9 @@ final class ReservationRecordController
             'checkIn' => $record->check_in->format('Y-m-d'),
             'checkOut' => $record->check_out->format('Y-m-d'),
             'lifecycleState' => $record->lifecycle_state,
+                'createdAt' => $record->created_at?->toISOString(),
+                'updatedAt' => $record->updated_at?->toISOString(),
+                'createdDate' => $record->created_at?->copy()->setTimezone($hotel->timezone ?: 'Asia/Manila')->format('Y-m-d'),
             'earlyCheckIn' => $early === null ? null : [
                 'scheduledCheckIn' => $early->scheduled_check_in,
                 'actualCheckInDate' => $early->actual_check_in_date,
@@ -58,6 +62,11 @@ final class ReservationRecordController
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
         $data = $request->validate([
+            'date_field' => ['sometimes', 'in:created_at,updated_at,check_in,check_out,stay'],
+            'date_from' => ['sometimes', 'date_format:Y-m-d'],
+            'date_to' => ['sometimes', 'date_format:Y-m-d', ...($request->filled('date_from') ? ['after_or_equal:date_from'] : [])],
+            'sort_by' => ['sometimes', 'in:created_at,updated_at,check_in,check_out'],
+            'sort_dir' => ['sometimes', 'in:asc,desc'],
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'search' => ['sometimes', 'string', 'max:100'],
@@ -103,7 +112,22 @@ final class ReservationRecordController
             });
         }
 
-        $records = $query->orderByDesc('id')->paginate($perPage);
+        $field = $data['date_field'] ?? 'created_at';
+        $from = $data['date_from'] ?? null;
+        $to = $data['date_to'] ?? null;
+        if ($field === 'stay') {
+            if ($from !== null) $query->where('check_out', '>', $from);
+            if ($to !== null) $query->where('check_in', '<=', $to);
+        } elseif (in_array($field, ['created_at', 'updated_at'], true)) {
+            $timezone = $hotel->timezone ?: 'Asia/Manila';
+            if ($from !== null) $query->where($field, '>=', CarbonImmutable::parse($from, $timezone)->startOfDay()->utc());
+            if ($to !== null) $query->where($field, '<', CarbonImmutable::parse($to, $timezone)->startOfDay()->addDay()->utc());
+        } else {
+            if ($from !== null) $query->where($field, '>=', $from);
+            if ($to !== null) $query->where($field, '<=', $to);
+        }
+        $direction = $data['sort_dir'] ?? 'desc';
+        $records = $query->orderBy($data['sort_by'] ?? 'created_at', $direction)->orderBy('id', $direction)->paginate($perPage);
         $guestNames = DB::table('guests')
             ->where('hotel_id', $hotel->id)
             ->whereIn('id', $records->getCollection()->pluck('guest_id')->filter()->all())
@@ -130,6 +154,9 @@ final class ReservationRecordController
                 'checkIn' => $record->check_in->format('Y-m-d'),
                 'checkOut' => $record->check_out->format('Y-m-d'),
                 'lifecycleState' => $record->lifecycle_state,
+                'createdAt' => $record->created_at?->toISOString(),
+                'updatedAt' => $record->updated_at?->toISOString(),
+                'createdDate' => $record->created_at?->copy()->setTimezone($hotel->timezone ?: 'Asia/Manila')->format('Y-m-d'),
                 'earlyCheckIn' => isset($earlyRecords[$record->id]) ? [
                     'scheduledCheckIn' => $earlyRecords[$record->id]->scheduled_check_in,
                     'actualCheckInDate' => $earlyRecords[$record->id]->actual_check_in_date,
