@@ -88,6 +88,58 @@ final class ExpenseController
         ]);
     }
 
+    public function exceptions(Hotel $hotel): JsonResponse
+    {
+        // Current property-wide work queue, deliberately independent of historical report dates.
+        $corrections = DB::table('hotel_expense_corrections as c')
+            ->leftJoin('hotel_expense_correction_decisions as d', function ($join): void {
+                $join->on('d.correction_id', '=', 'c.id')->on('d.hotel_id', '=', 'c.hotel_id');
+            })
+            ->join('hotel_expenses as e', function ($join): void {
+                $join->on('e.id', '=', 'c.expense_id')->on('e.hotel_id', '=', 'c.hotel_id');
+            })->where('c.hotel_id', $hotel->id);
+        $pending = (clone $corrections)->whereNull('d.id');
+        $returns = DB::table('expense_cash_returns as r')
+            ->leftJoin('expense_cash_return_reviews as v', function ($join): void {
+                $join->on('v.cash_return_id', '=', 'r.id')->on('v.hotel_id', '=', 'r.hotel_id');
+            })
+            ->join('hotel_expenses as e', function ($join): void {
+                $join->on('e.id', '=', 'r.expense_id')->on('e.hotel_id', '=', 'r.hotel_id');
+            })->where('r.hotel_id', $hotel->id);
+        $unreviewed = (clone $returns)->whereNull('v.id');
+        $flagged = (clone $returns)->where('v.decision', 'flag');
+        $items = [];
+        foreach ($pending->orderBy('c.id')->limit(50)->get(['c.id', 'c.expense_id', 'e.description', 'e.business_date']) as $row) {
+            $items[] = ['kind' => 'pending_correction', 'id' => (string) $row->id, 'expenseId' => (string) $row->expense_id,
+                'description' => $row->description, 'businessDate' => (string) $row->business_date, 'amountMinor' => null];
+        }
+        foreach (['pending_return' => $unreviewed, 'flagged_return' => $flagged] as $kind => $query) {
+            foreach ((clone $query)->orderBy('r.id')->limit(50)->get(['r.id', 'r.expense_id', 'r.amount_minor', 'e.description', 'e.business_date']) as $row) {
+                $items[] = ['kind' => $kind, 'id' => (string) $row->id, 'expenseId' => (string) $row->expense_id,
+                    'description' => $row->description, 'businessDate' => (string) $row->business_date, 'amountMinor' => (int) $row->amount_minor];
+            }
+        }
+        $settlements = DB::table('expense_cash_returns')->where('hotel_id', $hotel->id)
+            ->whereNotNull('correction_id')->selectRaw('correction_id, SUM(amount_minor) as settled')->groupBy('correction_id');
+        $clearing = (clone $corrections)->where('c.kind', 'amount_correction')->where('d.decision', 'approve')
+            ->leftJoinSub($settlements, 's', fn ($join) => $join->on('s.correction_id', '=', 'c.id'))
+            ->whereRaw('e.amount_minor - c.corrected_amount_minor - COALESCE(s.settled, 0) <> 0');
+        $clearingCount = (clone $clearing)->count();
+        foreach ($clearing->orderBy('c.id')->limit(50)->get(['c.id', 'c.expense_id', 'e.description', 'e.business_date',
+            DB::raw('e.amount_minor - c.corrected_amount_minor - COALESCE(s.settled, 0) as balance')]) as $row) {
+            $items[] = ['kind' => 'unresolved_clearing', 'id' => (string) $row->id, 'expenseId' => (string) $row->expense_id,
+                'description' => $row->description, 'businessDate' => (string) $row->business_date, 'amountMinor' => (int) $row->balance];
+        }
+        return response()->json(['data' => [
+            'hotelId' => (string) $hotel->id,
+            'pendingCorrectionCount' => $pending->count(),
+            'pendingReturnCount' => $unreviewed->count(),
+            'flaggedReturnCount' => $flagged->count(),
+            'unresolvedClearingCount' => $clearingCount,
+            'items' => $items,
+        ]]);
+    }
+
     public function show(Hotel $hotel, string $expense): JsonResponse
     {
         $row = $this->query($hotel)->where('e.id', (int) $expense)->first();
