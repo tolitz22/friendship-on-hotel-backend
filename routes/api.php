@@ -341,6 +341,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/rate-plans/{plan}/booking-policies', [\App\Http\Controllers\Api\RateBookingPolicyController::class, 'store'])->whereNumber('plan')->middleware('throttle:10,1');
                 Route::get('/rate-plans/{plan}/booking-policy-preview', [\App\Http\Controllers\Api\RateBookingPolicyController::class, 'preview'])->whereNumber('plan');
                 Route::get('/rate-plans/{plan}/rules', [\App\Http\Controllers\Api\SeasonalRateController::class, 'index'])->whereNumber('plan');
+                Route::post('/rate-plans/{plan}/bulk-overrides', [\App\Http\Controllers\Api\SeasonalRateController::class, 'bulk'])->whereNumber('plan')->middleware('throttle:10,1');
                 Route::post('/rate-plans/{plan}/rules', [\App\Http\Controllers\Api\SeasonalRateController::class, 'store'])->whereNumber('plan')->middleware('throttle:20,1');
                 Route::put('/rate-plans/{plan}/rules/{rule}', [\App\Http\Controllers\Api\SeasonalRateController::class, 'update'])->whereNumber('plan')->whereNumber('rule')->middleware('throttle:20,1');
                 Route::post('/rate-plans/{plan}/rules/{rule}/retire', [\App\Http\Controllers\Api\SeasonalRateController::class, 'retire'])->whereNumber('plan')->whereNumber('rule')->middleware('throttle:20,1');

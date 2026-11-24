@@ -66,6 +66,20 @@ final class SeasonalRateController
         return response()->json(['data' => ['id' => $rule, 'retired' => true]]);
     }
 
+    public function bulk(Request $request, Hotel $hotel, string $plan, SeasonalRateService $rates): JsonResponse
+    {
+        $input = $request->validate([
+            'name' => ['required', 'string', 'max:100'],
+            'startsOn' => ['required', 'date_format:Y-m-d'],
+            'endsOn' => ['required', 'date_format:Y-m-d', 'after_or_equal:startsOn'],
+            'nightlyMinor' => ['required', 'integer', 'min:0', 'max:100000000000'],
+            'replaceExisting' => ['required', 'boolean'],
+            'expectedRuleIds' => ['present', 'array', 'max:31'],
+            'expectedRuleIds.*' => ['integer', 'min:1', 'distinct'],
+        ]);
+        return response()->json(['data' => $rates->bulkOverrides($hotel, (int) $request->user()->id, (int) $plan, $input)], 201);
+    }
+
     public function preview(Request $request, Hotel $hotel, string $plan, SeasonalRateService $rates): JsonResponse
     {
         $input = $request->validate([

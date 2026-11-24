@@ -66,6 +66,47 @@ final class SeasonalRateService
         }, 3);
     }
 
+    /**
+     * Apply one override per night, atomically. A conflicting existing override
+     * must be explicitly replaced and the old version remains in history.
+     */
+    public function bulkOverrides(Hotel $hotel, int $actor, int $planId, array $input): array
+    {
+        return DB::transaction(function () use ($hotel, $actor, $planId, $input): array {
+            $plan = DB::table('room_rate_plans')->where('hotel_id', $hotel->id)
+                ->where('id', $planId)->where('is_active', true)->first();
+            abort_unless($plan !== null, 404);
+            DB::table('room_types')->where('hotel_id', $hotel->id)
+                ->where('id', $plan->room_type_id)->lockForUpdate()->firstOrFail();
+            $start = new \DateTimeImmutable($input['startsOn']);
+            $end = new \DateTimeImmutable($input['endsOn']);
+            if ($start > $end || $start->diff($end)->days >= 31) {
+                throw ValidationException::withMessages(['endsOn' => ['Select up to 31 consecutive nights.']]);
+            }
+            $expected = array_map('strval', $input['expectedRuleIds'] ?? []);
+            sort($expected, SORT_STRING);
+            $existing = $this->rules($hotel, $planId)->whereNull('retired_at')->where('kind', 'date_override')
+                ->where('starts_on', '<=', $input['endsOn'])->where('ends_on', '>=', $input['startsOn'])
+                ->lockForUpdate()->get();
+            $actual = $existing->map(fn ($rule) => (string) $rule->id)->all();
+            sort($actual, SORT_STRING);
+            abort_if($actual !== $expected, 409, 'Rate overrides changed. Refresh the calendar and review the selection.');
+            abort_if($existing->isNotEmpty() && ! ($input['replaceExisting'] ?? false), 409, 'Confirm replacement of existing date overrides.');
+            $created = [];
+            for ($date = $start; $date <= $end; $date = $date->modify('+1 day')) {
+                $day = $date->format('Y-m-d');
+                $previous = $existing->firstWhere('starts_on', $day);
+                $rule = ['name' => $input['name'], 'kind' => 'date_override',
+                    'startsOn' => $day, 'endsOn' => $day, 'nightlyMinor' => $input['nightlyMinor']];
+                $created[] = (string) ($previous === null
+                    ? $this->create($hotel, $actor, $planId, $rule)
+                    : $this->replace($hotel, $actor, $planId, (int) $previous->id, $rule));
+            }
+            return ['ruleIds' => $created, 'nightsUpdated' => count($created),
+                'replacedCount' => $existing->count(), 'appliedToBookings' => false];
+        }, 3);
+    }
+
     public function preview(Hotel $hotel, int $typeId, int $planId, StayPeriod $stay, ?string $corporateCode = null, ?string $promoCode = null): array
     {
         $base = app(RoomRateQuoteService::class)->quote($hotel, $typeId, $planId, $stay);
