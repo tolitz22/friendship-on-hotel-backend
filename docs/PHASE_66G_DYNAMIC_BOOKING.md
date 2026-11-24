@@ -1,0 +1,4 @@
+# Phase 66G.1 — opt-in dynamic single booking foundation
+Default off. Do not enable BOOKING_DYNAMIC_PRICING_ENABLED on deployed properties yet.
+POST dynamic-room-quote calculates the reviewed nightly rates and policy terms, returns a deterministic quote token. POST bookings accepts the token and optional eligibility code. Under the room-type lock it recomputes the quote and rejects stale values before creating records. The original quote and terms are stored alongside the nightly folio amounts. Existing clients retain fixed pricing.
+Remaining release blockers: frontend booking review and quote-token submission, group booking token propagation and fingerprints, extension pricing and stale confirmation, financial deposit/cancellation/no-show handling, snapshot retrieval, and CI/live regression. No automatic policy charges or payments are posted.

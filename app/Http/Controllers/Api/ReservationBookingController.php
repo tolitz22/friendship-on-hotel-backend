@@ -20,10 +20,14 @@ final class ReservationBookingController
             'guestId' => ['required', 'integer', 'min:1'],
             'roomTypeId' => ['required', 'integer', 'min:1'],
             'ratePlanId' => ['sometimes', 'integer', 'min:1'],
+            'dynamicQuoteToken' => ['sometimes', 'string', 'regex:/^[a-f0-9]{64}$/'],
+            'corporateCode' => ['nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/', 'prohibits:promoCode'],
+            'promoCode' => ['nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/', 'prohibits:corporateCode'],
             'checkIn' => ['required', 'date_format:Y-m-d'],
             'checkOut' => ['required', 'date_format:Y-m-d', 'after:checkIn'],
         ])->validate();
 
+        abort_if((isset($data['corporateCode']) || isset($data['promoCode'])) && ! isset($data['dynamicQuoteToken']), 422, 'Review a dynamic quote before using an eligibility code.');
         $result = $bookings->create($hotel, (int) $request->user()->id, $data);
 
         return response()->json(

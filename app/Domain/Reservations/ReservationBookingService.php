@@ -34,6 +34,11 @@ final class ReservationBookingService
         if (isset($data['ratePlanId'])) {
             $fingerprintFields['ratePlanId'] = (int) $data['ratePlanId'];
         }
+        if (isset($data['dynamicQuoteToken'])) {
+            $fingerprintFields['dynamicQuoteToken'] = $data['dynamicQuoteToken'];
+            $fingerprintFields['corporateCode'] = $data['corporateCode'] ?? null;
+            $fingerprintFields['promoCode'] = $data['promoCode'] ?? null;
+        }
         $fingerprint = hash('sha256', json_encode($fingerprintFields, JSON_THROW_ON_ERROR));
 
         return DB::transaction(function () use ($hotel, $actorId, $data, $period, $fingerprint): array {
@@ -73,6 +78,16 @@ final class ReservationBookingService
                 )
                 : null;
 
+            $dynamic = null;
+            if (isset($data['dynamicQuoteToken'])) {
+                abort_unless(config('booking.dynamic_pricing_enabled', false), 422, 'Dynamic booking pricing is not enabled.');
+                abort_unless(isset($data['ratePlanId']), 422, 'Select a rate plan.');
+                $dynamic = app(BookingDynamicQuoteService::class)->quote($hotel, (int) $type->id, (int) $data['ratePlanId'], $period,
+                    $data['corporateCode'] ?? null, $data['promoCode'] ?? null);
+                abort_unless(hash_equals($dynamic['quoteToken'], $data['dynamicQuoteToken']), 422, 'The reviewed price or policy changed. Request a new quote.');
+                $quote = $dynamic;
+            }
+
             $id = DB::table('reservation_records')->insertGetId([
                 'hotel_id' => $hotel->id,
                 'room_type_id' => $type->id,
@@ -103,18 +118,27 @@ final class ReservationBookingService
                     'created_by' => $actorId,
                     'created_at' => now(), 'updated_at' => now(),
                 ]);
-                foreach ($quote['nights'] as $night) {
+                foreach ($quote['nights'] as $index => $night) {
                     DB::table('folio_entries')->insert([
                         'folio_id' => $folioId, 'hotel_id' => $hotel->id,
                         'entry_type' => 'room_night',
                         'description' => 'Room night '.$night,
-                        'amount_minor' => $quote['nightlyMinor'],
+                        'amount_minor' => $dynamic === null ? $quote['nightlyMinor'] : $dynamic['nightlyRates'][$index]['amountMinor'],
                         'rate_plan_id' => $data['ratePlanId'],
                         'stay_date' => $night,
                         'actor_id' => $actorId,
                         'created_at' => now(), 'updated_at' => now(),
                     ]);
                 }
+            }
+
+            if ($dynamic !== null) {
+                DB::table('booking_pricing_snapshots')->insert([
+                    'hotel_id' => $hotel->id, 'reservation_record_id' => $id,
+                    'quote_token' => $dynamic['quoteToken'],
+                    'snapshot' => json_encode($dynamic, JSON_THROW_ON_ERROR),
+                    'created_by' => $actorId, 'created_at' => now(),
+                ]);
             }
 
             $this->audit($hotel->id, $id, $actorId, 'created', null, 'confirmed');

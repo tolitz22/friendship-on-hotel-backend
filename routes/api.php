@@ -108,6 +108,7 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('hotel.permission:reservation.read');
             Route::get('/front-desk/manifest', [FrontDeskReservationController::class, 'manifest'])->middleware('hotel.permission:reservation.read');
             Route::get('/rate-plans', [ReservationFinanceController::class, 'rates']);
+            Route::post('/dynamic-room-quote', [\App\Http\Controllers\Api\BookingDynamicQuoteController::class, 'quote'])->middleware('hotel.permission:booking.create')->middleware('throttle:30,1');
             Route::get('/room-quotes', [ReservationFinanceController::class, 'quote']);
             Route::get('/bookings/{booking}/folio', [ReservationFinanceController::class, 'folio'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
             Route::get('/bookings/{booking}/folio-ledger', [FolioAccountingController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');

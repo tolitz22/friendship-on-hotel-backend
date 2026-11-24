@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 return [
+    'dynamic_pricing_enabled' => env('BOOKING_DYNAMIC_PRICING_ENABLED', false),
     // Conservative initial operating defaults, replace with versioned hotel-level
     // settings when the client has a different reservation policy.
     'inventory_unit' => 'room_type',
