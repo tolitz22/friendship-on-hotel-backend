@@ -60,6 +60,7 @@ use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
 use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\SupplierController;
+use App\Http\Controllers\Api\SupplierBillController;
 use App\Http\Controllers\Api\ExpenseCorrectionController;
 use App\Http\Controllers\Api\GuestIncidentalChargeController;
 use App\Http\Controllers\Api\OccupancyVerificationController;
@@ -199,6 +200,10 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('booking')->middleware('hotel.permission:approval.request')
                 ->middleware('throttle:20,1');
 
+            Route::get('/supplier-bills', [SupplierBillController::class, 'index'])->middleware('hotel.permission:supplier.read');
+            Route::get('/supplier-bills/{bill}', [SupplierBillController::class, 'show'])->whereNumber('bill')->middleware('hotel.permission:supplier.read');
+            Route::post('/supplier-bills', [SupplierBillController::class, 'store'])->middleware('hotel.permission:supplier.bill.post')->middleware('throttle:20,1');
+            Route::post('/supplier-bills/{bill}/payments', [SupplierBillController::class, 'pay'])->whereNumber('bill')->middleware('hotel.permission:supplier.bill.pay')->middleware('throttle:20,1');
             Route::get('/suppliers', [SupplierController::class, 'index'])->middleware('hotel.permission:supplier.read');
             Route::get('/suppliers/{supplier}', [SupplierController::class, 'show'])->whereNumber('supplier')->middleware('hotel.permission:supplier.read');
             Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('hotel.permission:supplier.manage')->middleware('throttle:20,1');
