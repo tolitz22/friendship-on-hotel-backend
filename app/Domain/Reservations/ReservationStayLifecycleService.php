@@ -96,18 +96,19 @@ final class ReservationStayLifecycleService
                 app(SimplifiedCashCheckoutPolicy::class)->recordCheckout($hotel, $bookingId, $actor);
             } elseif ($operation === 'check_out'
                 && config('financial_accounting.enable_verified_settlement', false)) {
+                // Operational checkout needs verified, fully allocated funds,
+                // not a separate manager signature. Continue enforcing signed
+                // snapshot integrity and unresolved financial blockers.
                 $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
                     ->where('reservation_record_id', $bookingId)->lockForUpdate()->first();
-                if ($folio === null || !DB::table('folio_settlement_signoffs')
-                    ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
-                    ->where('reservation_record_id', $bookingId)->exists()) {
-                    throw new HttpException(409,
-                        'Checkout requires an approved immutable folio settlement statement.');
+                if ($folio === null) {
+                    throw new HttpException(409, 'Review the guest bill before checkout.');
                 }
                 $settlement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
-                if (!$settlement['signed'] || !$settlement['canSignOff']) {
+                if (!$settlement['canSignOff']
+                    || ($settlement['signed'] && !$settlement['signedSnapshotIntegrity'])) {
                     throw new HttpException(409,
-                        'Signed folio no longer reconciles; manager financial investigation required.');
+                        'Guest billing is not ready for checkout. Resolve the financial blockers in Billing.');
                 }
             }
 
