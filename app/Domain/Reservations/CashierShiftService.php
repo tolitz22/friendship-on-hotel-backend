@@ -170,6 +170,7 @@ final class CashierShiftService
             'currency' => $shift->currency, 'status' => $shift->status,
             'cashTenderTrackingSupported' => true,
             'expensePostingEnabled' => (bool) config('financial_accounting.enable_expense_posting', false),
+            'expenseCorrectionsEnabled' => (bool) config('financial_accounting.enable_expense_corrections', false),
             'negativeExpectedCash' => $shift->status !== 'open' && (int) $shift->expected_cash_minor < 0,
             'openingFloatMinor' => (int) $shift->opening_float_minor,
             // Do not expose the live expected cash to the cashier before count submission.
