@@ -70,6 +70,11 @@ final class ReservationExtensionService
                 throw new HttpException(409, 'The folio has no existing room rate plan.');
             }
             $rate = app(RoomRateQuoteService::class)->quote($hotel, (int) $booking->room_type_id, (int) $rateId, $stay);
+            $dynamic = config('booking.dynamic_pricing_enabled', false) && DB::table('booking_pricing_snapshots')
+                ->where('hotel_id', $hotel->id)->where('reservation_record_id', $bookingId)->exists();
+            if ($dynamic) {
+                $rate = app(BookingDynamicQuoteService::class)->quote($hotel, (int) $booking->room_type_id, (int) $rateId, $stay);
+            }
             if ($rate['currency'] !== $folio->currency) {
                 throw new HttpException(409, 'The room rate currency differs from the guest folio currency.');
             }
@@ -78,21 +83,23 @@ final class ReservationExtensionService
                 'previousCheckOut' => $departure, 'checkOut' => $stay->departure,
                 'nights' => count($rate['nights']), 'nightlyMinor' => $rate['nightlyMinor'],
                 'subtotalMinor' => $rate['roomSubtotalMinor'], 'currency' => $rate['currency'],
-                'saved' => isset($input['expectedNightlyMinor']),
+                'saved' => isset($input['expectedNightlyMinor']) || isset($input['expectedQuoteToken']),
+                ...($dynamic ? ['quoteToken' => $rate['quoteToken'], 'nightlyRates' => $rate['nightlyRates']] : []),
             ];
             if (! $result['saved']) {
                 return $result;
             }
-            if ((int) $input['expectedNightlyMinor'] !== $rate['nightlyMinor']) {
+            if ($dynamic ? ! hash_equals($rate['quoteToken'], $input['expectedQuoteToken'] ?? '')
+                : (! isset($input['expectedNightlyMinor']) || (int) $input['expectedNightlyMinor'] !== $rate['nightlyMinor'])) {
                 throw new HttpException(409, 'The room rate changed. Check availability and review the new amount.');
             }
 
             $timestamps = ['created_at' => now(), 'updated_at' => now()];
-            foreach ($rate['nights'] as $night) {
+            foreach ($rate['nights'] as $index => $night) {
                 DB::table('folio_entries')->insert([
                     ...$timestamps, 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
                     'entry_type' => 'room_night', 'description' => 'Stay extension · '.$night,
-                    'stay_date' => $night, 'amount_minor' => $rate['nightlyMinor'],
+                    'stay_date' => $night, 'amount_minor' => $dynamic ? $rate['nightlyRates'][$index]['amountMinor'] : $rate['nightlyMinor'],
                     'rate_plan_id' => $rateId, 'actor_id' => $actor,
                 ]);
             }
@@ -107,7 +114,8 @@ final class ReservationExtensionService
             DB::table('reservation_booking_events')->insert([
                 ...$timestamps, 'hotel_id' => $hotel->id, 'reservation_record_id' => $bookingId,
                 'actor_id' => $actor, 'event_type' => 'stay_extended', 'old_state' => 'checked_in',
-                'new_state' => 'checked_in', 'note' => 'Departure changed from '.$departure.' to '.$stay->departure.'.',
+                'new_state' => 'checked_in', 'note' => 'Departure changed from '.$departure.' to '.$stay->departure.'.'
+                    .($dynamic ? ' Reviewed extension quote: '.$rate['quoteToken'] : ''),
             ]);
 
             return $result;
