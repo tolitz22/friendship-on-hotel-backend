@@ -76,10 +76,16 @@ final class CashExpensePostingService
             );
             $date = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
                 ->where('id', $journalId)->value('business_date');
+            $policy = app(ExpensePolicyService::class)->policy($hotel);
+            $limit = $policy['routineLimitMinor'];
+            $requiresReview = $limit === null || $amount > $limit;
             $now = now();
             $expenseId = DB::table('hotel_expenses')->insertGetId($facts + [
                 'journal_id' => $journalId, 'business_date' => $date,
-                'review_status' => 'pending', 'created_at' => $now, 'updated_at' => $now,
+                'review_status' => $requiresReview ? 'pending' : 'not_required',
+                'policy_limit_minor' => $limit,
+                'review_reason' => $limit === null ? 'policy_unconfigured' : ($requiresReview ? 'above_limit' : null),
+                'created_at' => $now, 'updated_at' => $now,
             ]);
             $payoutId = DB::table('cashier_expense_payouts')->insertGetId([
                 'hotel_id' => $hotel->id, 'shift_id' => $shiftId,
