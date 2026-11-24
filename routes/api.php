@@ -60,6 +60,7 @@ use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
 use App\Http\Controllers\Api\ExpenseController;
 use App\Http\Controllers\Api\SupplierController;
+use App\Http\Controllers\Api\EmployeeReimbursementController;
 use App\Http\Controllers\Api\SupplierBillController;
 use App\Http\Controllers\Api\ExpenseCorrectionController;
 use App\Http\Controllers\Api\GuestIncidentalChargeController;
@@ -200,6 +201,11 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('booking')->middleware('hotel.permission:approval.request')
                 ->middleware('throttle:20,1');
 
+            Route::get('/employee-reimbursements', [EmployeeReimbursementController::class, 'index'])->middleware('hotel.permission:reimbursement.read_own');
+            Route::get('/employee-reimbursements/{claim}', [EmployeeReimbursementController::class, 'show'])->whereNumber('claim')->middleware('hotel.permission:reimbursement.read_own');
+            Route::post('/employee-reimbursements', [EmployeeReimbursementController::class, 'store'])->middleware('hotel.permission:reimbursement.submit')->middleware('throttle:20,1');
+            Route::post('/employee-reimbursements/{claim}/decision', [EmployeeReimbursementController::class, 'decide'])->whereNumber('claim')->middleware('hotel.permission:reimbursement.review')->middleware('throttle:20,1');
+            Route::post('/employee-reimbursements/{claim}/payments', [EmployeeReimbursementController::class, 'pay'])->whereNumber('claim')->middleware('hotel.permission:reimbursement.pay')->middleware('throttle:20,1');
             Route::get('/supplier-bills', [SupplierBillController::class, 'index'])->middleware('hotel.permission:supplier.read');
             Route::get('/supplier-bills/aging', [SupplierBillController::class, 'aging'])->middleware('hotel.permission:supplier.read');
             Route::get('/supplier-bills/{bill}', [SupplierBillController::class, 'show'])->whereNumber('bill')->middleware('hotel.permission:supplier.read');
