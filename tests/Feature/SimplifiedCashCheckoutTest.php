@@ -246,6 +246,35 @@ it('allows a fully reconciled bank-transfer folio to check out without a manager
         ->toBe(0);
 });
 
+
+it('allows a fully staff-confirmed bank payment to check out before final verification or allocation', function (): void {
+    config()->set('financial_accounting.simplified_cashier_mode', false);
+    config()->set('financial_accounting.enable_verified_settlement', true);
+    config()->set('financial_accounting.enable_live_folio_tax', false);
+    [$hotel, $booking, $folio, $cashier, $owner] = simplifiedCashFixture();
+    $accounting = app(FolioAccountingService::class);
+    $payment = $accounting->recordPayment($hotel, $booking, $cashier->id, [
+        'requestKey'=>'operational-checkout-confirmed-bank',
+        'method'=>'bank_transfer', 'reference'=>'BANK-OPERATIONAL-READY',
+        'amountMinor'=>840000,
+    ]);
+    $accounting->review($hotel, $booking, (int) $payment['id'], $owner->id, [
+        'decision'=>'confirm', 'note'=>'Staff confirmed receipt of the guest payment.',
+    ]);
+    $settlement = app(\App\Domain\Reservations\FolioSettlementService::class);
+    expect($settlement->statement($hotel, $booking)['canSignOff'])->toBeFalse();
+    Sanctum::actingAs($cashier, ['hotel:read','booking:write']);
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking.'/check-out')
+        ->assertOk()->assertJsonPath('data.status','checked_out');
+    $after = $settlement->statement($hotel, $booking);
+    expect($after['canSignOff'])->toBeFalse()
+        ->and($after['verifiedPaymentsMinor'])->toBe(0)
+        ->and($after['verifiedAllocatedMinor'])->toBe(0)
+        ->and($after['signed'])->toBeFalse();
+    expect(DB::table('reservation_turnover_links')->where('hotel_id',$hotel->id)
+        ->where('reservation_record_id',$booking)->count())->toBe(1);
+});
+
 it('permits an authorized front desk checkout through the API without an independent manager payment signoff', function (): void {
     config()->set('financial_accounting.simplified_cashier_mode', true);
     config()->set('financial_accounting.enable_verified_settlement', true);
