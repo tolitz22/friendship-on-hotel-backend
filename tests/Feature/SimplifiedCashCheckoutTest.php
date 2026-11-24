@@ -182,7 +182,7 @@ it('does not allow ordinary folio changes after simplified checkout', function (
     }
 });
 
-it('keeps the original independent-approval checkout policy when simplified mode is disabled', function (): void {
+it('blocks unsettled payment evidence when simplified mode is disabled', function (): void {
     config()->set('financial_accounting.simplified_cashier_mode', false);
     config()->set('financial_accounting.enable_verified_settlement', true);
     [$hotel, $booking, $folio, $cashier] = simplifiedCashFixture();
@@ -198,10 +198,52 @@ it('keeps the original independent-approval checkout policy when simplified mode
         app(ReservationStayLifecycleService::class)->transition(
             $hotel, $cashier->id, $booking, 'check_out'
         );
-        test()->fail('Strict mode must still require signed financial settlement.');
+        test()->fail('Unverified payments must not bypass reconciliation.');
     } catch (HttpException $e) {
         expect($e->getStatusCode())->toBe(409);
     }
+});
+
+it('allows a fully reconciled bank-transfer folio to check out without a manager signature', function (): void {
+    config()->set('financial_accounting.simplified_cashier_mode', false);
+    config()->set('financial_accounting.enable_verified_settlement', true);
+    [$hotel, $booking, $folio, $cashier, $owner] = simplifiedCashFixture();
+    $reviewer = User::create([
+        'name'=>'Independent reviewer',
+        'email'=>'checkout-signature-reviewer@example.test',
+        'password'=>'testing-only', 'is_active'=>true,
+    ]);
+    $accounting = app(FolioAccountingService::class);
+    $settlement = app(\App\Domain\Reservations\FolioSettlementService::class);
+    $payment = $accounting->recordPayment($hotel, $booking, $cashier->id, [
+        'requestKey'=>'unsigned-checkout-bank-payment',
+        'method'=>'bank_transfer', 'reference'=>'BANK-CHECKOUT-READY',
+        'amountMinor'=>840000,
+    ]);
+    // A recorded but unverified bank transfer is not ready for checkout.
+    try {
+        app(ReservationStayLifecycleService::class)->transition(
+            $hotel, $cashier->id, $booking, 'check_out');
+        test()->fail('Unverified payment must block checkout.');
+    } catch (HttpException $e) {
+        expect($e->getStatusCode())->toBe(409);
+    }
+    $accounting->review($hotel, $booking, (int)$payment['id'], $owner->id, [
+        'decision'=>'confirm', 'note'=>'Reviewed bank payment evidence.',
+    ]);
+    $verification = $settlement->prepareVerification($hotel, $booking,
+        (int)$payment['id'], $owner->id, 'bank_statement', 'BANK-CHECKOUT-VERIFIED');
+    $settlement->reviewVerification($hotel, $booking, (int)$verification['id'],
+        $reviewer->id, 'verify', 'Independently checked bank record.');
+    $settlement->allocate($hotel, $booking, (int)$payment['id'], $owner->id,
+        'checkout-without-signature-allocation', 'guest', 'Guest bill', 840000, null);
+    expect($settlement->statement($hotel, $booking)['canSignOff'])->toBeTrue()
+        ->and(DB::table('folio_settlement_signoffs')->where('hotel_id',$hotel->id)->count())->toBe(0);
+    Sanctum::actingAs($cashier, ['hotel:read','booking:write']);
+    $this->postJson('/api/v1/hotels/'.$hotel->id.'/bookings/'.$booking.'/check-out')
+        ->assertOk()->assertJsonPath('data.status','checked_out');
+    expect(DB::table('folio_settlement_signoffs')->where('hotel_id',$hotel->id)->count())
+        ->toBe(0);
 });
 
 it('permits an authorized front desk checkout through the API without an independent manager payment signoff', function (): void {
