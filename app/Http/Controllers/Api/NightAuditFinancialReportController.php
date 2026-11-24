@@ -194,6 +194,9 @@ final class NightAuditFinancialReportController
                 && $snapshotMatches && $unbalanced === 0,
         ];
 
+        $expenses['breakdown'] = app(\App\Services\Finance\DailyExpenseBreakdown::class)
+            ->report((int) $hotel->id, $date, $expenses['netExpenseMinor']);
+
         $blockers = [];
         $accountingReconciled = $reviewValid && $review?->status === 'reviewed'
             && $close !== null && $close->status === 'completed'
