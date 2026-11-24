@@ -157,13 +157,15 @@ final class NightAuditFinancialReportController
         $expenseAccounts = DB::table('financial_posting_journals as j')
             ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
             ->where('j.hotel_id', $hotel->id)->where('j.business_date', $date)
-            ->whereIn('j.source_type', ['cash_expense', 'cash_expense_reversal'])
+            ->whereIn('j.source_type', ['cash_expense', 'cash_expense_reversal', 'cash_expense_adjustment'])
             ->where('l.account_code', 'operating_expense')
             ->selectRaw('COALESCE(SUM(l.debit_minor), 0) as debits, COALESCE(SUM(l.credit_minor), 0) as credits')
             ->first();
         $expenses = [
             'postedExpenseMinor' => (int) $expenseAccounts->debits,
             'reversedExpenseMinor' => (int) $expenseAccounts->credits,
+            // Credits include downward corrections, not necessarily cash refunds.
+            'creditAdjustmentMinor' => (int) $expenseAccounts->credits,
             'netExpenseMinor' => (int) $expenseAccounts->debits - (int) $expenseAccounts->credits,
             'scope' => 'cash_expense_journal_movements_by_business_date',
             'closedLedgerVerified' => $close !== null && $close->status === 'completed'
