@@ -27,6 +27,9 @@ class AuthController
         }
 
         $abilities = ['hotel:read'];
+        if ($user->memberships()->where('is_active', true)->whereIn('role', ['admin', 'front_desk', 'housekeeping', 'maintenance'])->exists()) {
+            $abilities[] = 'reimbursement:submit';
+        }
 
         if ($user->memberships()->where('role', 'admin')->where('is_active', true)->exists()) {
             $abilities[] = 'hotel:write';
