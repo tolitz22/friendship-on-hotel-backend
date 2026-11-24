@@ -59,6 +59,7 @@ use App\Http\Controllers\Api\OperationalExceptionsController;
 use App\Http\Controllers\Api\ManagerApprovalController;
 use App\Http\Controllers\Api\CashierShiftController;
 use App\Http\Controllers\Api\ExpenseController;
+use App\Http\Controllers\Api\SupplierController;
 use App\Http\Controllers\Api\ExpenseCorrectionController;
 use App\Http\Controllers\Api\GuestIncidentalChargeController;
 use App\Http\Controllers\Api\OccupancyVerificationController;
@@ -198,6 +199,10 @@ Route::prefix('v1')->group(function (): void {
                 ->whereNumber('booking')->middleware('hotel.permission:approval.request')
                 ->middleware('throttle:20,1');
 
+            Route::get('/suppliers', [SupplierController::class, 'index'])->middleware('hotel.permission:supplier.read');
+            Route::get('/suppliers/{supplier}', [SupplierController::class, 'show'])->whereNumber('supplier')->middleware('hotel.permission:supplier.read');
+            Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('hotel.permission:supplier.manage')->middleware('throttle:20,1');
+            Route::put('/suppliers/{supplier}', [SupplierController::class, 'update'])->whereNumber('supplier')->middleware('hotel.permission:supplier.manage')->middleware('throttle:20,1');
             Route::get('/expenses', [ExpenseController::class, 'index'])->middleware('hotel.permission:expense.read');
             Route::get('/expenses/exceptions', [ExpenseController::class, 'exceptions'])->middleware('hotel.permission:expense.read');
             Route::get('/expenses/policy', [ExpenseController::class, 'policy'])->middleware('hotel.permission:expense.read');
