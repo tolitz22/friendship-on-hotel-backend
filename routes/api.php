@@ -360,6 +360,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/bookings/{booking}/payment-records/{payment}/review', [FolioAccountingController::class, 'reviewPayment'])->whereNumber('booking')->whereNumber('payment');
                 Route::post('/bookings/{booking}/payment-records/{payment}/void', [FolioAccountingController::class, 'voidPayment'])
                     ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:10,1');
+                Route::post('/bookings/{booking}/dates/preview', [FrontDeskReservationController::class, 'previewAmendment'])->whereNumber('booking')->middleware('throttle:30,1');
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/no-show', [ReservationBookingController::class, 'noShow'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
