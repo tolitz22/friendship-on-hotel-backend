@@ -16,7 +16,7 @@ use Symfony\Component\HttpFoundation\Response;
 final class EnsureHotelPermission
 {
     private const ROLE_PERMISSIONS = [
-        'admin' => ['expense.read', 'expense.record', 'expense.review', 'expense.policy', 'booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room', 'booking.special_request', 'guest.read', 'reservation.read', 'finance.read', 'approval.read', 'approval.request', 'cashier.read', 'cashier.write', 'keycard.read', 'keycard.request', 'occupancy.read'],
+        'admin' => ['supplier.read', 'supplier.manage', 'supplier.bill.post', 'expense.read', 'expense.record', 'expense.review', 'expense.policy', 'booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room', 'booking.special_request', 'guest.read', 'reservation.read', 'finance.read', 'approval.read', 'approval.request', 'cashier.read', 'cashier.write', 'keycard.read', 'keycard.request', 'occupancy.read'],
         'front_desk' => ['expense.record', 'booking.create', 'booking.check_in', 'booking.check_out', 'booking.assign_room', 'booking.special_request', 'guest.read', 'reservation.read', 'finance.read', 'approval.read', 'approval.request', 'cashier.read', 'cashier.write', 'keycard.read', 'keycard.request'],
         'housekeeping' => ['occupancy.read', 'occupancy.observe', 'housekeeping.assigned'],
         'maintenance' => ['maintenance.assigned'],
@@ -46,7 +46,7 @@ final class EnsureHotelPermission
 
         // Admin tokens require the legacy write ability. Receptionist tokens
         // require an explicitly issued booking capability (never read alone).
-        $tokenAllowed = (str_starts_with($permission, 'booking.') || $permission === 'approval.request' || $permission === 'cashier.write' || $permission === 'keycard.request' || in_array($permission, ['expense.record', 'expense.review', 'expense.policy'], true))
+        $tokenAllowed = (str_starts_with($permission, 'booking.') || $permission === 'approval.request' || $permission === 'cashier.write' || $permission === 'keycard.request' || in_array($permission, ['expense.record', 'expense.review', 'expense.policy', 'supplier.manage', 'supplier.bill.post'], true))
             ? ($membership->role === 'admin' ? $user->tokenCan('hotel:write') : $user->tokenCan('booking:write'))
             : $user->tokenCan('hotel:read');
         if (! $allowed || ! $tokenAllowed) {
