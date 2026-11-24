@@ -116,8 +116,32 @@ final class CashierShiftService
         $amount = $this->checkedAdd($amount, $returnTotal);
         // Preserve an impossible negative expectation as a discrepancy rather
         // than hiding actual payouts or preventing the cashier from counting.
-        $amount -= $payoutTotal;
+        $supplierPayments = DB::table('supplier_bill_payments as p')
+            ->leftJoin('supplier_bills as b', 'b.id', '=', 'p.bill_id')
+            ->where('p.hotel_id', $hotel->id)->where('p.shift_id', $shift->id)
+            ->orderBy('p.id')->get(['p.id', 'p.bill_id', 'p.amount_minor', 'p.payment_source',
+                'p.recorded_by', 'p.evidence_reference', 'p.created_at', 'b.hotel_id as bill_hotel_id',
+                'b.currency', 'b.supplier_name_snapshot', 'b.invoice_reference']);
+        $supplierTotal = 0;
+        foreach ($supplierPayments as $payment) {
+            if ((int) $payment->bill_hotel_id !== (int) $hotel->id
+                || (int) $payment->recorded_by !== (int) $shift->cashier_id
+                || $payment->payment_source !== 'cashier_drawer'
+                || $payment->currency !== $shift->currency || (int) $payment->amount_minor <= 0) {
+                throw new HttpException(409, 'Supplier payment is inconsistent. Investigate before reconciliation.');
+            }
+            $supplierTotal = $this->checkedAdd($supplierTotal, (int) $payment->amount_minor);
+        }
+        $amount -= $this->checkedAdd($payoutTotal, $supplierTotal);
         return [
+            'supplierPaymentTotalMinor' => $supplierTotal,
+            'supplierPaymentCount' => $supplierPayments->count(),
+            'supplierPayments' => $supplierPayments->map(fn ($p) => [
+                'id' => (string) $p->id, 'billId' => (string) $p->bill_id,
+                'amountMinor' => (int) $p->amount_minor, 'supplierName' => $p->supplier_name_snapshot,
+                'invoiceReference' => $p->invoice_reference, 'evidenceReference' => $p->evidence_reference,
+                'createdAt' => $p->created_at,
+            ])->all(),
             'expenseCashReturnTotalMinor' => $returnTotal,
             'expenseCashReturnCount' => $returns->count(),
             'unreviewedExpenseCashReturnCount' => $returns->filter(fn ($r) => $r->decision !== 'approve')->count(),
@@ -177,6 +201,8 @@ final class CashierShiftService
             'expectedCashMinor' => $shift->status === 'open' ? null : (int) $shift->expected_cash_minor,
             'countedCashMinor' => $shift->counted_cash_minor === null ? null : (int) $shift->counted_cash_minor,
             'varianceMinor' => $shift->variance_minor === null ? null : (int) $shift->variance_minor,
+            'supplierPaymentTotalMinor' => $calc['supplierPaymentTotalMinor'],
+            'supplierPaymentCount' => $calc['supplierPaymentCount'],
             'expenseCashReturnTotalMinor' => $calc['expenseCashReturnTotalMinor'],
             'expenseCashReturnCount' => $calc['expenseCashReturnCount'],
             'unreviewedExpenseCashReturnCount' => $calc['unreviewedExpenseCashReturnCount'],
@@ -188,7 +214,7 @@ final class CashierShiftService
             'reviewedBy' => $shift->reviewed_by === null ? null : (string) $shift->reviewed_by,
             'openedAt' => $shift->opened_at, 'submittedAt' => $shift->submitted_at,
             'reconciledAt' => $shift->reconciled_at,
-            ...($includeReceipts ? ['receipts' => $calc['receipts'], 'expensePayouts' => $calc['expensePayouts'], 'expenseCashReturns' => $calc['expenseCashReturns']] : []),
+            ...($includeReceipts ? ['receipts' => $calc['receipts'], 'expensePayouts' => $calc['expensePayouts'], 'expenseCashReturns' => $calc['expenseCashReturns'], 'supplierPayments' => $calc['supplierPayments']] : []),
         ];
     }
 
@@ -384,6 +410,8 @@ final class CashierShiftService
                 'varianceMinor' => $variance, 'receiptCount' => $calc['receiptCount'],
                 'expensePayoutTotalMinor' => $calc['expensePayoutTotalMinor'],
                 'expensePayoutCount' => $calc['expensePayoutCount'],
+                'supplierPaymentTotalMinor' => $calc['supplierPaymentTotalMinor'],
+                'supplierPaymentCount' => $calc['supplierPaymentCount'],
                 'unconfirmedReceiptCount' => $calc['unconfirmedReceiptCount'],
             ]);
             return $this->present($hotel, $this->shift($hotel, $id), true);
