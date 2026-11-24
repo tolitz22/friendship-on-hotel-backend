@@ -74,3 +74,39 @@ it('protects expense routes and records an authorized payout only when enabled',
     $this->postJson($otherBase.'/expenses/'.$expense.'/review', ['decision' => 'approve', 'note' => 'Checked invoice'])->assertNotFound();
     $this->assertDatabaseCount('cashier_expense_payouts', 1);
 });
+
+it('records already-paid hotel bank and card expenses once without touching a drawer', function (string $source): void {
+    $hotel = Hotel::create(['name' => 'Direct Expense', 'currency' => 'PHP']);
+    $manager = expenseApi65User($hotel, 'admin');
+    $cashier = expenseApi65User($hotel, 'front_desk');
+    $path = '/api/v1/hotels/'.$hotel->id.'/expenses';
+    DB::table('financial_business_clocks')->insert([
+        'hotel_id' => $hotel->id, 'business_date' => '2026-11-24', 'status' => 'open',
+    ]);
+    DB::table('financial_accounting_periods')->insert([
+        'hotel_id' => $hotel->id, 'starts_on' => '2026-11-01', 'ends_on' => '2026-11-30', 'status' => 'open',
+    ]);
+    $payload = ['requestKey' => 'api-direct-expense-65', 'payee' => 'Utility Company',
+        'description' => 'Electricity', 'department' => 'utilities', 'category' => 'utilities',
+        'serviceDate' => '2026-11-23', 'amountMinor' => 35000, 'paymentSource' => $source,
+        'paymentReference' => 'PAY-20261123'];
+    config(['financial_accounting.enable_expense_posting' => true]);
+
+    Sanctum::actingAs($cashier, ['hotel:read', 'booking:write']);
+    $this->postJson($path, $payload)->assertForbidden();
+    Sanctum::actingAs($manager, ['hotel:read', 'hotel:write']);
+    $this->postJson($path, array_diff_key($payload, ['paymentReference' => true]))
+        ->assertUnprocessable()->assertJsonValidationErrors('paymentReference');
+
+    $result = $this->postJson($path, $payload)->assertCreated()->json('data');
+    $this->postJson($path, $payload)->assertOk()->assertJsonPath('data.replayed', true);
+    $this->postJson($path, array_replace($payload, ['amountMinor' => 45000]))->assertConflict();
+    $this->getJson($path.'/'.$result['expenseId'])->assertOk()
+        ->assertJsonPath('data.paymentSource', $source)->assertJsonPath('data.shiftId', null)
+        ->assertJsonPath('data.paymentStatus', 'paid')->assertJsonPath('data.paymentReference', 'PAY-20261123');
+    $this->assertDatabaseHas('financial_posting_lines', [
+        'journal_id' => $result['journalId'], 'account_code' => $source, 'credit_minor' => 35000,
+    ]);
+    $this->assertDatabaseCount('hotel_expenses', 1);
+    $this->assertDatabaseCount('cashier_expense_payouts', 0);
+})->with(['hotel_bank', 'hotel_card']);

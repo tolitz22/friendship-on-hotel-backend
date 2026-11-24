@@ -12,9 +12,7 @@ use Symfony\Component\HttpKernel\Exception\HttpException;
 
 final class CashExpensePostingService
 {
-    // Internal service only. Do not expose until reconciliation, permissions,
-    // configured expense policy and end-to-end tests are integrated.
-    public function record(Hotel $hotel, int $actor, int $shiftId, array $input): array
+    public function record(Hotel $hotel, int $actor, ?int $shiftId, array $input): array
     {
         $data = Validator::make($input, [
             'requestKey' => ['required', 'string', 'min:8', 'max:100'],
@@ -25,13 +23,16 @@ final class CashExpensePostingService
             'serviceDate' => ['required', 'date_format:Y-m-d'],
             'amountMinor' => ['required', 'integer', 'min:1', 'max:100000000000'],
             'invoiceReference' => ['nullable', 'string', 'max:120'],
-        ])->validate();
+        ] + ($shiftId === null ? [
+            'paymentSource' => ['required', 'in:hotel_bank,hotel_card'],
+            'paymentReference' => ['required', 'string', 'max:160', 'regex:/\S/u'],
+        ] : []))->validate();
 
         return DB::transaction(function () use ($hotel, $actor, $shiftId, $data): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
-            $shift = DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
+            $shift = $shiftId === null ? null : DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
                 ->where('id', $shiftId)->lockForUpdate()->first();
-            abort_unless($shift !== null && (int) $shift->cashier_id === $actor, 404);
+            abort_if($shiftId !== null && ($shift === null || (int) $shift->cashier_id !== $actor), 404);
             $amount = (int) $data['amountMinor'];
             $facts = [
                 'hotel_id' => $hotel->id,
@@ -44,7 +45,8 @@ final class CashExpensePostingService
                 'service_date' => $data['serviceDate'],
                 'currency' => 'PHP',
                 'amount_minor' => $amount,
-                'payment_source' => 'cashier_drawer',
+                'payment_source' => $data['paymentSource'] ?? 'cashier_drawer',
+                'payment_reference' => isset($data['paymentReference']) ? trim($data['paymentReference']) : null,
                 'invoice_reference' => $data['invoiceReference'] ?? null,
             ];
             $existing = DB::table('hotel_expenses')->where('hotel_id', $hotel->id)
@@ -56,6 +58,10 @@ final class CashExpensePostingService
                         throw new HttpException(409, 'Expense request key already used with different details.');
                     }
                 }
+                if ($shiftId === null) {
+                    return ['expenseId' => (string) $existing->id,
+                        'journalId' => (string) $existing->journal_id, 'replayed' => true];
+                }
                 $payout = DB::table('cashier_expense_payouts')->where('hotel_id', $hotel->id)
                     ->where('expense_id', $existing->id)->first();
                 if ($payout === null || (int) $payout->shift_id !== $shiftId
@@ -65,13 +71,18 @@ final class CashExpensePostingService
                 return ['expenseId' => (string) $existing->id, 'payoutId' => (string) $payout->id,
                     'journalId' => (string) $existing->journal_id, 'replayed' => true];
             }
-            abort_unless($shift->status === 'open' && $shift->currency === 'PHP', 409,
+            abort_if($shift !== null && ($shift->status !== 'open' || $shift->currency !== 'PHP'), 409,
                 'An open PHP cashier shift is required.');
+            $fundingAccount = match ($facts['payment_source']) {
+                'hotel_bank' => 'hotel_bank',
+                'hotel_card' => 'hotel_card',
+                default => 'cashier_cash',
+            };
             $journalId = app(FinancialJournalPostingService::class)->post(
-                (int) $hotel->id, 'expense:'.$data['requestKey'], 'cash_expense',
-                $data['requestKey'], 'Cash expense payout', [
+                (int) $hotel->id, 'expense:'.$data['requestKey'], $shift === null ? 'direct_expense' : 'cash_expense',
+                $data['requestKey'], $shift === null ? 'Expense paid from hotel funds' : 'Cash expense payout', [
                     ['account_code' => 'operating_expense', 'debit_minor' => $amount, 'credit_minor' => 0],
-                    ['account_code' => 'cashier_cash', 'debit_minor' => 0, 'credit_minor' => $amount],
+                    ['account_code' => $fundingAccount, 'debit_minor' => 0, 'credit_minor' => $amount],
                 ], $actor
             );
             $date = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
@@ -87,6 +98,10 @@ final class CashExpensePostingService
                 'review_reason' => $limit === null ? 'policy_unconfigured' : ($requiresReview ? 'above_limit' : null),
                 'created_at' => $now, 'updated_at' => $now,
             ]);
+            if ($shift === null) {
+                return ['expenseId' => (string) $expenseId,
+                    'journalId' => (string) $journalId, 'replayed' => false];
+            }
             $payoutId = DB::table('cashier_expense_payouts')->insertGetId([
                 'hotel_id' => $hotel->id, 'shift_id' => $shiftId,
                 'expense_id' => $expenseId, 'amount_minor' => $amount, 'created_at' => $now,

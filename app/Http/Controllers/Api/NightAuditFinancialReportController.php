@@ -157,14 +157,14 @@ final class NightAuditFinancialReportController
         $expenseAccounts = DB::table('financial_posting_journals as j')
             ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
             ->where('j.hotel_id', $hotel->id)->where('j.business_date', $date)
-            ->whereIn('j.source_type', ['cash_expense', 'cash_expense_reversal', 'cash_expense_adjustment', 'cash_expense_refund', 'supplier_bill', 'employee_expense_claim'])
+            ->whereIn('j.source_type', ['cash_expense', 'direct_expense', 'cash_expense_reversal', 'cash_expense_adjustment', 'cash_expense_refund', 'supplier_bill', 'employee_expense_claim'])
             ->where('l.account_code', 'operating_expense')
             ->selectRaw('COALESCE(SUM(l.debit_minor), 0) as debits, COALESCE(SUM(l.credit_minor), 0) as credits')
             ->first();
         $expenseSources = DB::table('financial_posting_journals as j')
             ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
             ->where('j.hotel_id', $hotel->id)->where('j.business_date', $date)
-            ->whereIn('j.source_type', ['cash_expense', 'cash_expense_adjustment', 'cash_expense_reversal', 'cash_expense_refund', 'expense_clearing_cash_return', 'supplier_bill', 'supplier_bill_payment', 'employee_expense_claim', 'employee_reimbursement_payment'])
+            ->whereIn('j.source_type', ['cash_expense', 'direct_expense', 'cash_expense_adjustment', 'cash_expense_reversal', 'cash_expense_refund', 'expense_clearing_cash_return', 'supplier_bill', 'supplier_bill_payment', 'employee_expense_claim', 'employee_reimbursement_payment'])
             ->selectRaw('j.source_type, l.account_code, SUM(l.debit_minor) as debits, SUM(l.credit_minor) as credits')
             ->groupBy('j.source_type', 'l.account_code')->get();
         $movement = static function (string $source, string $account) use ($expenseSources): int {
@@ -178,7 +178,7 @@ final class NightAuditFinancialReportController
             ->where('l.account_code', 'expense_correction_clearing')
             ->selectRaw('COALESCE(SUM(l.debit_minor), 0) as debits, COALESCE(SUM(l.credit_minor), 0) as credits')->first();
         $expenses = [
-            'grossExpenseMinor' => $movement('cash_expense', 'operating_expense') + $movement('supplier_bill', 'operating_expense') + $movement('employee_expense_claim', 'operating_expense'),
+            'grossExpenseMinor' => $movement('cash_expense', 'operating_expense') + $movement('direct_expense', 'operating_expense') + $movement('supplier_bill', 'operating_expense') + $movement('employee_expense_claim', 'operating_expense'),
             'employeeClaimExpenseMinor' => $movement('employee_expense_claim', 'operating_expense'),
             'employeeReimbursementMinor' => $movement('employee_reimbursement_payment', 'employee_payable'),
             'employeeDrawerReimbursementMinor' => -$movement('employee_reimbursement_payment', 'cashier_cash'),

@@ -38,6 +38,7 @@ final class ExpenseController
             'paymentSource' => $e->payment_source, 'paymentStatus' => 'paid',
             'reviewStatus' => $e->review_status, 'reviewReason' => $e->review_reason,
             'policyLimitMinor' => $e->policy_limit_minor === null ? null : (int) $e->policy_limit_minor,
+            'paymentReference' => $e->payment_reference,
             'invoiceReference' => $e->invoice_reference, 'createdAt' => $e->created_at,
         ];
     }
@@ -161,6 +162,14 @@ final class ExpenseController
         abort_unless(config('financial_accounting.enable_expense_posting', false), 409,
             'Expense posting is not enabled for this deployment.');
         $result = $service->record($hotel, (int) $request->user()->id, (int) $shift, $request->all());
+        return response()->json(['data' => $result], $result['replayed'] ? 200 : 201);
+    }
+
+    public function recordDirect(Request $request, Hotel $hotel, CashExpensePostingService $service): JsonResponse
+    {
+        abort_unless(config('financial_accounting.enable_expense_posting', false), 409,
+            'Expense posting is not enabled for this deployment.');
+        $result = $service->record($hotel, (int) $request->user()->id, null, $request->all());
         return response()->json(['data' => $result], $result['replayed'] ? 200 : 201);
     }
 

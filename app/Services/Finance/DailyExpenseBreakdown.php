@@ -22,7 +22,7 @@ final class DailyExpenseBreakdown
             ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
             ->where('j.hotel_id', $hotelId)->where('j.business_date', $date)
             ->where('l.account_code', 'operating_expense');
-        $original = (clone $base)->where('j.source_type', 'cash_expense')
+        $original = (clone $base)->whereIn('j.source_type', ['cash_expense', 'direct_expense'])
             ->join('hotel_expenses as e', function ($join): void {
                 $join->on('e.journal_id', '=', 'j.id')->on('e.hotel_id', '=', 'j.hotel_id');
             });

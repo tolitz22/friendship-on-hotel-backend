@@ -216,6 +216,7 @@ Route::prefix('v1')->group(function (): void {
             Route::post('/suppliers', [SupplierController::class, 'store'])->middleware('hotel.permission:supplier.manage')->middleware('throttle:20,1');
             Route::put('/suppliers/{supplier}', [SupplierController::class, 'update'])->whereNumber('supplier')->middleware('hotel.permission:supplier.manage')->middleware('throttle:20,1');
             Route::get('/expenses', [ExpenseController::class, 'index'])->middleware('hotel.permission:expense.read');
+            Route::post('/expenses', [ExpenseController::class, 'recordDirect'])->middleware('hotel.permission:expense.record_direct')->middleware('throttle:20,1');
             Route::get('/expenses/exceptions', [ExpenseController::class, 'exceptions'])->middleware('hotel.permission:expense.read');
             Route::get('/expenses/policy', [ExpenseController::class, 'policy'])->middleware('hotel.permission:expense.read');
             Route::put('/expenses/policy', [ExpenseController::class, 'updatePolicy'])->middleware('hotel.permission:expense.policy')->middleware('throttle:10,1');
