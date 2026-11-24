@@ -130,3 +130,17 @@ it('rejects unauthorized amendments and scopes manifest to the member hotel', fu
     $this->getJson('/api/v1/hotels/'.$other->id.'/front-desk/manifest?date=2026-12-10')
         ->assertNotFound();
 });
+
+
+it('records an expired unpriced booking as no-show only once', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-11-20 10:00:00 Asia/Manila'));
+    [$hotel, $type, $rooms, $guest] = phase23Setup();
+    phase23Auth($hotel);
+    $id = phase23Create($this, $hotel, $type, $guest, 'no-show-example-001', '2026-11-21', '2026-11-22');
+    $path = '/api/v1/hotels/'.$hotel->id.'/bookings/'.$id.'/no-show';
+    $this->postJson($path)->assertStatus(409);
+    $this->travelTo(new DateTimeImmutable('2026-11-23 10:00:00 Asia/Manila'));
+    $this->postJson($path)->assertOk()->assertJsonPath('data.status', 'no_show');
+    $this->postJson($path)->assertStatus(409);
+    expect(DB::table('reservation_booking_events')->where('reservation_record_id', $id)->where('event_type', 'no_show')->count())->toBe(1);
+});
