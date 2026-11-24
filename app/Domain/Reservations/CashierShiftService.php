@@ -95,11 +95,8 @@ final class CashierShiftService
             }
             $payoutTotal = $this->checkedAdd($payoutTotal, (int) $payout->amount_minor);
         }
-        // The existing expected-cash column is unsigned. Do not fabricate a
-        // zero balance when recorded payouts exceed all known cash receipts.
-        if ($payoutTotal > $amount) {
-            throw new HttpException(409, 'Recorded payouts exceed available recorded cash. Investigate before reconciliation.');
-        }
+        // Preserve an impossible negative expectation as a discrepancy rather
+        // than hiding actual payouts or preventing the cashier from counting.
         $amount -= $payoutTotal;
         return [
             'expensePayoutTotalMinor' => $payoutTotal,
@@ -145,6 +142,7 @@ final class CashierShiftService
             'currency' => $shift->currency, 'status' => $shift->status,
             'cashTenderTrackingSupported' => true,
             'expensePostingEnabled' => (bool) config('financial_accounting.enable_expense_posting', false),
+            'negativeExpectedCash' => $shift->status !== 'open' && (int) $shift->expected_cash_minor < 0,
             'openingFloatMinor' => (int) $shift->opening_float_minor,
             // Do not expose the live expected cash to the cashier before count submission.
             'expectedCashMinor' => $shift->status === 'open' ? null : (int) $shift->expected_cash_minor,
@@ -372,7 +370,7 @@ final class CashierShiftService
                 throw new HttpException(409, 'Shift receipts or payouts changed after submission.');
             }
             if ($decision === 'reconcile'
-                && ((int) $shift->variance_minor !== 0 || $calc['unconfirmedReceiptCount'] > 0)) {
+                && ((int) $shift->expected_cash_minor < 0 || (int) $shift->variance_minor !== 0 || $calc['unconfirmedReceiptCount'] > 0)) {
                 throw new HttpException(409, 'Variance or unreviewed/rejected payments require a flagged investigation.');
             }
             $status = $decision === 'reconcile' ? 'reconciled' : 'flagged';
