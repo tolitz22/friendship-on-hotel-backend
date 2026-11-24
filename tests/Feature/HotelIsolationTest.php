@@ -93,3 +93,52 @@ it('denies a deliberately inactive user even when they hold an active hotel memb
 
     $this->getJson('/api/v1/hotels/'.$hotel->id)->assertForbidden();
 });
+
+it('allows managers to edit hotel profile details with auditable changes', function (): void {
+    $manager = User::create([
+        'name'=>'Property Manager','email'=>'property-manager@example.test','password'=>'long-passphrase',
+    ]);
+    $hotel = Hotel::create(['name'=>'Original Hotel']);
+    HotelMembership::create([
+        'hotel_id'=>$hotel->id,'user_id'=>$manager->id,'role'=>'admin','is_active'=>true,
+    ]);
+    Sanctum::actingAs($manager, ['hotel:read','hotel:write']);
+    $url='/api/v1/hotels/'.$hotel->id;
+    $this->patchJson($url,[
+        'name'=>'Updated Hotel','address'=>'Highway 12, Pampanga',
+        'contactEmail'=>'desk@example.test','contactPhone'=>'+63 123 456 7890',
+    ])->assertOk()->assertJsonPath('data.name','Updated Hotel')
+        ->assertJsonPath('data.contactEmail','desk@example.test')
+        ->assertJsonPath('data.currency','PHP');
+
+    $entry=\Illuminate\Support\Facades\DB::table('catalog_audit_logs')
+        ->where('hotel_id',$hotel->id)->where('subject_type','hotel')->first();
+    expect($entry)->not->toBeNull();
+    expect($entry->actor_id)->toBe($manager->id);
+    expect(json_decode($entry->changes_before,true)['name'])->toBe('Original Hotel');
+    expect(json_decode($entry->changes_after,true)['name'])->toBe('Updated Hotel');
+
+    $this->patchJson($url,['name'=>'Updated Hotel'])->assertOk();
+    expect(\Illuminate\Support\Facades\DB::table('catalog_audit_logs')
+        ->where('hotel_id',$hotel->id)->where('subject_type','hotel')->count())->toBe(1);
+});
+
+it('blocks non-managers from changing property details and forbids currency or timezone edits', function (): void {
+    $worker=User::create([
+        'name'=>'Property Worker','email'=>'property-worker@example.test','password'=>'long-passphrase',
+    ]);
+    $manager=User::create([
+        'name'=>'Safe Manager','email'=>'safe-manager@example.test','password'=>'long-passphrase',
+    ]);
+    $hotel=Hotel::create(['name'=>'Protected Hotel','timezone'=>'Asia/Manila','currency'=>'PHP']);
+    foreach ([[$worker,'front_desk'],[$manager,'admin']] as [$user,$role]) {
+        HotelMembership::create(['hotel_id'=>$hotel->id,'user_id'=>$user->id,'role'=>$role]);
+    }
+    $url='/api/v1/hotels/'.$hotel->id;
+    Sanctum::actingAs($worker,['hotel:read','booking:write']);
+    $this->patchJson($url,['name'=>'Unauthorized'])->assertForbidden();
+    Sanctum::actingAs($manager,['hotel:read','hotel:write']);
+    $this->patchJson($url,['name'=>'  '])->assertUnprocessable();
+    $this->patchJson($url,['address'=>'Office','currency'=>'USD','timeZone'=>'UTC'])
+        ->assertOk()->assertJsonPath('data.currency','PHP')->assertJsonPath('data.timeZone','Asia/Manila');
+});
