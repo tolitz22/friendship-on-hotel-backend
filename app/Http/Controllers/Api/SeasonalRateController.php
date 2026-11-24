@@ -23,11 +23,13 @@ final class SeasonalRateController
     {
         $input = $request->validate([
             'name' => ['required', 'string', 'max:100'],
-            'kind' => ['required', 'in:seasonal,date_override,weekend,holiday'],
+            'kind' => ['required', 'in:seasonal,date_override,weekend,holiday,corporate,promotion'],
             'startsOn' => ['required', 'date_format:Y-m-d'],
             'endsOn' => ['required', 'date_format:Y-m-d', 'after_or_equal:startsOn'],
             'weekendDays' => ['required_if:kind,weekend', 'exclude_unless:kind,weekend', 'array', 'min:1', 'max:7'],
             'weekendDays.*' => ['integer', 'distinct', 'between:1,7'],
+            'eligibilityCode' => ['required_if:kind,corporate,promotion', 'nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'minimumNights' => ['nullable', 'integer', 'min:1', 'max:31'],
             'nightlyMinor' => ['required', 'integer', 'min:0', 'max:100000000000'],
         ]);
         if ($input['kind'] === 'date_override' && $input['startsOn'] !== $input['endsOn']) {
@@ -36,6 +38,12 @@ final class SeasonalRateController
         if ($input['kind'] === 'weekend') {
             $input['weekendDays'] = array_map('intval', $input['weekendDays']);
             sort($input['weekendDays']);
+        }
+        if (in_array($input['kind'], ['corporate', 'promotion'], true)) {
+            $input['eligibilityCode'] = strtoupper($input['eligibilityCode']);
+            $input['minimumNights'] = (int) ($input['minimumNights'] ?? 1);
+        } else {
+            unset($input['eligibilityCode'], $input['minimumNights']);
         }
         return $input;
     }
@@ -62,10 +70,17 @@ final class SeasonalRateController
     {
         $input = $request->validate([
             'roomTypeId' => ['required', 'integer', 'min:1'],
+            'corporateCode' => ['nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/'],
+            'promoCode' => ['nullable', 'string', 'max:40', 'regex:/^[A-Za-z0-9_-]+$/'],
             'checkIn' => ['required', 'date_format:Y-m-d'],
             'checkOut' => ['required', 'date_format:Y-m-d', 'after:checkIn'],
         ]);
+        if (isset($input['corporateCode'], $input['promoCode'])) {
+            throw \Illuminate\Validation\ValidationException::withMessages(['promoCode' => ['Select only one negotiated or promotional rate.']]);
+        }
         return response()->json(['data' => $rates->preview($hotel, (int) $input['roomTypeId'], (int) $plan,
-            new StayPeriod($input['checkIn'], $input['checkOut']))]);
+            new StayPeriod($input['checkIn'], $input['checkOut']),
+            isset($input['corporateCode']) ? strtoupper($input['corporateCode']) : null,
+            isset($input['promoCode']) ? strtoupper($input['promoCode']) : null)]);
     }
 }
