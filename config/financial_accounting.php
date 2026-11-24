@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Enable only after reimbursement acceptance and finance sign-off.
+    'enable_employee_reimbursements' => (bool) env('FINANCE_ENABLE_EMPLOYEE_REIMBURSEMENTS', false),
     // Supplier financial posting requires separate acceptance and finance sign-off.
     'enable_supplier_billing' => (bool) env('FINANCE_ENABLE_SUPPLIER_BILLING', false),
     // Keep new expense writes disabled until staging acceptance and finance sign-off.
