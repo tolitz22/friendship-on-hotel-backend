@@ -6,6 +6,7 @@ namespace App\Services\Finance;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\ValidationException;
 use InvalidArgumentException;
 
@@ -65,6 +66,17 @@ final class NightlyRoomRevenueRecognitionService
 
             $linked = DB::table('financial_folio_night_assessments')
                 ->where('hotel_id', $hotelId)->where('source_journal_id', $sourceJournalId)->first();
+            if ($linked !== null && Schema::hasTable('reservation_pricing_revisions')
+                && DB::table('reservation_pricing_revision_nights as n')
+                    ->join('reservation_pricing_revisions as r', 'r.id', '=', 'n.revision_id')
+                    ->where('r.hotel_id', $hotelId)->where('r.folio_id', $linked->folio_id)
+                    ->where('n.kind', 'reversal')->where('n.original_entry_id', $linked->folio_entry_id)
+                    ->exists()) {
+                throw ValidationException::withMessages([
+                    'source_journal_id' => 'Superseded room nights cannot recognize new revenue.',
+                ]);
+            }
+
             $approvedNet = $linked === null ? null
                 : (new FolioNightCorrectionService())->current($hotelId, $linked)['room_revenue_minor'];
             if ($linked !== null && ($linked->status !== 'approved'
