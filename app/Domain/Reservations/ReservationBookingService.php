@@ -166,8 +166,9 @@ final class ReservationBookingService
                 throw new HttpException(409, 'Only confirmed reservations can be cancelled through this endpoint.');
             }
 
-            if (DB::table('reservation_folios')->where('hotel_id', $hotel->id)
-                ->where('reservation_record_id', $record->id)->exists()) {
+            $priced = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+                ->where('reservation_record_id', $record->id)->exists();
+            if ($priced && !$noShow) {
                 throw new HttpException(409, 'Priced reservations require a financial reversal policy before cancellation.');
             }
 
@@ -179,13 +180,17 @@ final class ReservationBookingService
             DB::table('reservation_records')->where('id', $record->id)->update([
                 'lifecycle_state' => $state, 'updated_at' => now(),
             ]);
-            $this->audit($hotel->id, (int) $record->id, $actorId, $state, 'confirmed', $state);
+            $this->audit($hotel->id, (int) $record->id, $actorId, $state, 'confirmed', $state,
+                $noShow && $priced ? 'Financial review required: original charges and payments retained. No fee, waiver or refund applied.' : null);
 
-            return $this->present($hotel->id, (int) $record->id, false);
+            return [
+                ...$this->present($hotel->id, (int) $record->id, false),
+                ...($noShow ? ['financialReviewRequired' => $priced] : []),
+            ];
         }, 3);
     }
 
-    private function audit(int $hotelId, int $id, int $actorId, string $event, ?string $from, string $to): void
+    private function audit(int $hotelId, int $id, int $actorId, string $event, ?string $from, string $to, ?string $note = null): void
     {
         DB::table('reservation_booking_events')->insert([
             'hotel_id' => $hotelId,
@@ -194,6 +199,7 @@ final class ReservationBookingService
             'event_type' => $event,
             'old_state' => $from,
             'new_state' => $to,
+            ...($note === null ? [] : ['note' => $note]),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
