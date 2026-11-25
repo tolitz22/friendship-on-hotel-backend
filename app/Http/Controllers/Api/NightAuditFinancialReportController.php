@@ -267,6 +267,8 @@ final class NightAuditFinancialReportController
             ],
             'cashier' => $cashier,
             'expenses' => $expenses,
+            'noShow' => app(\App\Services\Finance\NoShowFinancialReport::class)->report((int) $hotel->id, $date,
+                $close !== null && $close->status === 'completed' && $snapshotMatches && $unbalanced === 0),
             'limitations' => [
                 'Scheduled room nights are not independently verified occupied room nights.',
                 'Point-in-time verified room inspections cannot establish overnight room-night occupancy; official ADR/RevPAR remain unavailable.',
