@@ -77,6 +77,13 @@ final class NightlyRoomRevenueRecognitionService
                 ]);
             }
 
+            if ($linked !== null && DB::table('reservation_records')->where('hotel_id', $hotelId)
+                ->where('id', $linked->reservation_record_id)->where('lifecycle_state', 'no_show')->exists()) {
+                throw ValidationException::withMessages([
+                    'source_journal_id' => 'No-show charges require financial reconciliation before revenue recognition.',
+                ]);
+            }
+
             $approvedNet = $linked === null ? null
                 : (new FolioNightCorrectionService())->current($hotelId, $linked)['room_revenue_minor'];
             if ($linked !== null && ($linked->status !== 'approved'
