@@ -185,6 +185,16 @@ final class FolioSettlementService
                 ->where('hotel_id', $hotel->id)->where('payment_record_id', $paymentId)
                 ->whereIn('status', ['requested', 'approved'])->sum('amount_minor');
             $net = app(FolioAccountingService::class)->summaryFor($folio)['netRecordedChargesMinor'];
+            if (DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->where('lifecycle_state', 'no_show')->exists()) {
+                if ($entryId !== null) {
+                    throw ValidationException::withMessages(['folioEntryId' => 'No-show fees require a folio-level allocation, not an unused room night.']);
+                }
+                $clearance = app(NoShowRefundEligibility::class)->review($hotel, $bookingId);
+                if (!config('booking.no_show_adjustments_enabled', false) || !$clearance['financialClearanceValid']) {
+                    throw ValidationException::withMessages(['allocation' => 'Complete no-show financial clearance before allocating payments.']);
+                }
+            }
             $folioAllocated = (int) DB::table('folio_settlement_allocations')
                 ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
                 ->sum('amount_minor');
@@ -390,7 +400,10 @@ final class FolioSettlementService
         if ($pending > 0) $blockers[] = 'Unverified or rejected payment evidence remains.';
         if ($net !== $allocated) $blockers[] = 'Verified payment allocations do not equal recorded charges.';
         if ($allocated > $verified) $blockers[] = 'Allocated funds exceed verified payment evidence.';
-        if (config('financial_accounting.enable_live_folio_tax', false)) {
+        if ($booking->lifecycle_state === 'no_show') {
+            $blockers[] = 'No-show accounts use dedicated financial reconciliation, not guest checkout sign-off.';
+        }
+        if ($booking->lifecycle_state !== 'no_show' && config('financial_accounting.enable_live_folio_tax', false)) {
             $assessedEntries = array_column($taxAllocations, 'folioEntryId');
             foreach ($charges as $charge) {
                 if ($charge['type'] === 'room_night'
