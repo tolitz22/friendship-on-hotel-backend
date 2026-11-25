@@ -42,7 +42,7 @@ final class NightAuditPreviewService
         $folios = $folioRows->keyBy('booking_id');
         $folioIds = $folioRows->pluck('folio_id')->all();
         $roomEntries = $folioIds === [] ? collect()
-            : DB::table('folio_entries')
+            : ActiveFolioEntryScope::apply(DB::table('folio_entries'))
                 ->where('hotel_id', $hotel->id)->whereIn('folio_id', $folioIds)
                 ->where('entry_type','room_night')->where('stay_date', $date)
                 ->get(['id','folio_id','amount_minor'])->groupBy('folio_id');
