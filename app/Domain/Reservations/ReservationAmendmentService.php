@@ -113,6 +113,8 @@ final class ReservationAmendmentService
                 $latest = max($booking->check_out, $newStay->departure);
                 $closed = ($clock !== null && $earliest < $clock->business_date) || DB::table('financial_day_closes')->where('hotel_id', $hotel->id)
                     ->where('status', 'completed')->where('business_date', '>=', $earliest)->where('business_date', '<', $latest)->exists();
+                $assessed = DB::table('financial_folio_night_assessments')
+                    ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)->exists();
                 $review = [
                     'id' => (string) $bookingId, 'oldCheckIn' => $booking->check_in, 'oldCheckOut' => $booking->check_out,
                     'checkIn' => $newStay->arrival, 'checkOut' => $newStay->departure, 'currency' => $folio->currency,
@@ -120,7 +122,10 @@ final class ReservationAmendmentService
                     'differenceMinor' => $rate['roomSubtotalMinor'] - $oldSubtotal,
                     'nightlyRates' => $rate['nightlyRates'] ?? array_map(fn ($date) => ['date' => $date, 'amountMinor' => $rate['nightlyMinor'], 'source' => 'base', 'ruleId' => null], $rate['nights']),
                     'policyTerms' => $rate['policyTerms'] ?? null, 'currentFolioSummary' => $summary,
-                    'closedPeriodAffected' => $closed, 'previewOnly' => true, 'saved' => false,
+                    'closedPeriodAffected' => $closed,
+                    'accountingAlreadyAssessed' => $assessed,
+                    'requiresFinancialCorrection' => $closed || $assessed,
+                    'previewOnly' => true, 'saved' => false,
                 ];
 
                 // Bind the review to the property, actor, dates, pricing and current folio.
