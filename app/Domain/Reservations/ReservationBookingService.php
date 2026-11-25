@@ -155,6 +155,11 @@ final class ReservationBookingService
                 ->where('hotel_id', $hotel->id)->where('id', $reservationId)->first();
             abort_unless($record !== null, 404);
 
+            if ($noShow) {
+                // Serialize the no-show status change with nightly posting.
+                DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->lockForUpdate()->first();
+            }
+
             // Lock in the same order as create (room type, then reservation).
             DB::table('room_types')->where('hotel_id', $hotel->id)
                 ->where('id', $record->room_type_id)->lockForUpdate()->first();
@@ -163,17 +168,26 @@ final class ReservationBookingService
             abort_unless($record !== null, 404);
 
             if ($record->lifecycle_state !== 'confirmed') {
-                throw new HttpException(409, 'Only confirmed reservations can be cancelled through this endpoint.');
+                throw new HttpException(409, $noShow
+                    ? 'Only a confirmed booking can be marked as a no-show.'
+                    : 'Only confirmed reservations can be cancelled through this endpoint.');
             }
 
-            $priced = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
-                ->where('reservation_record_id', $record->id)->exists();
+            $folioId = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+                ->where('reservation_record_id', $record->id)->value('id');
+            $priced = $folioId !== null;
             if ($priced && !$noShow) {
                 throw new HttpException(409, 'Priced reservations require a financial reversal policy before cancellation.');
             }
 
-            if ($noShow && now($hotel->timezone ?: 'Asia/Manila')->toDateString() < $record->check_out) {
-                throw new HttpException(409, 'A no-show can only be recorded once the scheduled stay has ended.');
+            if ($noShow) {
+                $cutoff = NoShowWorkflow::eligibleAt($hotel, $record->check_in);
+                if (now()->lessThan($cutoff)) {
+                    throw new HttpException(409, 'This booking can be marked as a no-show from '.$cutoff->format('M j, Y H:i T').'.');
+                }
+                if ($priced && ($blocker = NoShowWorkflow::accountingBlocker((int) $hotel->id, (int) $folioId)) !== null) {
+                    throw new HttpException(409, $blocker.' Resolve it with Finance before releasing the booking.');
+                }
             }
             $state = $noShow ? 'no_show' : 'cancelled';
             // This starter workflow does not compute refunds or cancellation fees.

@@ -107,6 +107,9 @@ final class FolioAccountingService
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $folio = $this->findFolio($hotel, $bookingId, true);
             $this->assertNotSigned($hotel, $folio);
+            abort_if(DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->where('lifecycle_state', 'no_show')->exists(), 409,
+                'Use the dedicated no-show financial review to adjust this account.');
             if (!empty($input['routineIncidental'])) {
                 if (!Schema::hasColumn('folio_adjustments', 'is_routine_incidental')) {
                     throw new HttpException(409, 'Incidental charge migration is required before adding this service.');

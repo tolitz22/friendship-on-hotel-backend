@@ -106,7 +106,7 @@ final class FinancialBusinessDayController
         }
 
         $noShowPending = \App\Domain\Reservations\NoShowClosingGuard::unresolved((int) $hotel->id, $date);
-        if ($noShowPending > 0) {
+        if ($noShowPending > 0 && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id)) {
             $blockers[] = $noShowPending.' priced no-show booking(s) require financial reconciliation.';
         }
 
@@ -181,6 +181,7 @@ final class FinancialBusinessDayController
             ],
             'blockers' => $blockers,
             'unresolvedNoShowCount' => $noShowPending,
+            'unresolvedNoShowBookings' => \App\Domain\Reservations\NoShowClosingGuard::bookings((int) $hotel->id, $date),
             'openShiftIds' => $openShiftIds,
             'canClose' => $blockers === [],
             'readinessIsAdvisory' => true,

@@ -54,7 +54,8 @@ final class FinancialBusinessDayCloseService
             }
             $period = $periods->first();
 
-            if (\App\Domain\Reservations\NoShowClosingGuard::unresolved($hotelId, $expectedBusinessDate) > 0) {
+            if (\App\Domain\Reservations\NoShowWorkflow::enabled($hotelId)
+                && \App\Domain\Reservations\NoShowClosingGuard::unresolved($hotelId, $expectedBusinessDate) > 0) {
                 throw ValidationException::withMessages([
                     'no_show_financial_review' => 'Priced no-show bookings require financial reconciliation before day close.',
                 ]);

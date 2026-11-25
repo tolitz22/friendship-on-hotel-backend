@@ -12,9 +12,9 @@ use Illuminate\Validation\ValidationException;
  */
 final class NoShowFeeJournalService
 {
-    public function post(int $hotelId, int $reviewId, int $actorId, int $vatMinor): ?int
+    public function post(int $hotelId, int $reviewId, int $actorId, int $vatMinor, ?int $previousClearanceId = null): ?int
     {
-        return DB::transaction(function () use ($hotelId, $reviewId, $actorId, $vatMinor): ?int {
+        return DB::transaction(function () use ($hotelId, $reviewId, $actorId, $vatMinor, $previousClearanceId): ?int {
             $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotelId)->lockForUpdate()->first();
             $review = DB::table('no_show_financial_reviews')->where('hotel_id', $hotelId)
                 ->where('id', $reviewId)->lockForUpdate()->first();
@@ -32,8 +32,12 @@ final class NoShowFeeJournalService
             if ($vatMinor > 0) {
                 $lines[] = ['account_code' => 'VAT_PAYABLE', 'debit_minor' => 0, 'credit_minor' => $vatMinor];
             }
+            $key = 'no-show-fee-'.$reviewId;
+            if ($previousClearanceId !== null) {
+                $key .= '-replace-'.$previousClearanceId;
+            }
             return app(FinancialJournalPostingService::class)->post(
-                $hotelId, 'no-show-fee-'.$reviewId, 'no_show_fee', 'no-show-review-'.$reviewId,
+                $hotelId, $key, 'no_show_fee', 'no-show-review-'.$reviewId,
                 'Reviewed no-show fee', $lines, $actorId
             );
         }, 3);

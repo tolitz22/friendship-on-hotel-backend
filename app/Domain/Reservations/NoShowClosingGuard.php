@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Reservations;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -12,8 +13,23 @@ final class NoShowClosingGuard
 {
     public static function unresolved(int $hotelId, string $businessDate): int
     {
+        return self::query($hotelId, $businessDate)?->count('r.id') ?? 0;
+    }
+
+    public static function bookings(int $hotelId, string $businessDate): array
+    {
+        return self::query($hotelId, $businessDate)?->orderBy('r.check_in')->orderBy('r.id')->limit(30)
+            ->get(['r.id', 'r.reference', 'r.check_in'])
+            ->map(fn ($row) => ['id' => (string) $row->id, 'reference' => $row->reference, 'arrival' => $row->check_in])
+            ->all() ?? [];
+    }
+
+    private static function query(int $hotelId, string $businessDate): ?Builder
+    {
         foreach (['reservation_records', 'reservation_folios'] as $table) {
-            if (!Schema::hasTable($table)) return 0;
+            if (!Schema::hasTable($table)) {
+                return null;
+            }
         }
 
         $query = DB::table('reservation_records as r')
@@ -25,7 +41,8 @@ final class NoShowClosingGuard
             ->where('r.lifecycle_state', 'no_show')
             ->where('r.check_in', '<=', $businessDate);
         if (Schema::hasTable('no_show_financial_clearances') && Schema::hasTable('no_show_financial_reviews')
-            && Schema::hasTable('financial_posting_journals')) {
+            && Schema::hasColumn('financial_posting_journals', 'reverses_journal_id')
+            && Schema::hasTable('financial_posting_lines')) {
             $query->whereNotExists(function ($sub) use ($businessDate): void {
                 $sub->selectRaw('1')->from('no_show_financial_reviews as v')
                     ->join('no_show_financial_clearances as c', function ($join): void {
@@ -33,28 +50,40 @@ final class NoShowClosingGuard
                     })
                     ->whereColumn('v.hotel_id', 'r.hotel_id')
                     ->whereColumn('v.reservation_record_id', 'r.id')->whereColumn('v.folio_id', 'f.id')
-                    ->whereColumn('c.gross_minor', 'v.fee_minor')
-                    ->whereColumn('c.reviewed_by', '!=', 'v.actor_id')
-                    ->where('c.business_date', '<=', $businessDate)
-                    ->whereRaw('c.vat_minor + c.revenue_minor = c.gross_minor')
-                    ->where(function ($valid): void {
-                        $valid->where(function ($zero): void {
-                            $zero->where('c.gross_minor', 0)->whereNull('c.journal_id');
-                        })->orWhere(function ($posted): void {
-                            $posted->where('c.gross_minor', '>', 0)->whereExists(function ($journal): void {
-                                $journal->selectRaw('1')->from('financial_posting_journals as j')
-                                    ->whereColumn('j.id', 'c.journal_id')->whereColumn('j.hotel_id', 'c.hotel_id')
-                                    ->whereColumn('j.business_date', 'c.business_date')
-                                    ->whereColumn('j.posted_by', 'c.reviewed_by')->where('j.source_type', 'no_show_fee')
-                                    ->whereNotExists(function ($reversal): void {
-                                        $reversal->selectRaw('1')->from('financial_posting_journals as x')
-                                            ->whereColumn('x.reverses_journal_id', 'j.id');
-                                    });
-                            });
+                    ->where('c.business_date', '<=', $businessDate);
+                self::requireValidClearance($sub);
+            });
+        }
+        return $query;
+    }
+
+    public static function requireValidClearance(Builder $query): void
+    {
+        $sourceReference = DB::connection()->getDriverName() === 'sqlite'
+            ? "('no-show-review-' || v.id)"
+            : "CONCAT('no-show-review-', v.id)";
+
+        $query->whereColumn('c.gross_minor', 'v.fee_minor')
+            ->whereColumn('c.reviewed_by', '!=', 'v.actor_id')
+            ->whereRaw('c.vat_minor + c.revenue_minor = c.gross_minor')
+            ->where(function (Builder $valid) use ($sourceReference): void {
+                $valid->where(fn (Builder $zero) => $zero->where('c.gross_minor', 0)->whereNull('c.journal_id'))
+                    ->orWhere(function (Builder $posted) use ($sourceReference): void {
+                        $posted->where('c.gross_minor', '>', 0)->whereExists(function (Builder $journal) use ($sourceReference): void {
+                            $journal->selectRaw('1')->from('financial_posting_journals as j')
+                                ->whereColumn('j.id', 'c.journal_id')->whereColumn('j.hotel_id', 'c.hotel_id')
+                                ->whereColumn('j.business_date', 'c.business_date')->whereColumn('j.posted_by', 'c.reviewed_by')
+                                ->where('j.source_type', 'no_show_fee')->whereRaw("j.source_reference = $sourceReference")
+                                ->whereNotExists(fn (Builder $reversal) => $reversal->selectRaw('1')
+                                    ->from('financial_posting_journals as x')->whereColumn('x.hotel_id', 'j.hotel_id')
+                                    ->whereColumn('x.reverses_journal_id', 'j.id'))
+                                ->whereRaw('c.gross_minor = (select coalesce(sum(l.debit_minor), 0) from financial_posting_lines l where l.journal_id = j.id)')
+                                ->whereRaw('c.gross_minor = (select coalesce(sum(l.credit_minor), 0) from financial_posting_lines l where l.journal_id = j.id)')
+                                ->whereRaw("c.gross_minor = (select coalesce(sum(l.debit_minor), 0) from financial_posting_lines l where l.journal_id = j.id and l.account_code = 'AR')")
+                                ->whereRaw("c.revenue_minor = (select coalesce(sum(l.credit_minor), 0) from financial_posting_lines l where l.journal_id = j.id and l.account_code = 'NO_SHOW_REV')")
+                                ->whereRaw("c.vat_minor = (select coalesce(sum(l.credit_minor), 0) from financial_posting_lines l where l.journal_id = j.id and l.account_code = 'VAT_PAYABLE')");
                         });
                     });
             });
-        }
-        return $query->distinct()->count('r.id');
     }
 }

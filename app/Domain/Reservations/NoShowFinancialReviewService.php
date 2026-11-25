@@ -15,6 +15,7 @@ final class NoShowFinancialReviewService
     {
         return DB::transaction(function () use ($hotel, $bookingId): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
+            $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->lockForUpdate()->first();
             $booking = DB::table('reservation_records')->where('hotel_id', $hotel->id)
                 ->where('id', $bookingId)->lockForUpdate()->first();
             abort_unless($booking !== null, 404);
@@ -25,82 +26,72 @@ final class NoShowFinancialReviewService
             $summary = $accounting->summaryFor($folio);
             $snapshot = DB::table('booking_pricing_snapshots')->where('hotel_id', $hotel->id)
                 ->where('reservation_record_id', $bookingId)->first();
-            $terms = $snapshot === null ? null : (json_decode($snapshot->snapshot, true, 512, JSON_THROW_ON_ERROR)['policyTerms'] ?? null);
+            $terms = $snapshot === null ? null : (json_decode($snapshot->snapshot, true)['policyTerms'] ?? null);
             $nights = ActiveFolioEntryScope::apply(DB::table('folio_entries'))
                 ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
                 ->where('entry_type', 'room_night')->orderBy('stay_date')->get();
-            $subtotal = (int) $nights->sum('amount_minor');
-            $firstNight = (int) ($nights->first()->amount_minor ?? 0);
+            $revision = DB::table('reservation_pricing_revisions')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->where('reservation_record_id', $bookingId)->latest('id')->first();
+            $revisionNights = $revision === null ? collect() : DB::table('reservation_pricing_revision_nights')
+                ->where('revision_id', $revision->id)->where('kind', 'replacement')->orderBy('stay_date')->get();
+            $effectiveNights = $revision === null ? $nights : $revisionNights;
+            $subtotal = (int) $effectiveNights->sum('amount_minor');
+            $firstNight = (int) ($effectiveNights->first()->amount_minor ?? 0);
             $kind = $terms['noShowKind'] ?? null;
+            $kind = is_string($kind) ? $kind : null;
             $value = $terms['noShowValue'] ?? null;
             $blockers = [];
             $fee = null;
-            if (!is_int($value) || $value < 0 || $subtotal < 0 || $nights->isEmpty()
-                || ($kind === 'percent' && $value > 10000)) {
-                $blockers[] = 'No valid recorded no-show policy. Manual policy review required.';
-            } else {
+            if (is_int($value) && $value >= 0) {
                 $fee = match ($kind) {
                     'none' => 0,
                     'fixed' => min($subtotal, $value),
                     'first_night' => $firstNight,
                     'full' => $subtotal,
-                    'percent' => intdiv($subtotal, 10000) * $value + intdiv(($subtotal % 10000) * $value + 5000, 10000),
+                    'percent' => $value <= 10000
+                        ? intdiv($subtotal, 10000) * $value + intdiv(($subtotal % 10000) * $value + 5000, 10000)
+                        : null,
                     default => null,
                 };
-                if ($fee === null) {
-                    $blockers[] = 'Unsupported recorded no-show policy.';
-                }
             }
-            if (Schema::hasTable('reservation_pricing_revisions') && DB::table('reservation_pricing_revisions')
-                ->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)->exists()) {
-                $fee = null;
-                $blockers[] = 'Revised stay policy requires manual review.';
+            if ($effectiveNights->isEmpty() || $subtotal < 0 || $subtotal > 1000000000000
+                || $subtotal !== $summary['roomSubtotalMinor']) {
+                $blockers[] = 'The active room charges must reconcile before applying a no-show adjustment.';
             }
-            foreach (['financial_folio_night_assessments', 'folio_settlement_signoffs', 'folio_settlement_allocations', 'folio_refund_requests'] as $table) {
-                if (Schema::hasTable($table) && DB::table($table)->where('hotel_id', $hotel->id)
-                    ->where('folio_id', $folio->id)->exists()) {
-                    $blockers[] = 'Existing accounting or settlement activity requires reviewed financial correction.';
-                    break;
-                }
-            }
-            if (DB::table('folio_adjustments')->where('hotel_id', $hotel->id)
-                ->where('folio_id', $folio->id)->exists()) {
-                $blockers[] = 'Existing folio adjustments require manual financial review.';
-            }
-            if (Schema::hasTable('financial_business_clocks')) {
-                $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->first();
-                if ($clock !== null && $booking->check_in < $clock->business_date) {
-                    $blockers[] = 'Past business dates require an audited accounting correction.';
-                }
-            }
-            if (Schema::hasTable('financial_day_closes') && DB::table('financial_day_closes')
-                ->where('hotel_id', $hotel->id)->where('status', 'completed')
-                ->where('business_date', '>=', $booking->check_in)
-                ->where('business_date', '<', $booking->check_out)->exists()) {
-                $blockers[] = 'A closed financial period requires an audited accounting correction.';
+            if ($clock === null || $clock->status !== 'open' || $folio->currency !== 'PHP'
+                || DB::table('financial_day_closes')->where('hotel_id', $hotel->id)
+                    ->where('business_date', $clock->business_date)->exists()) {
+                $blockers[] = 'An open PHP business date is required to post the reconciliation.';
             }
             $prior = Schema::hasTable('no_show_financial_reviews')
                 ? DB::table('no_show_financial_reviews')->where('hotel_id', $hotel->id)
                     ->where('folio_id', $folio->id)->first() : null;
             if ($prior !== null) {
                 $blockers[] = 'No-show financial adjustments have already been recorded.';
+            } elseif (($blocker = NoShowWorkflow::accountingBlocker((int) $hotel->id, (int) $folio->id)) !== null) {
+                $blockers[] = $blocker;
             }
-            $clearance = $prior !== null && Schema::hasTable('no_show_financial_clearances')
-                ? DB::table('no_show_financial_clearances')->where('hotel_id', $hotel->id)->where('review_id', $prior->id)->first()
-                : null;
+
+            $canReview = NoShowWorkflow::enabled((int) $hotel->id)
+                && Schema::hasTable('no_show_financial_reviews') && $blockers === [];
+            $clearance = NoShowRefundEligibility::clearance((int) $hotel->id, $bookingId, (int) $folio->id);
+            $refund = $prior === null ? null : app(NoShowRefundEligibility::class)->review($hotel, $bookingId);
             $review = [
                 'bookingId' => (string) $bookingId, 'currency' => $folio->currency,
                 'policyVersion' => $terms['version'] ?? null, 'noShowKind' => $kind,
                 'originalRoomSubtotalMinor' => $subtotal, 'proposedNoShowFeeMinor' => $fee,
-                'proposedRoomCreditMinor' => $fee === null ? null : $subtotal - $fee,
+                'proposedRoomCreditMinor' => $subtotal,
+                'businessDate' => $clock?->business_date,
+                'canApplyManual' => $canReview && $fee === null,
                 'currentFolioSummary' => $summary, 'blockers' => $blockers,
                 'previewOnly' => true, 'applied' => false,
-                'canApply' => config('booking.no_show_adjustments_enabled', false)
-                    && Schema::hasTable('no_show_financial_reviews') && $blockers === [] && $fee !== null,
+                'canApply' => $canReview && $fee !== null,
                 'recordedReviewId' => $prior === null ? null : (string) $prior->id,
                 'recordedBy' => $prior === null ? null : (string) $prior->actor_id,
                 'recordedFeeMinor' => $prior === null ? null : (int) $prior->fee_minor,
-                'approvalEnabled' => (bool) config('booking.no_show_adjustments_enabled', false),
+                'approvalEnabled' => (bool) NoShowWorkflow::enabled((int) $hotel->id),
+                'refundEligibility' => $refund,
+                'recordedReason' => $prior?->reason,
                 'clearance' => $clearance === null ? null : [
                     'id' => (string) $clearance->id, 'vatMinor' => (int) $clearance->vat_minor,
                     'revenueMinor' => (int) $clearance->revenue_minor,
@@ -110,28 +101,32 @@ final class NoShowFinancialReviewService
             $review['reviewFingerprint'] = hash_hmac('sha256', json_encode([
                 'hotelId' => (string) $hotel->id, 'folioId' => (string) $folio->id,
                 'bookingVersion' => (string) $booking->updated_at,
-                'entryIds' => $nights->pluck('id')->map(fn ($id) => (string) $id)->all(),
+                'entries' => $effectiveNights->map(fn ($row) => [$row->id, $row->stay_date, (int) $row->amount_minor])->all(),
+                'revisionId' => $revision?->id,
+                'terms' => $terms,
+                'paymentEvidence' => DB::table('folio_payment_records as p')
+                    ->leftJoin('folio_settlement_verifications as v', function ($join): void {
+                        $join->on('v.payment_record_id', '=', 'p.id')->on('v.hotel_id', '=', 'p.hotel_id');
+                    })
+                    ->where('p.hotel_id', $hotel->id)->where('p.folio_id', $folio->id)
+                    ->orderBy('p.id')->get(['p.id', 'p.amount_minor', 'p.status', 'v.status as verification_status'])->all(),
                 'review' => $review,
             ], JSON_THROW_ON_ERROR), (string) config('app.key'));
             return $review;
         }, 3);
     }
-    /** Internal write path; do not expose until fee accounting and close guards are integrated. */
-    public function apply(Hotel $hotel, int $bookingId, int $actor, string $fingerprint, string $reason): array
+    public function apply(Hotel $hotel, int $bookingId, int $actor, string $fingerprint, string $reason, ?int $manualFee = null): array
     {
-        abort_unless(config('booking.no_show_adjustments_enabled', false), 409, 'No-show adjustments are not enabled.');
+        abort_unless(NoShowWorkflow::enabled((int) $hotel->id), 409, 'No-show adjustments are not enabled.');
         abort_if(mb_strlen(trim($reason)) < 12 || mb_strlen($reason) > 500, 422, 'A review reason is required.');
-        return DB::transaction(function () use ($hotel, $bookingId, $actor, $fingerprint, $reason): array {
-            app(ReadinessWriteGuard::class)->lockHotel($hotel);
-            $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
-            app(FolioAccountingService::class)->assertNotSigned($hotel, $folio);
-            if (Schema::hasTable('financial_business_clocks')) {
-                DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->lockForUpdate()->first();
-            }
+        return DB::transaction(function () use ($hotel, $bookingId, $actor, $fingerprint, $reason, $manualFee): array {
             $review = $this->preview($hotel, $bookingId);
-            abort_unless($review['canApply'] && hash_equals($review['reviewFingerprint'], $fingerprint), 409, 'Financial review changed or requires manual correction.');
+            $canApply = $manualFee === null ? $review['canApply'] : $review['canApplyManual'];
+            abort_unless($canApply && hash_equals($review['reviewFingerprint'], $fingerprint), 409,
+                'Financial review changed or requires a documented manual decision.');
+            $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
             $subtotal = $review['originalRoomSubtotalMinor'];
-            $fee = $review['proposedNoShowFeeMinor'];
+            $fee = $manualFee ?? $review['proposedNoShowFeeMinor'];
             abort_unless(is_int($subtotal) && is_int($fee) && $fee >= 0 && $fee <= $subtotal, 409, 'Invalid reviewed fee.');
             $creditId = null;
             $feeId = null;
@@ -152,7 +147,7 @@ final class NoShowFinancialReviewService
                 'actor_id' => $actor, 'review_fingerprint' => $fingerprint, 'currency' => $folio->currency,
                 'room_subtotal_minor' => $subtotal, 'fee_minor' => $fee, 'credit_minor' => $subtotal,
                 'credit_adjustment_id' => $creditId, 'fee_adjustment_id' => $feeId,
-                'review_snapshot' => json_encode($review, JSON_THROW_ON_ERROR),
+                'review_snapshot' => json_encode([...$review, 'manualFeeMinor' => $manualFee], JSON_THROW_ON_ERROR),
                 'reason' => trim($reason), 'created_at' => now(),
             ]);
             return ['reviewId' => (string) $id, 'applied' => true, 'refundIssued' => false,

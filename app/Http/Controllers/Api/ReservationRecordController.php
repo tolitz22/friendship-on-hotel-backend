@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Reservations\NoShowWorkflow;
 use App\Models\Hotel;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
@@ -39,6 +40,11 @@ final class ReservationRecordController
             'checkIn' => $record->check_in->format('Y-m-d'),
             'checkOut' => $record->check_out->format('Y-m-d'),
             'lifecycleState' => $record->lifecycle_state,
+            'noShowEligibleAt' => $record->lifecycle_state === 'confirmed'
+                ? NoShowWorkflow::eligibleAt($hotel, $record->check_in->format('Y-m-d'))->toIso8601String() : null,
+            'noShowReviewRequired' => $record->lifecycle_state === 'no_show'
+                && DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+                    ->where('reservation_record_id', $record->id)->exists(),
                 'createdAt' => $record->created_at?->toISOString(),
                 'updatedAt' => $record->updated_at?->toISOString(),
                 'createdDate' => $record->created_at?->copy()->setTimezone($hotel->timezone ?: 'Asia/Manila')->format('Y-m-d'),
@@ -70,7 +76,7 @@ final class ReservationRecordController
             'page' => ['sometimes', 'integer', 'min:1'],
             'per_page' => ['sometimes', 'integer', 'min:1', 'max:100'],
             'search' => ['sometimes', 'string', 'max:100'],
-            'filter' => ['sometimes', 'in:all,needs_room,arrivals,in_house,completed,checked_out,cancelled'],
+            'filter' => ['sometimes', 'in:all,needs_room,arrivals,in_house,completed,checked_out,cancelled,no_show'],
         ]);
 
         $perPage = (int) ($data['per_page'] ?? 20);
@@ -84,8 +90,8 @@ final class ReservationRecordController
         } elseif ($filter === 'in_house') {
             $query->where('lifecycle_state', 'checked_in');
         } elseif ($filter === 'completed') {
-            $query->whereIn('lifecycle_state', ['checked_out', 'cancelled']);
-        } elseif ($filter === 'checked_out' || $filter === 'cancelled') {
+            $query->whereIn('lifecycle_state', ['checked_out', 'cancelled', 'no_show']);
+        } elseif (in_array($filter, ['checked_out', 'cancelled', 'no_show'], true)) {
             $query->where('lifecycle_state', $filter);
         }
 

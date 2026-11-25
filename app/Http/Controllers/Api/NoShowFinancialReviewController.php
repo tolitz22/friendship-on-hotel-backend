@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Domain\Reservations\NoShowFinancialReviewService;
+use App\Domain\Reservations\NoShowWorkflow;
 use App\Models\Hotel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,23 +23,25 @@ final class NoShowFinancialReviewController
         $data = $request->validate([
             'reviewFingerprint' => ['required', 'string', 'regex:/^[a-f0-9]{64}$/D'],
             'reason' => ['required', 'string', 'min:12', 'max:500'],
+            'manualFeeMinor' => ['nullable', 'integer', 'min:0', 'max:1000000000000'],
         ]);
         return response()->json(['data' => $service->apply(
             $hotel, (int) $booking, (int) $request->user()->id,
-            $data['reviewFingerprint'], $data['reason']
+            $data['reviewFingerprint'], $data['reason'],
+            isset($data['manualFeeMinor']) ? (int) $data['manualFeeMinor'] : null
         )], 201);
     }
 
     public function approve(Request $request, Hotel $hotel, string $booking, string $review, NoShowFinancialClearanceService $service): JsonResponse
     {
-        abort_unless(config('booking.no_show_adjustments_enabled', false), 409, 'No-show financial approval is not enabled.');
+        abort_unless(NoShowWorkflow::enabled((int) $hotel->id), 409, 'No-show financial approval is not enabled.');
         $data = $request->validate([
-            'vatMinor' => ['required', 'integer', 'min:0', 'max:1000000000000'],
+            'taxClassification' => ['required', 'in:vat_standard,vat_zero,vat_exempt,non_vat'],
             'taxBasis' => ['required', 'string', 'min:12', 'max:1000'],
         ]);
         return response()->json(['data' => $service->approve(
             $hotel, (int) $booking, (int) $review, (int) $request->user()->id,
-            (int) $data['vatMinor'], $data['taxBasis']
+            $data['taxClassification'], $data['taxBasis']
         )], 201);
     }
 

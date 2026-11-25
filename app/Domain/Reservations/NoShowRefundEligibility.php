@@ -16,13 +16,7 @@ final class NoShowRefundEligibility
         $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId);
         $booking = DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
         abort_unless($booking !== null && $booking->lifecycle_state === 'no_show', 409, 'Booking is not a no-show.');
-        $clearance = Schema::hasTable('no_show_financial_clearances') && Schema::hasTable('no_show_financial_reviews')
-            ? DB::table('no_show_financial_clearances as c')
-                ->join('no_show_financial_reviews as v', 'v.id', '=', 'c.review_id')
-                ->where('c.hotel_id', $hotel->id)->where('v.hotel_id', $hotel->id)
-                ->where('v.folio_id', $folio->id)->where('v.reservation_record_id', $bookingId)
-                ->whereColumn('c.gross_minor', 'v.fee_minor')->whereColumn('c.reviewed_by', '!=', 'v.actor_id')
-                ->first(['c.*']) : null;
+        $clearance = self::clearance((int) $hotel->id, $bookingId, (int) $folio->id);
         $statement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
         $net = $statement['netRecordedChargesMinor'];
         $verified = $statement['verifiedPaymentsMinor'];
@@ -33,22 +27,19 @@ final class NoShowRefundEligibility
                 $reserved += $refund['amountMinor'];
             }
         }
-        $validJournal = $clearance !== null && ((int) $clearance->gross_minor === 0
-            ? $clearance->journal_id === null
-            : DB::table('financial_posting_journals as j')->where('j.id', $clearance->journal_id)
-                ->where('j.hotel_id', $hotel->id)->where('j.source_type', 'no_show_fee')
-                ->whereNotExists(function ($q): void {
-                    $q->selectRaw('1')->from('financial_posting_journals as x')->whereColumn('x.reverses_journal_id', 'j.id');
-                })->exists());
-        $ready = $validJournal && $net === (int) $clearance->gross_minor
+        $valid = $clearance !== null && $net === (int) $clearance->gross_minor;
+        $ready = $valid
             && $allocated >= 0 && $allocated <= $net
             && $statement['paymentEvidenceIndependentlyReviewed']
             && config('financial_accounting.enable_verified_settlement', false)
-            && config('booking.no_show_adjustments_enabled', false);
+            && NoShowWorkflow::enabled((int) $hotel->id);
         $excess = $ready ? max(0, $verified - max($net, $allocated) - $reserved) : 0;
         $payments = [];
         foreach ($statement['payments'] as $payment) {
-            if ($payment['status'] !== 'staff_confirmed' || $payment['verificationStatus'] !== 'verified') continue;
+            if ($payment['status'] !== 'staff_confirmed' || $payment['verificationStatus'] !== 'verified'
+                || $payment['method'] !== 'bank_transfer') {
+                continue;
+            }
             $used = 0;
             foreach ($statement['allocations'] as $allocation) {
                 if ($allocation['paymentId'] === $payment['id']) $used += $allocation['amountMinor'];
@@ -60,12 +51,33 @@ final class NoShowRefundEligibility
             }
             $payments[] = ['paymentId' => $payment['id'], 'maximumRequestMinor' => min($excess, max(0, $payment['amountMinor'] - $used))];
         }
+        $maximumRefund = min($excess, array_sum(array_column($payments, 'maximumRequestMinor')));
+
         return [
-            'financialClearanceValid' => $validJournal && $net === (int) $clearance->gross_minor, 'canRequestRefund' => $ready && $excess > 0,
+            'financialClearanceValid' => $valid,
+            'canRequestRefund' => $maximumRefund > 0,
             'verifiedPaymentsMinor' => $verified, 'reservedRefundsMinor' => $reserved,
-            'remainingCollectionMinor' => $ready ? max(0, $net - $verified + $reserved) : null,
-            'maximumRefundRequestMinor' => $excess, 'payments' => $payments,
+            'remainingCollectionMinor' => $valid ? max(0, $net - $verified + $statement['verifiedRefundsMinor']) : null,
+            'maximumRefundRequestMinor' => $maximumRefund,
+            'settled' => $valid && $statement['paymentEvidenceIndependentlyReviewed']
+                && $allocated === $net && $verified - $statement['verifiedRefundsMinor'] === $net
+                && $reserved === $statement['verifiedRefundsMinor'], 'payments' => $payments,
             'refundIssued' => false,
         ];
+    }
+
+    public static function clearance(int $hotelId, int $bookingId, int $folioId): ?object
+    {
+        if (!Schema::hasTable('no_show_financial_clearances') || !Schema::hasTable('no_show_financial_reviews')) {
+            return null;
+        }
+
+        $query = DB::table('no_show_financial_clearances as c')
+            ->join('no_show_financial_reviews as v', 'v.id', '=', 'c.review_id')
+            ->where('c.hotel_id', $hotelId)->where('v.hotel_id', $hotelId)
+            ->where('v.folio_id', $folioId)->where('v.reservation_record_id', $bookingId);
+        NoShowClosingGuard::requireValidClearance($query);
+
+        return $query->latest('c.id')->first(['c.*']);
     }
 }

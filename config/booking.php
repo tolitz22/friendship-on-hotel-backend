@@ -8,6 +8,8 @@ return [
     'priced_amendments_enabled' => env('BOOKING_PRICED_AMENDMENTS_ENABLED', false),
     // Keep no-show financial writes disabled until accounting acceptance.
     'no_show_adjustments_enabled' => env('BOOKING_NO_SHOW_ADJUSTMENTS_ENABLED', false),
+    'no_show_adjustments_hotel_ids' => env('BOOKING_NO_SHOW_ADJUSTMENTS_HOTEL_IDS', ''),
+    'no_show_cutoff_next_day' => env('BOOKING_NO_SHOW_CUTOFF_NEXT_DAY', '06:00'),
     // Conservative initial operating defaults, replace with versioned hotel-level
     // settings when the client has a different reservation policy.
     'inventory_unit' => 'room_type',

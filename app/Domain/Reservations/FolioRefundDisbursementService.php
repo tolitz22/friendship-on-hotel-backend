@@ -45,6 +45,7 @@ final class FolioRefundDisbursementService
             if (mb_strlen(trim($reference)) < 8 || mb_strlen($reference) > 160) {
                 throw ValidationException::withMessages(['reference' => 'External bank refund reference is required.']);
             }
+            $this->assertNoShowRefundStillEligible($hotel, $bookingId, $refund);
             $payment = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->where('id', $refund->payment_record_id)->first();
             if ($payment === null || $payment->method !== 'bank_transfer'
@@ -106,6 +107,9 @@ final class FolioRefundDisbursementService
             if ($refund === null || $refund->status !== 'approved') {
                 throw ValidationException::withMessages(['refund' => 'Original refund approval is no longer valid.']);
             }
+            if ($decision === 'verify') {
+                $this->assertNoShowRefundStillEligible($hotel, $bookingId, $refund);
+            }
             DB::table('folio_refund_disbursement_evidence')->where('id', $evidenceId)
                 ->where('hotel_id', $hotel->id)->update([
                     'status' => $decision === 'verify' ? 'verified' : 'rejected',
@@ -116,12 +120,27 @@ final class FolioRefundDisbursementService
         }, 3);
     }
 
+    private function assertNoShowRefundStillEligible(Hotel $hotel, int $bookingId, object $refund): void
+    {
+        if (!DB::table('reservation_records')->where('hotel_id', $hotel->id)
+            ->where('id', $bookingId)->where('lifecycle_state', 'no_show')->exists()) {
+            return;
+        }
+
+        $review = app(NoShowRefundEligibility::class)->review($hotel, $bookingId, (int) $refund->id);
+        $limits = array_column($review['payments'], 'maximumRequestMinor', 'paymentId');
+        if ((int) $refund->amount_minor > ($limits[(string) $refund->payment_record_id] ?? 0)) {
+            throw ValidationException::withMessages(['refund' => 'Refund exceeds the current verified excess deposit.']);
+        }
+    }
+
     private function lock(Hotel $hotel, int $bookingId): object
     {
         if (!config('financial_accounting.enable_verified_settlement', false)) {
             throw ValidationException::withMessages(['activation' => 'Verified settlement is not activated.']);
         }
         app(ReadinessWriteGuard::class)->lockHotel($hotel);
+        NoShowWorkflow::lockClockForNoShow($hotel, $bookingId);
         $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
         app(FolioAccountingService::class)->assertNotSigned($hotel, $folio);
         return $folio;

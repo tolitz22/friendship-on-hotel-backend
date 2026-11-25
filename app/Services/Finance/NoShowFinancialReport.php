@@ -12,11 +12,16 @@ final class NoShowFinancialReport
 {
     public function report(int $hotelId, string $date, bool $ledgerVerified): array
     {
+        $supportsReversals = Schema::hasColumn('financial_posting_journals', 'reverses_journal_id');
         $movement = DB::table('financial_posting_journals as j')
             ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
             ->where('j.hotel_id', $hotelId)->where('j.business_date', $date)
-            ->where(function ($query): void {
-                $query->where('j.source_type', 'no_show_fee')->orWhereExists(function ($original): void {
+            ->where(function ($query) use ($supportsReversals): void {
+                $query->where('j.source_type', 'no_show_fee');
+                if (!$supportsReversals) {
+                    return;
+                }
+                $query->orWhereExists(function ($original): void {
                     $original->selectRaw('1')->from('financial_posting_journals as o')
                         ->whereColumn('o.id', 'j.reverses_journal_id')
                         ->whereColumn('o.hotel_id', 'j.hotel_id')->where('o.source_type', 'no_show_fee');

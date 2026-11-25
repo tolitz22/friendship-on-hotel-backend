@@ -27,6 +27,7 @@ final class FolioSettlementService
             ]);
         }
         app(ReadinessWriteGuard::class)->lockHotel($hotel);
+        NoShowWorkflow::lockClockForNoShow($hotel, $bookingId);
         // Simplified checkout deliberately happens before shift review, but
         // post-departure financial mutations require a separate approved
         // correction flow, not an ordinary pre-checkout endpoint.
@@ -191,7 +192,7 @@ final class FolioSettlementService
                     throw ValidationException::withMessages(['folioEntryId' => 'No-show fees require a folio-level allocation, not an unused room night.']);
                 }
                 $clearance = app(NoShowRefundEligibility::class)->review($hotel, $bookingId);
-                if (!config('booking.no_show_adjustments_enabled', false) || !$clearance['financialClearanceValid']) {
+                if (!NoShowWorkflow::enabled((int) $hotel->id) || !$clearance['financialClearanceValid']) {
                     throw ValidationException::withMessages(['allocation' => 'Complete no-show financial clearance before allocating payments.']);
                 }
             }

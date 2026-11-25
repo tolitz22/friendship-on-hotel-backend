@@ -155,6 +155,9 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/readiness/enforcement-policy', [ReadinessEnforcementPolicyController::class, 'show']);
             Route::get('/readiness/enforcement-policy/history', [ReadinessEnforcementPolicyController::class, 'history']);
 
+            Route::post('/bookings/{booking}/no-show', [ReservationBookingController::class, 'noShow'])
+                ->whereNumber('booking')->middleware('hotel.permission:booking.check_in')->middleware('throttle:20,1');
+
             // Phase 50: explicit low-risk operational permissions; all other
             // sensitive mutations remain inside the administrator group.
             Route::get('/inventory-blocks', [RoomInventoryController::class, 'blocks'])
@@ -362,7 +365,6 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/dates/preview', [FrontDeskReservationController::class, 'previewAmendment'])->whereNumber('booking')->middleware('throttle:30,1');
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
-                Route::post('/bookings/{booking}/no-show', [ReservationBookingController::class, 'noShow'])->whereNumber('booking');
                 Route::get('/bookings/{booking}/no-show-financial-review', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
                 Route::post('/bookings/{booking}/no-show-financial-review', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'apply'])
                     ->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
