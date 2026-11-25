@@ -155,6 +155,7 @@ final class FrontDeskReservationController
         $data = $request->validate([
             'checkIn' => ['required', 'date_format:Y-m-d'],
             'checkOut' => ['required', 'date_format:Y-m-d', 'after:checkIn'],
+            'reviewFingerprint' => ['sometimes', 'required', 'string', 'regex:/^[a-f0-9]{64}$/D'],
         ]);
         return response()->json(['data' => $amendments->amend(
             $hotel, (int) $request->user()->id, (int) $booking, $data
