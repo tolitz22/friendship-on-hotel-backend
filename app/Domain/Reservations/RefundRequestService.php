@@ -63,6 +63,8 @@ final class RefundRequestService
                 throw new HttpException(409, 'Refund review amounts exceed recorded payment evidence.');
             }
 
+            $this->assertNoShowEligibility($hotel, $bookingId, (int) $payment->id, (int) $input['amountMinor']);
+
             $id = DB::table('folio_refund_requests')->insertGetId([
                 'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
                 'payment_record_id' => $payment->id,
@@ -91,6 +93,10 @@ final class RefundRequestService
             if ((int) $request->requested_by === $actor && $input['decision'] === 'approve') {
                 throw new HttpException(403, 'Refund request approval requires a different administrator.');
             }
+            if ($input['decision'] === 'approve') {
+                $this->assertNoShowEligibility($hotel, $bookingId, (int) $request->payment_record_id,
+                    (int) $request->amount_minor, (int) $request->id);
+            }
             $next = $input['decision'] === 'approve' ? 'approved' : 'rejected';
             DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)
                 ->where('id', $requestId)->update([
@@ -99,6 +105,25 @@ final class RefundRequestService
                 ]);
             return $this->present(DB::table('folio_refund_requests')->find($requestId));
         }, 3);
+    }
+
+    private function assertNoShowEligibility(Hotel $hotel, int $bookingId, int $paymentId, int $amount, ?int $requestId = null): void
+    {
+        if (!DB::table('reservation_records')->where('hotel_id', $hotel->id)
+            ->where('id', $bookingId)->where('lifecycle_state', 'no_show')->exists()) {
+            return;
+        }
+        $eligibility = app(NoShowRefundEligibility::class)->review($hotel, $bookingId, $requestId);
+        $limit = 0;
+        foreach ($eligibility['payments'] as $payment) {
+            if ($payment['paymentId'] === (string) $paymentId) {
+                $limit = $payment['maximumRequestMinor'];
+                break;
+            }
+        }
+        if (!$eligibility['canRequestRefund'] || $amount < 1 || $amount > $limit) {
+            throw new HttpException(409, 'No-show refund exceeds verified excess funds or financial clearance is incomplete.');
+        }
     }
 
     private function present(object $r): array
