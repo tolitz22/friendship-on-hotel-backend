@@ -112,7 +112,7 @@ final class ReservationAmendmentService
                 $latest = max($booking->check_out, $newStay->departure);
                 $closed = ($clock !== null && $earliest < $clock->business_date) || DB::table('financial_day_closes')->where('hotel_id', $hotel->id)
                     ->where('status', 'completed')->where('business_date', '>=', $earliest)->where('business_date', '<', $latest)->exists();
-                return [
+                $review = [
                     'id' => (string) $bookingId, 'oldCheckIn' => $booking->check_in, 'oldCheckOut' => $booking->check_out,
                     'checkIn' => $newStay->arrival, 'checkOut' => $newStay->departure, 'currency' => $folio->currency,
                     'originalRoomSubtotalMinor' => $oldSubtotal, 'proposedRoomSubtotalMinor' => $rate['roomSubtotalMinor'],
@@ -121,6 +121,16 @@ final class ReservationAmendmentService
                     'policyTerms' => $rate['policyTerms'] ?? null, 'currentFolioSummary' => $summary,
                     'closedPeriodAffected' => $closed, 'previewOnly' => true, 'saved' => false,
                 ];
+
+                // Bind the review to the property, actor, dates, pricing and current folio.
+                // The future commit path must recompute this under the same locks.
+                $review['reviewFingerprint'] = hash_hmac('sha256', json_encode([
+                    'hotelId' => (string) $hotel->id, 'actorId' => (string) $actor,
+                    'bookingVersion' => (string) $booking->updated_at,
+                    'folioId' => (string) $folio->id, 'review' => $review,
+                ], JSON_THROW_ON_ERROR), (string) config('app.key'));
+
+                return $review;
             }
 
             DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->update([
