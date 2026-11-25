@@ -52,6 +52,11 @@ final class ReservationPricingRevisionService
 
         $oldStay = new StayPeriod($booking->check_in, $booking->check_out);
         $newStay = new StayPeriod($review['checkIn'], $review['checkOut']);
+        // The canonical folio uniqueness constraint still reserves original
+        // room-night dates. Overlapping amendments require a separate design.
+        if ($oldStay->overlaps($newStay)) {
+            throw new HttpException(409, 'Overlapping priced stay changes require manual review.');
+        }
         $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->lockForUpdate()->first();
         $earliest = min($oldStay->arrival, $newStay->arrival);
         $latest = max($oldStay->departure, $newStay->departure);
@@ -125,7 +130,16 @@ final class ReservationPricingRevisionService
             ]);
         }
         foreach ($nights as $night) {
+            $entryId = DB::table('folio_entries')->insertGetId([
+                'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
+                'entry_type' => 'room_night',
+                'description' => 'Revised stay room charge · '.$night['date'],
+                'stay_date' => $night['date'], 'amount_minor' => $night['amountMinor'],
+                'rate_plan_id' => $plans->first(), 'actor_id' => $actor,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
             DB::table('reservation_pricing_revision_nights')->insert([
+                'replacement_entry_id' => $entryId,
                 'revision_id' => $revision, 'rate_plan_id' => $plans->first(),
                 'stay_date' => $night['date'], 'kind' => 'replacement',
                 'amount_minor' => $night['amountMinor'], 'rate_source' => $night['source'],
