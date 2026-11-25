@@ -6,6 +6,8 @@ return [
     'dynamic_pricing_enabled' => env('BOOKING_DYNAMIC_PRICING_ENABLED', false),
     // Enable only after priced amendment accounting regression and acceptance.
     'priced_amendments_enabled' => env('BOOKING_PRICED_AMENDMENTS_ENABLED', false),
+    // Keep no-show financial writes disabled until accounting acceptance.
+    'no_show_adjustments_enabled' => env('BOOKING_NO_SHOW_ADJUSTMENTS_ENABLED', false),
     // Conservative initial operating defaults, replace with versioned hotel-level
     // settings when the client has a different reservation policy.
     'inventory_unit' => 'room_type',
