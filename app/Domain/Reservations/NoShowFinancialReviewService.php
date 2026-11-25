@@ -79,6 +79,12 @@ final class NoShowFinancialReviewService
                 ->where('business_date', '<', $booking->check_out)->exists()) {
                 $blockers[] = 'A closed financial period requires an audited accounting correction.';
             }
+            $prior = Schema::hasTable('no_show_financial_reviews')
+                ? DB::table('no_show_financial_reviews')->where('hotel_id', $hotel->id)
+                    ->where('folio_id', $folio->id)->first() : null;
+            if ($prior !== null) {
+                $blockers[] = 'No-show financial adjustments have already been recorded.';
+            }
             $review = [
                 'bookingId' => (string) $bookingId, 'currency' => $folio->currency,
                 'policyVersion' => $terms['version'] ?? null, 'noShowKind' => $kind,
@@ -86,7 +92,9 @@ final class NoShowFinancialReviewService
                 'proposedRoomCreditMinor' => $fee === null ? null : $subtotal - $fee,
                 'currentFolioSummary' => $summary, 'blockers' => $blockers,
                 'previewOnly' => true, 'applied' => false,
-                'canApply' => false,
+                'canApply' => config('booking.no_show_adjustments_enabled', false)
+                    && Schema::hasTable('no_show_financial_reviews') && $blockers === [] && $fee !== null,
+                'recordedReviewId' => $prior === null ? null : (string) $prior->id,
             ];
             $review['reviewFingerprint'] = hash_hmac('sha256', json_encode([
                 'hotelId' => (string) $hotel->id, 'folioId' => (string) $folio->id,
@@ -97,4 +105,48 @@ final class NoShowFinancialReviewService
             return $review;
         }, 3);
     }
+    /** Internal write path; do not expose until fee accounting and close guards are integrated. */
+    public function apply(Hotel $hotel, int $bookingId, int $actor, string $fingerprint, string $reason): array
+    {
+        abort_unless(config('booking.no_show_adjustments_enabled', false), 409, 'No-show adjustments are not enabled.');
+        abort_if(mb_strlen(trim($reason)) < 12 || mb_strlen($reason) > 500, 422, 'A review reason is required.');
+        return DB::transaction(function () use ($hotel, $bookingId, $actor, $fingerprint, $reason): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
+            $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId, true);
+            app(FolioAccountingService::class)->assertNotSigned($hotel, $folio);
+            if (Schema::hasTable('financial_business_clocks')) {
+                DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->lockForUpdate()->first();
+            }
+            $review = $this->preview($hotel, $bookingId);
+            abort_unless($review['canApply'] && hash_equals($review['reviewFingerprint'], $fingerprint), 409, 'Financial review changed or requires manual correction.');
+            $subtotal = $review['originalRoomSubtotalMinor'];
+            $fee = $review['proposedNoShowFeeMinor'];
+            abort_unless(is_int($subtotal) && is_int($fee) && $fee >= 0 && $fee <= $subtotal, 409, 'Invalid reviewed fee.');
+            $creditId = null;
+            $feeId = null;
+            foreach ([['credit', $subtotal, 'Reverse unconsumed room charges'], ['debit', $fee, 'Reviewed no-show fee']] as [$kind, $amount, $description]) {
+                if ($amount === 0) continue;
+                $id = DB::table('folio_adjustments')->insertGetId([
+                    'hotel_id' => $hotel->id, 'folio_id' => $folio->id,
+                    'request_key' => 'no-show-'.$bookingId.'-'.$kind,
+                    'payload_sha256' => hash('sha256', $fingerprint.':'.$kind.':'.$amount),
+                    'kind' => $kind, 'amount_minor' => $amount, 'reason' => $description,
+                    'actor_id' => $actor, 'created_at' => now(), 'updated_at' => now(),
+                ]);
+                if ($kind === 'credit') $creditId = $id;
+                else $feeId = $id;
+            }
+            $id = DB::table('no_show_financial_reviews')->insertGetId([
+                'hotel_id' => $hotel->id, 'reservation_record_id' => $bookingId, 'folio_id' => $folio->id,
+                'actor_id' => $actor, 'review_fingerprint' => $fingerprint, 'currency' => $folio->currency,
+                'room_subtotal_minor' => $subtotal, 'fee_minor' => $fee, 'credit_minor' => $subtotal,
+                'credit_adjustment_id' => $creditId, 'fee_adjustment_id' => $feeId,
+                'review_snapshot' => json_encode($review, JSON_THROW_ON_ERROR),
+                'reason' => trim($reason), 'created_at' => now(),
+            ]);
+            return ['reviewId' => (string) $id, 'applied' => true, 'refundIssued' => false,
+                'summary' => app(FolioAccountingService::class)->summaryFor($folio)];
+        }, 3);
+    }
+
 }
