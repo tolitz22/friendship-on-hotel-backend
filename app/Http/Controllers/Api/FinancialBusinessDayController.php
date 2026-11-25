@@ -180,6 +180,7 @@ final class FinancialBusinessDayController
                 'reviewedAt' => $review->reviewed_at,
             ],
             'blockers' => $blockers,
+            'unresolvedNoShowCount' => $noShowPending,
             'openShiftIds' => $openShiftIds,
             'canClose' => $blockers === [],
             'readinessIsAdvisory' => true,
