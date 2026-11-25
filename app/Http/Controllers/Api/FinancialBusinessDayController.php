@@ -105,6 +105,11 @@ final class FinancialBusinessDayController
             $blockers[] = $invalidJournals.' journal(s) have invalid or unbalanced lines.';
         }
 
+        $noShowPending = \App\Domain\Reservations\NoShowClosingGuard::unresolved((int) $hotel->id, $date);
+        if ($noShowPending > 0) {
+            $blockers[] = $noShowPending.' priced no-show booking(s) require financial reconciliation.';
+        }
+
         if (Schema::hasTable('financial_folio_night_assessments')
                 && (config('financial_accounting.enable_live_folio_tax', false)
                     || DB::table('financial_folio_night_assessments')
@@ -143,7 +148,7 @@ final class FinancialBusinessDayController
                     })
                     ->where('e.hotel_id', $hotel->id)->where('f.hotel_id', $hotel->id)
                     ->where('r.hotel_id', $hotel->id)->where('e.entry_type', 'room_night')
-                    ->where('e.stay_date', $date)->where('r.lifecycle_state', '!=', 'cancelled')
+                    ->where('e.stay_date', $date)->whereNotIn('r.lifecycle_state', ['cancelled', 'no_show'])
                     ->whereNull('a.id')->exists();
                 if ($unassessed) {
                     $blockers[] = 'Priced room nights for this date still require approved tax allocation.';
