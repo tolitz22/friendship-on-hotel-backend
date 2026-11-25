@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Reservations\ActiveFolioEntryScope;
 use App\Models\Hotel;
 use App\Services\Finance\FolioNightAssessmentService;
 use Illuminate\Http\JsonResponse;
@@ -17,7 +18,7 @@ final class FolioNightAssessmentController
         $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
             ->where('reservation_record_id', (int) $booking)->first();
         abort_unless($folio !== null, 404);
-        $entries = DB::table('folio_entries')->where('hotel_id', $hotel->id)
+        $entries = ActiveFolioEntryScope::apply(DB::table('folio_entries'))->where('hotel_id', $hotel->id)
             ->where('folio_id', $folio->id)->where('entry_type', 'room_night')
             ->orderBy('stay_date')->get(['id', 'stay_date', 'amount_minor']);
         return response()->json(['data' => $entries->map(fn ($entry) => [
@@ -46,7 +47,7 @@ final class FolioNightAssessmentController
             'evidenceReference' => ['nullable', 'string', 'min:6', 'max:160'],
         ]);
         // Verify the folio entry belongs to the hotel AND requested reservation.
-        abort_unless(DB::table('folio_entries as e')
+        abort_unless(ActiveFolioEntryScope::apply(DB::table('folio_entries as e'), 'e')
             ->join('reservation_folios as f', 'f.id', '=', 'e.folio_id')
             ->where('e.hotel_id', $hotel->id)->where('f.hotel_id', $hotel->id)
             ->where('f.reservation_record_id', (int) $booking)
