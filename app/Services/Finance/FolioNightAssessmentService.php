@@ -192,6 +192,10 @@ final class FolioNightAssessmentService
             throw ValidationException::withMessages(['assessment' => 'An approved folio-night assessment is required.']);
         }
         $this->assertNotSuperseded($hotelId, (int) $assessment->folio_entry_id, (int) $assessment->folio_id);
+        if (DB::table('reservation_records')->where('hotel_id', $hotelId)
+            ->where('id', $assessment->reservation_record_id)->where('lifecycle_state', 'no_show')->exists()) {
+            throw ValidationException::withMessages(['assessment' => 'No-show charges require financial reconciliation before revenue recognition.']);
+        }
         $existing = DB::table('financial_room_revenue_recognitions')
             ->where('hotel_id', $hotelId)
             ->where('source_journal_id', $assessment->source_journal_id)
@@ -263,7 +267,7 @@ final class FolioNightAssessmentService
             ]);
         }
         if ($entry === null || $entry->currency !== 'PHP'
-            || in_array($entry->lifecycle_state, ['cancelled'], true)
+            || in_array($entry->lifecycle_state, ['cancelled', 'no_show'], true)
             || $entry->stay_date < $entry->check_in || $entry->stay_date >= $entry->check_out) {
             throw ValidationException::withMessages(['folio_entry_id' => 'Active PHP room-night folio entry required.']);
         }
