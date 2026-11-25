@@ -199,7 +199,7 @@ final class FolioSettlementService
                 throw ValidationException::withMessages(['amountMinor' => 'Payment allocation exceeds verified payment amount.']);
             }
             if ($entryId !== null) {
-                $entry = DB::table('folio_entries')->where('hotel_id', $hotel->id)
+                $entry = ActiveFolioEntryScope::apply(DB::table('folio_entries'))->where('hotel_id', $hotel->id)
                     ->where('folio_id', $folio->id)->where('id', $entryId)->first();
                 abort_unless($entry !== null, 404);
                 $entryAllocated = (int) DB::table('folio_settlement_allocations')
@@ -267,7 +267,7 @@ final class FolioSettlementService
         abort_unless($booking !== null, 404);
 
         $summary = app(FolioAccountingService::class)->summaryFor($folio);
-        $charges = DB::table('folio_entries')->where('hotel_id', $hotel->id)
+        $charges = ActiveFolioEntryScope::apply(DB::table('folio_entries'))->where('hotel_id', $hotel->id)
             ->where('folio_id', $folio->id)->orderBy('id')
             ->get(['id', 'entry_type', 'description', 'stay_date', 'amount_minor'])
             ->map(fn ($r) => [
