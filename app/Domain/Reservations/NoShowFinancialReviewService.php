@@ -63,14 +63,38 @@ final class NoShowFinancialReviewService
                     break;
                 }
             }
-            return [
+            if (DB::table('folio_adjustments')->where('hotel_id', $hotel->id)
+                ->where('folio_id', $folio->id)->exists()) {
+                $blockers[] = 'Existing folio adjustments require manual financial review.';
+            }
+            if (Schema::hasTable('financial_business_clocks')) {
+                $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->first();
+                if ($clock !== null && $booking->check_in < $clock->business_date) {
+                    $blockers[] = 'Past business dates require an audited accounting correction.';
+                }
+            }
+            if (Schema::hasTable('financial_day_closes') && DB::table('financial_day_closes')
+                ->where('hotel_id', $hotel->id)->where('status', 'completed')
+                ->where('business_date', '>=', $booking->check_in)
+                ->where('business_date', '<', $booking->check_out)->exists()) {
+                $blockers[] = 'A closed financial period requires an audited accounting correction.';
+            }
+            $review = [
                 'bookingId' => (string) $bookingId, 'currency' => $folio->currency,
                 'policyVersion' => $terms['version'] ?? null, 'noShowKind' => $kind,
                 'originalRoomSubtotalMinor' => $subtotal, 'proposedNoShowFeeMinor' => $fee,
                 'proposedRoomCreditMinor' => $fee === null ? null : $subtotal - $fee,
                 'currentFolioSummary' => $summary, 'blockers' => $blockers,
                 'previewOnly' => true, 'applied' => false,
+                'canApply' => false,
             ];
+            $review['reviewFingerprint'] = hash_hmac('sha256', json_encode([
+                'hotelId' => (string) $hotel->id, 'folioId' => (string) $folio->id,
+                'bookingVersion' => (string) $booking->updated_at,
+                'entryIds' => $nights->pluck('id')->map(fn ($id) => (string) $id)->all(),
+                'review' => $review,
+            ], JSON_THROW_ON_ERROR), (string) config('app.key'));
+            return $review;
         }, 3);
     }
 }
