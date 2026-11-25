@@ -130,6 +130,11 @@ final class ReservationAmendmentService
                     'closedPeriodAffected' => $closed,
                     'accountingAlreadyAssessed' => $assessed,
                     'requiresFinancialCorrection' => $closed || $assessed,
+                    'pricedSaveAvailable' => (bool) config('booking.priced_amendments_enabled', false)
+                        && !$closed && !$assessed
+                        && \Illuminate\Support\Facades\Schema::hasTable('reservation_pricing_revisions')
+                        && !DB::table('reservation_pricing_revisions')
+                            ->where('hotel_id', $hotel->id)->where('reservation_record_id', $bookingId)->exists(),
                     'previewOnly' => true, 'saved' => false,
                 ];
 
