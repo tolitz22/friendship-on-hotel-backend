@@ -44,6 +44,30 @@ final class ActiveFolioChargeReader
             throw new HttpException(409, 'Pricing revision records require financial review.');
         }
 
-        return $base->whereNotIn('id', $reversed)->get(['amount_minor'])->concat($replacement);
+        if (!Schema::hasColumn('reservation_pricing_revision_nights', 'replacement_entry_id')) {
+            return $base->whereNotIn('id', $reversed)->get(['amount_minor'])->concat($replacement);
+        }
+
+        // Materialized replacement nights already appear in the base ledger.
+        // Validate their identity and amount before counting each charge once.
+        $details = (clone $nights)->where('kind', 'replacement')->get();
+        $materialized = $details->whereNotNull('replacement_entry_id');
+        $ids = $materialized->pluck('replacement_entry_id');
+        $canonical = (clone $base)->where('entry_type', 'room_night')
+            ->whereIn('id', $ids)->get()->keyBy('id');
+        foreach ($materialized as $detail) {
+            $entry = $canonical->get($detail->replacement_entry_id);
+            if ($entry === null || $reversed->contains($entry->id)
+                || $entry->stay_date !== $detail->stay_date
+                || (int) $entry->rate_plan_id !== (int) $detail->rate_plan_id
+                || (int) $entry->amount_minor !== (int) $detail->amount_minor) {
+                throw new HttpException(409, 'Replacement accounting entry does not match its revision.');
+            }
+        }
+
+        return $base->whereNotIn('id', $reversed)->get(['amount_minor'])
+            ->concat($details->whereNull('replacement_entry_id')->map(
+                fn ($detail) => (object) ['amount_minor' => $detail->amount_minor]
+            )->values());
     }
 }
