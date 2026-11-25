@@ -11,7 +11,7 @@ use Illuminate\Support\Facades\Schema;
 final class NoShowRefundEligibility
 {
     /** Caller must hold the hotel and folio write locks when authorizing a refund. */
-    public function review(Hotel $hotel, int $bookingId): array
+    public function review(Hotel $hotel, int $bookingId, ?int $reviewingRefundId = null): array
     {
         $folio = app(FolioAccountingService::class)->findFolio($hotel, $bookingId);
         $booking = DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
@@ -29,7 +29,7 @@ final class NoShowRefundEligibility
         $allocated = $statement['verifiedAllocatedMinor'];
         $reserved = 0;
         foreach ($statement['refunds'] as $refund) {
-            if (in_array($refund['status'], ['requested', 'approved'], true)) {
+            if ((string) $reviewingRefundId !== $refund['id'] && in_array($refund['status'], ['requested', 'approved'], true)) {
                 $reserved += $refund['amountMinor'];
             }
         }
@@ -43,7 +43,8 @@ final class NoShowRefundEligibility
         $ready = $validJournal && $net === (int) $clearance->gross_minor
             && $allocated >= 0 && $allocated <= $net
             && $statement['paymentEvidenceIndependentlyReviewed']
-            && config('financial_accounting.enable_verified_settlement', false);
+            && config('financial_accounting.enable_verified_settlement', false)
+            && config('booking.no_show_adjustments_enabled', false);
         $excess = $ready ? max(0, $verified - max($net, $allocated) - $reserved) : 0;
         $payments = [];
         foreach ($statement['payments'] as $payment) {
@@ -53,14 +54,14 @@ final class NoShowRefundEligibility
                 if ($allocation['paymentId'] === $payment['id']) $used += $allocation['amountMinor'];
             }
             foreach ($statement['refunds'] as $refund) {
-                if ($refund['paymentId'] === $payment['id'] && in_array($refund['status'], ['requested', 'approved'], true)) {
+                if ((string) $reviewingRefundId !== $refund['id'] && $refund['paymentId'] === $payment['id'] && in_array($refund['status'], ['requested', 'approved'], true)) {
                     $used += $refund['amountMinor'];
                 }
             }
             $payments[] = ['paymentId' => $payment['id'], 'maximumRequestMinor' => min($excess, max(0, $payment['amountMinor'] - $used))];
         }
         return [
-            'financialClearanceValid' => $validJournal, 'canRequestRefund' => $ready && $excess > 0,
+            'financialClearanceValid' => $validJournal && $net === (int) $clearance->gross_minor, 'canRequestRefund' => $ready && $excess > 0,
             'verifiedPaymentsMinor' => $verified, 'reservedRefundsMinor' => $reserved,
             'remainingCollectionMinor' => $ready ? max(0, $net - $verified + $reserved) : null,
             'maximumRefundRequestMinor' => $excess, 'payments' => $payments,
