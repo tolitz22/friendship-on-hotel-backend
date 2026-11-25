@@ -191,6 +191,7 @@ final class FolioNightAssessmentService
         if ($assessment === null || $assessment->status !== 'approved' || $assessment->source_journal_id === null) {
             throw ValidationException::withMessages(['assessment' => 'An approved folio-night assessment is required.']);
         }
+        $this->assertNotSuperseded($hotelId, (int) $assessment->folio_entry_id, (int) $assessment->folio_id);
         $existing = DB::table('financial_room_revenue_recognitions')
             ->where('hotel_id', $hotelId)
             ->where('source_journal_id', $assessment->source_journal_id)
@@ -251,6 +252,9 @@ final class FolioNightAssessmentService
                 'f.currency', 'f.reservation_record_id', 'r.lifecycle_state',
                 'r.check_in', 'r.check_out');
         $entry = $lock ? $query->lockForUpdate()->first() : $query->first();
+        if ($entry !== null) {
+            $this->assertNotSuperseded($hotelId, (int) $entry->id, (int) $entry->folio_id);
+        }
         if ($entry !== null && Schema::hasTable('folio_settlement_signoffs')
             && DB::table('folio_settlement_signoffs')
                 ->where('hotel_id', $hotelId)->where('folio_id', $entry->folio_id)->exists()) {
@@ -264,6 +268,19 @@ final class FolioNightAssessmentService
             throw ValidationException::withMessages(['folio_entry_id' => 'Active PHP room-night folio entry required.']);
         }
         return $entry;
+    }
+
+    private function assertNotSuperseded(int $hotelId, int $entryId, int $folioId): void
+    {
+        if (Schema::hasTable('reservation_pricing_revisions')
+            && DB::table('reservation_pricing_revision_nights as n')
+                ->join('reservation_pricing_revisions as r', 'r.id', '=', 'n.revision_id')
+                ->where('r.hotel_id', $hotelId)->where('r.folio_id', $folioId)
+                ->where('n.kind', 'reversal')->where('n.original_entry_id', $entryId)->exists()) {
+            throw ValidationException::withMessages([
+                'folio_entry_id' => 'Superseded room nights cannot receive new tax or revenue postings.',
+            ]);
+        }
     }
 
     private function policy(int $hotelId, int $policyId, string $date): object
