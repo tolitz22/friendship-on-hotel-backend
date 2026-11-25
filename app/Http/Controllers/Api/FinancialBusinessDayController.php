@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Domain\Reservations\ActiveFolioEntryScope;
 use App\Models\Hotel;
 use App\Services\Finance\FinancialBusinessDayCloseService;
 use Carbon\CarbonImmutable;
@@ -133,7 +134,7 @@ final class FinancialBusinessDayController
             }
             if (Schema::hasTable('folio_entries') && Schema::hasTable('reservation_folios')
                 && Schema::hasTable('reservation_records')) {
-                $unassessed = DB::table('folio_entries as e')
+                $unassessed = ActiveFolioEntryScope::apply(DB::table('folio_entries as e'), 'e')
                     ->join('reservation_folios as f', 'f.id', '=', 'e.folio_id')
                     ->join('reservation_records as r', 'r.id', '=', 'f.reservation_record_id')
                     ->leftJoin('financial_folio_night_assessments as a', function ($join): void {
