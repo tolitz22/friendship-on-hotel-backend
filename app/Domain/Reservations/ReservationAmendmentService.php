@@ -17,11 +17,12 @@ final class ReservationAmendmentService
     public function amend(Hotel $hotel, int $actor, int $bookingId, array $input, bool $preview = false): array
     {
         $newStay = new StayPeriod($input['checkIn'], $input['checkOut']);
+        $reviewFingerprint = $input['reviewFingerprint'] ?? null;
         if ($newStay->nights() > (int) config('booking.maximum_nights', 31)) {
             throw new HttpException(422, 'Requested stay exceeds the maximum nights.');
         }
 
-        return DB::transaction(function () use ($hotel, $actor, $bookingId, $newStay, $preview): array {
+        return DB::transaction(function () use ($hotel, $actor, $bookingId, $newStay, $preview, $reviewFingerprint): array {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $snapshot = DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->first();
             abort_unless($snapshot !== null, 404);
@@ -129,6 +130,11 @@ final class ReservationAmendmentService
                     'bookingVersion' => (string) $booking->updated_at,
                     'folioId' => (string) $folio->id, 'review' => $review,
                 ], JSON_THROW_ON_ERROR), (string) config('app.key'));
+
+                if ($reviewFingerprint !== null && (! is_string($reviewFingerprint)
+                    || ! hash_equals($review['reviewFingerprint'], $reviewFingerprint))) {
+                    throw new HttpException(409, 'The reviewed stay pricing has changed. Review the dates again.');
+                }
 
                 return $review;
             }
