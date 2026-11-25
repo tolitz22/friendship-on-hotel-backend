@@ -85,6 +85,9 @@ final class NoShowFinancialReviewService
             if ($prior !== null) {
                 $blockers[] = 'No-show financial adjustments have already been recorded.';
             }
+            $clearance = $prior !== null && Schema::hasTable('no_show_financial_clearances')
+                ? DB::table('no_show_financial_clearances')->where('hotel_id', $hotel->id)->where('review_id', $prior->id)->first()
+                : null;
             $review = [
                 'bookingId' => (string) $bookingId, 'currency' => $folio->currency,
                 'policyVersion' => $terms['version'] ?? null, 'noShowKind' => $kind,
@@ -95,6 +98,14 @@ final class NoShowFinancialReviewService
                 'canApply' => config('booking.no_show_adjustments_enabled', false)
                     && Schema::hasTable('no_show_financial_reviews') && $blockers === [] && $fee !== null,
                 'recordedReviewId' => $prior === null ? null : (string) $prior->id,
+                'recordedBy' => $prior === null ? null : (string) $prior->actor_id,
+                'recordedFeeMinor' => $prior === null ? null : (int) $prior->fee_minor,
+                'approvalEnabled' => (bool) config('booking.no_show_adjustments_enabled', false),
+                'clearance' => $clearance === null ? null : [
+                    'id' => (string) $clearance->id, 'vatMinor' => (int) $clearance->vat_minor,
+                    'revenueMinor' => (int) $clearance->revenue_minor,
+                    'businessDate' => (string) $clearance->business_date,
+                ],
             ];
             $review['reviewFingerprint'] = hash_hmac('sha256', json_encode([
                 'hotelId' => (string) $hotel->id, 'folioId' => (string) $folio->id,
