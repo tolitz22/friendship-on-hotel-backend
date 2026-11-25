@@ -54,6 +54,12 @@ final class FinancialBusinessDayCloseService
             }
             $period = $periods->first();
 
+            if (\App\Domain\Reservations\NoShowClosingGuard::unresolved($hotelId, $expectedBusinessDate) > 0) {
+                throw ValidationException::withMessages([
+                    'no_show_financial_review' => 'Priced no-show bookings require financial reconciliation before day close.',
+                ]);
+            }
+
             // Do not advance the business clock with unreviewed or unearned
             // accounting for room nights belonging to this financial date.
             if (Schema::hasTable('financial_folio_night_assessments')
@@ -98,7 +104,7 @@ final class FinancialBusinessDayCloseService
                         ->where('e.hotel_id', $hotelId)->where('f.hotel_id', $hotelId)
                         ->where('r.hotel_id', $hotelId)->where('e.entry_type', 'room_night')
                         ->where('e.stay_date', $expectedBusinessDate)
-                        ->where('r.lifecycle_state', '!=', 'cancelled')
+                        ->whereNotIn('r.lifecycle_state', ['cancelled', 'no_show'])
                         ->whereNull('a.id')->exists();
                     if ($unassessed) {
                         throw ValidationException::withMessages([
