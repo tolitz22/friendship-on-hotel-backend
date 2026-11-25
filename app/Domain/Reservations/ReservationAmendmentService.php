@@ -37,11 +37,16 @@ final class ReservationAmendmentService
                 throw new HttpException(409, 'Only confirmed reservations may change stay dates.');
             }
 
-            // Prevent changing priced nights without an approved repricing
-            // and charge-reversal workflow. Original folio stays immutable.
-            if (! $preview && DB::table('reservation_folios')->where('hotel_id', $hotel->id)
-                ->where('reservation_record_id', $bookingId)->exists()) {
-                throw new HttpException(409, 'Priced reservations require the future repricing workflow to amend dates.');
+            $priced = DB::table('reservation_folios')->where('hotel_id', $hotel->id)
+                ->where('reservation_record_id', $bookingId)->exists();
+            $pricedCommit = ! $preview && $priced;
+            $revisionId = null;
+            if ($pricedCommit && (!config('booking.priced_amendments_enabled', false)
+                || !is_string($reviewFingerprint) || !preg_match('/^[a-f0-9]{64}$/D', $reviewFingerprint))) {
+                throw new HttpException(409, 'Priced reservations require an enabled, reviewed pricing amendment.');
+            }
+            if (! $preview && !$priced && $reviewFingerprint !== null) {
+                throw new HttpException(409, 'This booking no longer has the reviewed priced folio.');
             }
 
             $today = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
@@ -49,7 +54,7 @@ final class ReservationAmendmentService
                 throw new HttpException(409, 'Choose dates on or after today. A confirmed stay currently in its scheduled arrival window cannot be amended here.');
             }
 
-            if (! $preview && $booking->check_in === $newStay->arrival && $booking->check_out === $newStay->departure) {
+            if (! $preview && !$pricedCommit && $booking->check_in === $newStay->arrival && $booking->check_out === $newStay->departure) {
                 return ['id' => (string) $bookingId, 'checkIn' => $booking->check_in,
                     'checkOut' => $booking->check_out, 'unchanged' => true];
             }
@@ -92,11 +97,11 @@ final class ReservationAmendmentService
                 }
             }
 
-            if ($preview) {
+            if ($preview || $pricedCommit) {
                 $folioService = app(FolioAccountingService::class);
                 $folio = $folioService->findFolio($hotel, $bookingId, true);
                 $folioService->assertNotSigned($hotel, $folio);
-                $entries = DB::table('folio_entries')->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
+                $entries = ActiveFolioEntryScope::apply(DB::table('folio_entries'))->where('hotel_id', $hotel->id)->where('folio_id', $folio->id)
                     ->where('entry_type', 'room_night')->orderBy('stay_date')->orderBy('id')->get();
                 $planIds = $entries->pluck('rate_plan_id')->unique()->values();
                 abort_if($entries->isEmpty() || $planIds->count() !== 1 || $planIds->first() === null, 409, 'A single original rate plan is required for automatic repricing.');
@@ -141,7 +146,14 @@ final class ReservationAmendmentService
                     throw new HttpException(409, 'The reviewed stay pricing has changed. Review the dates again.');
                 }
 
-                return $review;
+                if ($preview) {
+                    return $review;
+                }
+                if ($booking->check_in === $newStay->arrival && $booking->check_out === $newStay->departure) {
+                    return ['id' => (string) $bookingId, 'checkIn' => $newStay->arrival,
+                        'checkOut' => $newStay->departure, 'unchanged' => true, 'saved' => false];
+                }
+                $revisionId = app(ReservationPricingRevisionService::class)->record($hotel, $actor, $bookingId, $review);
             }
 
             DB::table('reservation_records')->where('hotel_id', $hotel->id)->where('id', $bookingId)->update([
@@ -161,11 +173,13 @@ final class ReservationAmendmentService
             DB::table('reservation_booking_events')->insert([
                 'hotel_id' => $hotel->id, 'reservation_record_id' => $bookingId, 'actor_id' => $actor,
                 'event_type' => 'stay_amended', 'old_state' => 'confirmed',
+                ...($revisionId === null ? [] : ['note' => 'Reviewed pricing revision #'.$revisionId]),
                 'new_state' => 'confirmed', 'created_at' => now(), 'updated_at' => now(),
             ]);
 
             return ['id' => (string) $bookingId, 'checkIn' => $newStay->arrival,
-                'checkOut' => $newStay->departure, 'unchanged' => false];
+                'checkOut' => $newStay->departure, 'unchanged' => false,
+                ...($revisionId === null ? [] : ['saved' => true, 'pricingRevisionId' => (string) $revisionId])];
         }, 3);
     }
 }
