@@ -34,8 +34,7 @@ final class FolioAccountingService
 
     public function summaryFor(object $folio): array
     {
-        $entries = DB::table('folio_entries')->where('hotel_id', $folio->hotel_id)
-            ->where('folio_id', $folio->id)->get(['amount_minor']);
+        $entries = app(ActiveFolioChargeReader::class)->amounts($folio);
         $adjustments = DB::table('folio_adjustments')->where('hotel_id', $folio->hotel_id)
             ->where('folio_id', $folio->id)->get(['kind', 'amount_minor']);
         $payments = DB::table('folio_payment_records')->where('hotel_id', $folio->hotel_id)
@@ -436,6 +435,11 @@ final class FolioAccountingService
 
             $folio = $this->findFolio($hotel, $bookingId, true);
             $this->assertNotSigned($hotel, $folio);
+            if (Schema::hasTable('reservation_pricing_revisions')
+                && DB::table('reservation_pricing_revisions')->where('hotel_id', $hotel->id)
+                    ->where('folio_id', $folio->id)->exists()) {
+                throw new HttpException(409, 'Revised folios require reviewed cancellation reconciliation.');
+            }
             // Once financial journals have been linked to a priced room night,
             // cancellation must use an explicit append-only accounting reversal.
             if (DB::table('financial_folio_night_assessments')
