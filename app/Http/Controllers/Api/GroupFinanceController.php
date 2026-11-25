@@ -69,6 +69,7 @@ final class GroupFinanceController
             }
             $summary = $accounting->summaryFor((object) [
                 'id' => $row->folio_id, 'hotel_id' => $hotel->id, 'currency' => $row->currency,
+                'reservation_record_id' => $row->booking_id,
             ]);
             $verifiedAllocated = (int) DB::table('folio_settlement_allocations as alloc')
                 ->join('folio_settlement_verifications as verify', function ($join): void {
