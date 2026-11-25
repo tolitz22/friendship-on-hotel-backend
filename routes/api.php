@@ -363,6 +363,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/bookings/{booking}/dates/preview', [FrontDeskReservationController::class, 'previewAmendment'])->whereNumber('booking')->middleware('throttle:30,1');
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
                 Route::post('/bookings/{booking}/no-show', [ReservationBookingController::class, 'noShow'])->whereNumber('booking');
+                Route::get('/bookings/{booking}/no-show-financial-review', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
                 Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
                 Route::get('/reservation-policy-draft/history', [ReservationPolicyDraftController::class, 'history']);
