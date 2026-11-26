@@ -119,15 +119,32 @@ final class StaffMessageController
 
     private function announcementMeta(Request $request, Hotel $hotel, object $row): void
     {
-        $row->is_announcement=(bool)$row->is_announcement;
-        $row->handover=$row->handover===null?null:json_decode($row->handover,true,512,JSON_THROW_ON_ERROR);
-        if (!$row->is_announcement && !$row->handover) return;
-        $recipients=DB::table('staff_announcement_recipients')->where('message_id',$row->id);
-        $mine=(clone $recipients)->where('user_id',$request->user()->id)->first();
-        $row->acknowledgement=['required'=>$mine!==null,'acknowledged_at'=>$mine?->acknowledged_at];
-        if (($row->handover && (string)$row->sender_id===(string)$request->user()->id) || ($this->active($hotel)->where('u.id',$request->user()->id)->where('hm.role','admin')->exists() && $request->user()->tokenCan('hotel:write'))) {
-            $row->acknowledgement['total']=$recipients->count();
-            $row->acknowledgement['acknowledged']=(clone $recipients)->whereNotNull('acknowledged_at')->count();
+        $this->announcementMetadata($request,$hotel,collect([$row]));
+    }
+
+    private function announcementMetadata(Request $request, Hotel $hotel, \Illuminate\Support\Collection $rows): void
+    {
+        $special=$rows->filter(function ($row) {
+            $row->is_announcement=(bool)$row->is_announcement;
+            $row->handover=$row->handover===null?null:json_decode($row->handover,true,512,JSON_THROW_ON_ERROR);
+            return $row->is_announcement || $row->handover;
+        });
+        if ($special->isEmpty()) return;
+        $uid=$request->user()->id;
+        $ids=$special->pluck('id');
+        $mine=DB::table('staff_announcement_recipients')->whereIn('message_id',$ids)->where('user_id',$uid)->get(['message_id','acknowledged_at'])->keyBy('message_id');
+        $manager=$request->user()->tokenCan('hotel:write') && $this->active($hotel)->where('u.id',$uid)->where('hm.role','admin')->exists();
+        $countIds=$special->filter(fn ($row)=>$manager || ($row->handover && (string)$row->sender_id===(string)$uid))->pluck('id');
+        $counts=$countIds->isEmpty()?collect():DB::table('staff_announcement_recipients')->whereIn('message_id',$countIds)
+            ->selectRaw('message_id, COUNT(*) AS total, COUNT(acknowledged_at) AS acknowledged')->groupBy('message_id')->get()->keyBy('message_id');
+        foreach ($special as $row) {
+            $recipient=$mine->get($row->id);
+            $row->acknowledgement=['required'=>$recipient!==null,'acknowledged_at'=>$recipient?->acknowledged_at];
+            if ($manager || ($row->handover && (string)$row->sender_id===(string)$uid)) {
+                $count=$counts->get($row->id);
+                $row->acknowledgement['total']=(int)($count->total??0);
+                $row->acknowledgement['acknowledged']=(int)($count->acknowledged??0);
+            }
         }
     }
 
@@ -157,20 +174,33 @@ final class StaffMessageController
             ->where('c.hotel_id',$hotel->id)->where('m.user_id',$uid)
             ->where(fn ($q)=>$q->where('c.kind','!=','channel')->orWhereIn('c.direct_key',$keys))
             ->orderByDesc('c.updated_at')->orderByDesc('c.id')->get(['c.*','m.last_read_message_id']);
-        $rows->each(function ($c) use ($uid,$hotel,$request): void {
-            $c->members=DB::table('staff_conversation_members as m')->join('users as u','u.id','=','m.user_id')
-                ->where('m.conversation_id',$c->id)->whereIn('u.id',$this->active($hotel)->select('u.id'))->get(['u.id','u.name','m.last_read_message_id']);
+        if ($rows->isEmpty()) return response()->json(['data'=>$rows]);
+        $ids=$rows->pluck('id');
+        $latestIds=DB::table('staff_messages')->whereIn('conversation_id',$ids)->groupBy('conversation_id')->selectRaw('MAX(id) AS id');
+        $latest=DB::table('staff_messages')->whereIn('id',$latestIds)->get()->keyBy('conversation_id');
+        $unread=DB::table('staff_messages as sm')->join('staff_conversation_members as cm',function ($join) use ($uid) {
+            $join->on('cm.conversation_id','=','sm.conversation_id')->where('cm.user_id',$uid);
+        })->whereIn('sm.conversation_id',$ids)->whereColumn('sm.id','>','cm.last_read_message_id')->where('sm.sender_id','!=',$uid)
+            ->groupBy('sm.conversation_id')->selectRaw('sm.conversation_id, COUNT(*) AS total')->get()->keyBy('conversation_id');
+        $staff=$this->active($hotel)->get(['u.id','u.name','hm.role']);
+        $members=DB::table('staff_conversation_members')->whereIn('conversation_id',$ids)->get(['conversation_id','user_id','last_read_message_id'])->groupBy('conversation_id');
+        foreach ($rows as $c) {
+            $readers=$members->get($c->id,collect())->keyBy('user_id');
+            $eligible=$staff;
             if ($c->kind==='channel') {
-                $eligible=$this->active($hotel);
                 $role=substr($c->direct_key,8);
-                if ($role!=='all') $eligible->whereIn('hm.role',array_unique([$role,'admin']));
-                $c->members=$eligible->leftJoin('staff_conversation_members as cm',function ($join) use ($c) { $join->on('cm.user_id','=','u.id')->where('cm.conversation_id',$c->id); })->get(['u.id','u.name','cm.last_read_message_id']);
+                if ($role!=='all') $eligible=$eligible->filter(fn ($person)=>in_array($person->role,[$role,'admin'],true));
+            } else {
+                $eligible=$eligible->filter(fn ($person)=>$readers->has($person->id));
             }
-            $c->latest=DB::table('staff_messages')->where('conversation_id',$c->id)->orderByDesc('id')->first();
-            if ($c->latest) { $this->presentReference($request,$hotel,$c->latest); $this->announcementMeta($request,$hotel,$c->latest); }
-            $c->unread=DB::table('staff_messages')->where('conversation_id',$c->id)
-                ->where('id','>',$c->last_read_message_id)->where('sender_id','!=',$uid)->count();
-        });
+            $c->members=$eligible->unique('id')->map(fn ($person)=>[
+                'id'=>$person->id,'name'=>$person->name,'last_read_message_id'=>$readers->get($person->id)?->last_read_message_id,
+            ])->values();
+            $c->latest=$latest->get($c->id);
+            if ($c->latest) $this->presentReference($request,$hotel,$c->latest);
+            $c->unread=(int)($unread->get($c->id)?->total??0);
+        }
+        $this->announcementMetadata($request,$hotel,$latest->values());
         return response()->json(['data'=>$rows]);
     }
 
@@ -210,8 +240,8 @@ final class StaffMessageController
         $rows->each(function ($row) use ($attachments,$request,$hotel): void {
             $row->attachment=$attachments->get($row->id);
             $this->presentReference($request,$hotel,$row);
-            $this->announcementMeta($request,$hotel,$row);
         });
+        $this->announcementMetadata($request,$hotel,$rows);
         return response()->json(['data'=>$rows]);
     }
 
