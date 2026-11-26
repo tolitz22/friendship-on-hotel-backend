@@ -17,14 +17,15 @@ final class NoShowFinancialReport
             ->join('financial_posting_lines as l', 'l.journal_id', '=', 'j.id')
             ->where('j.hotel_id', $hotelId)->where('j.business_date', $date)
             ->where(function ($query) use ($supportsReversals): void {
-                $query->where('j.source_type', 'no_show_fee');
+                $query->whereIn('j.source_type', ['no_show_fee', 'no_show_fee_replacement']);
                 if (!$supportsReversals) {
                     return;
                 }
                 $query->orWhereExists(function ($original): void {
                     $original->selectRaw('1')->from('financial_posting_journals as o')
                         ->whereColumn('o.id', 'j.reverses_journal_id')
-                        ->whereColumn('o.hotel_id', 'j.hotel_id')->where('o.source_type', 'no_show_fee');
+                        ->whereColumn('o.hotel_id', 'j.hotel_id')
+                        ->whereIn('o.source_type', ['no_show_fee', 'no_show_fee_replacement', 'no_show_fee_reversal']);
                 });
             })
             ->whereIn('l.account_code', ['NO_SHOW_REV', 'VAT_PAYABLE', 'AR'])
