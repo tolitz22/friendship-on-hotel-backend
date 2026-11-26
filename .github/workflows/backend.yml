@@ -153,6 +153,8 @@ jobs:
           php scripts/real-engine-no-show-fee-correction-race.php posting
           php scripts/real-engine-no-show-fee-correction-race.php waiver
           php scripts/real-engine-no-show-fee-correction-race.php closing
+          php scripts/real-engine-no-show-fee-correction-race.php allocation
+          php scripts/real-engine-no-show-fee-correction-race.php refund
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
 
@@ -237,5 +239,7 @@ jobs:
           php scripts/real-engine-no-show-fee-correction-race.php posting
           php scripts/real-engine-no-show-fee-correction-race.php waiver
           php scripts/real-engine-no-show-fee-correction-race.php closing
+          php scripts/real-engine-no-show-fee-correction-race.php allocation
+          php scripts/real-engine-no-show-fee-correction-race.php refund
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
