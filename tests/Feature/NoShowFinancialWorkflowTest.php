@@ -1015,3 +1015,111 @@ it('requires an independently approved complete room journal reversal before no-
     expect(NoShowClosingGuard::unresolved($hotel->id, '2026-11-22'))->toBe(0);
     expect((int) DB::table('folio_adjustments')->where('folio_id', $folio)->where('kind', 'credit')->sum('amount_minor'))->toBe(600000);
 })->with(['success', 'self approval', 'stale snapshot', 'disabled posting', 'changed date', 'damaged reversal']);
+
+
+it('corrects cleared no-show fees atomically and preserves financial evidence', function (string $scenario, int $replacement, int $deposit): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    config()->set([
+        'financial_accounting.enable_no_show_fee_correction_review' => true,
+        'financial_accounting.enable_no_show_fee_correction_posting' => true,
+    ]);
+    if ($deposit > 0) noShowPayment($hotel, $folio, $author, $reviewer, $deposit);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    $original = (int) noShowApprove($this, $path, $review, 'vat_standard')->assertCreated()->json('data.journalId');
+    $service = app(\App\Services\Finance\NoShowFeeCorrectionDecisionService::class);
+    $previewer = app(\App\Services\Finance\NoShowFeeReversalPreview::class);
+    $reason = 'Documented exception independently reviewed for synthetic testing.';
+    $preview = $previewer->preview($hotel, $booking, $author->id, $replacement);
+    expect($preview['eligibleForReview'])->toBeTrue()
+        ->and($preview['canPost'])->toBeFalse()
+        ->and($preview['proposedFolioCreditMinor'])->toBe(200000 - $replacement);
+    $proposal = $service->propose($hotel, $booking, $author->id, $replacement, $reason);
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id);
+    $adjustments = DB::table('folio_adjustments')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
+    $payments = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
+    $originalPayments = (clone $payments)->orderBy('id')->get()->all();
+    $originalJournal = (clone $journals)->where('id', $original)->first();
+    $originalLines = DB::table('financial_posting_lines')->where('journal_id', $original)->orderBy('line_number')->get()->all();
+    $originalCount = (clone $journals)->count();
+    $originalAdjustments = (clone $adjustments)->count();
+    $approve = fn (int $actor) => $service->approve($hotel, $proposal, $actor, 'vat_standard', $reason, $reason);
+    $apply = fn (int $actor) => $service->applyApprovedCorrection($hotel, $proposal, $actor);
+
+    if ($scenario === 'self approval') {
+        expect(fn () => $approve($author->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    } elseif ($scenario === 'stale evidence') {
+        noShowPayment($hotel, $folio, $author, $reviewer, 10000, 2);
+        expect(fn () => $approve($reviewer->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+    } else {
+        $approve($reviewer->id);
+        if ($scenario === 'wrong poster') {
+            expect(fn () => $apply($author->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        } elseif ($scenario === 'disabled') {
+            config()->set('financial_accounting.enable_no_show_fee_correction_posting', false);
+            expect(fn () => $apply($reviewer->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        } elseif ($scenario === 'stale date') {
+            DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['business_date' => '2026-11-23']);
+            expect(fn () => $apply($reviewer->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        } elseif ($scenario === 'rollback') {
+            // Force a failure at the final validation boundary, after all three writes.
+            $validator = Mockery::mock(\App\Services\Finance\NoShowEffectiveFeeClearance::class);
+            $validator->shouldReceive('appliedProposal')->andReturnNull();
+            $validator->shouldReceive('resolve')->once()->andReturnNull();
+            app()->instance(\App\Services\Finance\NoShowEffectiveFeeClearance::class, $validator);
+            expect(fn () => $apply($reviewer->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+            app()->forgetInstance(\App\Services\Finance\NoShowEffectiveFeeClearance::class);
+        } else {
+            $result = $apply($reviewer->id);
+            expect($result['replayed'])->toBeFalse()
+                ->and($result['replacementFeeMinor'])->toBe($replacement)
+                ->and($result['refundIssued'])->toBeFalse()
+                ->and($result['replacementJournalId'] === null)->toBe($replacement === 0)
+                ->and((clone $journals)->count())->toBe($originalCount + ($replacement === 0 ? 1 : 2))
+                ->and((clone $adjustments)->count())->toBe($originalAdjustments + 1)
+                ->and((clone $payments)->orderBy('id')->get()->all())->toEqual($originalPayments)
+                ->and((clone $journals)->where('id', $original)->first())->toEqual($originalJournal)
+                ->and(DB::table('financial_posting_lines')->where('journal_id', $original)->orderBy('line_number')->get()->all())->toEqual($originalLines);
+            $effective = NoShowRefundEligibility::clearance($hotel->id, $booking, $folio);
+            expect((int) $effective->gross_minor)->toBe($replacement)
+                ->and((int) $effective->vat_minor)->toBe($replacement - intdiv($replacement * 10000 + 5600, 11200));
+            $eligibility = app(NoShowRefundEligibility::class)->review($hotel, $booking);
+            expect($eligibility['financialClearanceValid'])->toBeTrue()
+                ->and($eligibility['remainingCollectionMinor'])->toBe(max(0, $replacement - $deposit))
+                ->and($eligibility['maximumRefundRequestMinor'])->toBe(max(0, $deposit - $replacement))
+                ->and(NoShowClosingGuard::unresolved($hotel->id, '2026-11-22'))->toBe(0);
+            $report = app(\App\Services\Finance\NoShowFinancialReport::class)->report($hotel->id, '2026-11-22', false);
+            expect($report['postedReceivableMovementMinor'])->toBe($replacement)
+                ->and($report['postedRevenueMinor'] + $report['postedVatMinor'])->toBe($replacement);
+            DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['business_date' => '2026-11-23']);
+            expect($apply($reviewer->id))->toBe(array_replace($result, ['replayed' => true]));
+            if ($scenario === 'damaged journal') {
+                DB::table('financial_posting_lines')->where('journal_id', $result['reversalJournalId'])
+                    ->where('line_number', 1)->update(['account_code' => 'INVALID']);
+                expect(fn () => $apply($reviewer->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+                expect(NoShowRefundEligibility::clearance($hotel->id, $booking, $folio))->toBeNull()
+                    ->and(NoShowClosingGuard::unresolved($hotel->id, '2026-11-23'))->toBe(1);
+            }
+            expect((clone $journals)->count())->toBe($originalCount + ($replacement === 0 ? 1 : 2))
+                ->and((clone $adjustments)->count())->toBe($originalAdjustments + 1);
+            return;
+        }
+    }
+    expect((clone $journals)->count())->toBe($originalCount)
+        ->and((clone $adjustments)->count())->toBe($originalAdjustments)
+        ->and(NoShowRefundEligibility::clearance($hotel->id, $booking, $folio))->not->toBeNull();
+})->with([
+    'partial reduction with excess deposit' => ['success', 100000, 150000],
+    'partial reduction with outstanding balance' => ['success', 100000, 50000],
+    'full waiver with deposit' => ['success', 0, 150000],
+    'full waiver without deposit' => ['success', 0, 0],
+    'self approval' => ['self approval', 100000, 0],
+    'changed payment evidence' => ['stale evidence', 100000, 0],
+    'unauthorized posting' => ['wrong poster', 100000, 0],
+    'disabled posting' => ['disabled', 100000, 0],
+    'changed business date' => ['stale date', 100000, 0],
+    'atomic rollback' => ['rollback', 100000, 0],
+    'damaged reversal' => ['damaged journal', 100000, 150000],
+]);
