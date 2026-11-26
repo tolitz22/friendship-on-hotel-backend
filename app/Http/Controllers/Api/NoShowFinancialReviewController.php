@@ -18,6 +18,14 @@ final class NoShowFinancialReviewController
         return response()->json(['data' => $service->preview($hotel, (int) $booking)]);
     }
 
+    public function ledgerReconciliation(Request $request, Hotel $hotel, string $booking,
+        \App\Services\Finance\NoShowLedgerReconciliationService $service): JsonResponse
+    {
+        return response()->json(['data' => $service->report(
+            $hotel, (int) $booking, (int) $request->user()->id
+        )])->header('Cache-Control', 'private, no-store');
+    }
+
     public function apply(Request $request, Hotel $hotel, string $booking, NoShowFinancialReviewService $service): JsonResponse
     {
         $data = $request->validate([
