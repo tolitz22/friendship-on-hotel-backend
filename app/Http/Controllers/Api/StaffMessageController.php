@@ -17,12 +17,41 @@ final class StaffMessageController
             ->where('hm.hotel_id',$hotel->id)->where('hm.is_active',true)->where('u.is_active',true);
     }
 
+    private const CHANNELS = ['all'=>'All Staff','admin'=>'Management','front_desk'=>'Reception','housekeeping'=>'Housekeeping','maintenance'=>'Maintenance'];
+
+    // Membership rows track read state; current role is always authoritative.
+    private function channelKeys(Hotel $hotel, int $uid): array
+    {
+        $roles=$this->active($hotel)->where('u.id',$uid)->pluck('hm.role')->all();
+        if (!$roles) return [];
+        $keys=in_array('admin',$roles,true)?array_keys(self::CHANNELS):array_merge(['all'],array_intersect(array_keys(self::CHANNELS),$roles));
+        return array_map(fn ($key)=>'channel:'.$key,$keys);
+    }
+
+    private function ensureChannels(Hotel $hotel, int $uid): void
+    {
+        $keys=$this->channelKeys($hotel,$uid);
+        foreach ($keys as $key) {
+            $row=DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('direct_key',$key)->first();
+            if (!$row || !DB::table('staff_conversation_members')->where('conversation_id',$row->id)->where('user_id',$uid)->exists()) {
+                DB::transaction(function () use ($hotel,$uid,$key): void {
+                    DB::table('hotels')->where('id',$hotel->id)->lockForUpdate()->first();
+                    if (!in_array($key,$this->channelKeys($hotel,$uid),true)) return;
+                    $id=DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('direct_key',$key)->value('id');
+                    if (!$id) $id=DB::table('staff_conversations')->insertGetId(['hotel_id'=>$hotel->id,'kind'=>'channel','title'=>self::CHANNELS[substr($key,8)],'direct_key'=>$key,'created_at'=>now(),'updated_at'=>now()]);
+                    DB::table('staff_conversation_members')->insertOrIgnore(['conversation_id'=>$id,'user_id'=>$uid,'created_at'=>now(),'updated_at'=>now()]);
+                },3);
+            }
+        }
+    }
+
     private function access(Request $request, Hotel $hotel, int $conversation): void
     {
+        $keys=$this->channelKeys($hotel,(int)$request->user()->id);
         abort_unless(DB::table('staff_conversations as c')
             ->join('staff_conversation_members as m','m.conversation_id','=','c.id')
             ->where('c.hotel_id',$hotel->id)->where('c.id',$conversation)
-            ->where('m.user_id',$request->user()->id)->exists(),404);
+            ->where('m.user_id',$request->user()->id)->where(fn ($q)=>$q->where('c.kind','!=','channel')->orWhereIn('c.direct_key',$keys))->exists(),404);
     }
 
     public function directory(Request $request, Hotel $hotel): JsonResponse
@@ -34,12 +63,21 @@ final class StaffMessageController
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
         $uid=$request->user()->id;
+        $this->ensureChannels($hotel,(int)$uid);
+        $keys=$this->channelKeys($hotel,(int)$uid);
         $rows=DB::table('staff_conversations as c')->join('staff_conversation_members as m','m.conversation_id','=','c.id')
             ->where('c.hotel_id',$hotel->id)->where('m.user_id',$uid)
+            ->where(fn ($q)=>$q->where('c.kind','!=','channel')->orWhereIn('c.direct_key',$keys))
             ->orderByDesc('c.updated_at')->orderByDesc('c.id')->get(['c.*','m.last_read_message_id']);
-        $rows->each(function ($c) use ($uid): void {
+        $rows->each(function ($c) use ($uid,$hotel): void {
             $c->members=DB::table('staff_conversation_members as m')->join('users as u','u.id','=','m.user_id')
                 ->where('m.conversation_id',$c->id)->get(['u.id','u.name','m.last_read_message_id']);
+            if ($c->kind==='channel') {
+                $eligible=$this->active($hotel);
+                $role=substr($c->direct_key,8);
+                if ($role!=='all') $eligible->whereIn('hm.role',array_unique([$role,'admin']));
+                $c->members=$eligible->leftJoin('staff_conversation_members as cm',function ($join) use ($c) { $join->on('cm.user_id','=','u.id')->where('cm.conversation_id',$c->id); })->get(['u.id','u.name','cm.last_read_message_id']);
+            }
             $c->latest=DB::table('staff_messages')->where('conversation_id',$c->id)->orderByDesc('id')->first();
             $c->unread=DB::table('staff_messages')->where('conversation_id',$c->id)
                 ->where('id','>',$c->last_read_message_id)->where('sender_id','!=',$uid)->count();
