@@ -99,6 +99,34 @@ it('provides scoped arrival and departure manifests without turning mock data li
         ->assertOk()->assertJsonCount(1, 'data');
 });
 
+it('keeps due and overdue guests in today’s in-house manifest until checkout', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-10 10:00:00 Asia/Manila'));
+    [$hotel, $type, $rooms, $guest] = phase23Setup();
+    phase23Auth($hotel);
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $id = phase23Create($this, $hotel, $type, $guest, 'manifest-in-house-001', '2026-12-10', '2026-12-12');
+    $this->patchJson($base.'/bookings/'.$id.'/assign-room', ['roomId' => $rooms[0]->id])->assertOk();
+    $this->postJson($base.'/bookings/'.$id.'/check-in')->assertOk();
+
+    $manifest = $base.'/front-desk/manifest?kind=in_house&date=';
+    $this->getJson($manifest.'2026-12-12')->assertOk()->assertJsonPath('meta.total', 0);
+
+    // In UTC it is still December 11, but the hotel's current date is December 12.
+    $this->travelTo(new DateTimeImmutable('2026-12-12 01:00:00 Asia/Manila'));
+    $this->getJson($manifest.'2026-12-12')->assertOk()
+        ->assertJsonPath('data.0.id', $id)->assertJsonPath('meta.total', 1);
+
+    $this->travelTo(new DateTimeImmutable('2026-12-13 10:00:00 Asia/Manila'));
+    $this->getJson($manifest.'2026-12-12')->assertOk()->assertJsonPath('meta.total', 0);
+    $this->getJson($manifest.'2026-12-13')->assertOk()
+        ->assertJsonPath('data.0.id', $id)->assertJsonPath('meta.total', 1);
+    $this->getJson($base.'/front-desk/manifest?kind=overdue&date=2026-12-13')
+        ->assertOk()->assertJsonPath('data.0.id', $id);
+
+    $this->postJson($base.'/bookings/'.$id.'/check-out')->assertOk();
+    $this->getJson($manifest.'2026-12-13')->assertOk()->assertJsonPath('meta.total', 0);
+});
+
 it('creates exactly one housekeeping checkout task when a booking is checked out', function (): void {
     $this->travelTo(new DateTimeImmutable('2026-12-10 10:00:00 Asia/Manila'));
     [$hotel, $type, $rooms, $guest] = phase23Setup();

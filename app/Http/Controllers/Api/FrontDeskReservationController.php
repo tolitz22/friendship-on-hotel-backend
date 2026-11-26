@@ -51,8 +51,11 @@ final class FrontDeskReservationController
                 ->where('event.event_type', 'departure_follow_up')
                 ->latest('event.id')->limit(1)->select('event.note'), 'departure_follow_up');
         } else {
-            $query->where('r.check_in', '<=', $date)
-                ->where('r.check_out', '>', $date)->where('r.lifecycle_state', 'checked_in');
+            $query->where('r.lifecycle_state', 'checked_in');
+            // Today's roster follows actual check-in status. Other dates show overlap with the booked nights.
+            if ($date !== now($hotel->timezone ?: 'Asia/Manila')->toDateString()) {
+                $query->where('r.check_in', '<=', $date)->where('r.check_out', '>', $date);
+            }
         }
 
         $unassignedCount = (clone $query)->whereNull('r.assigned_room_id')->count();
