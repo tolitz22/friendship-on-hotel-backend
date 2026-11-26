@@ -15,6 +15,11 @@ final class PushAlertPayload
         if (isset($alert['paymentId'])) $params['payment'] = $alert['paymentId'];
         if (isset($alert['expenseId'])) $params['expense'] = $alert['expenseId'];
         if (isset($alert['shiftId'])) $params['shift'] = $alert['shiftId'];
+        foreach (['taskId' => 'task', 'orderId' => 'order', 'room' => 'room', 'calendarDate' => 'date', 'approvalId' => 'approval'] as $field => $parameter) {
+            if (isset($alert[$field])) {
+                $params[$parameter] = $alert[$field];
+            }
+        }
         if ($kind === 'room_assignment') {
             $params['deskAction'] = 'assign';
         } elseif (in_array($kind, ['checkout_due', 'checkout_overdue'], true)) {
@@ -44,6 +49,17 @@ final class PushAlertPayload
                 'expense_recorded' => 'A hotel expense was recorded.',
                 'expense_correction_requested' => 'An expense correction was requested.',
                 'cashier_discrepancy' => 'A cashier cash-count discrepancy was reported.',
+                'housekeeping_completed' => 'A housekeeping task was completed.',
+                'room_inspection_approved' => 'A room inspection was approved.',
+                'room_inspection_rejected' => 'A room inspection requires attention.',
+                'maintenance_created' => 'A maintenance work order was created.',
+                'maintenance_urgent' => 'An urgent maintenance work order requires attention.',
+                'maintenance_resolved' => 'A maintenance work order was resolved.',
+                'room_blocked' => 'A room inventory block was created.',
+                'room_unblocked' => 'A room inventory block was released.',
+                'approval_requested' => 'A manager approval is awaiting review.',
+                'approval_approved' => 'A manager approval was granted.',
+                'approval_rejected' => 'A manager approval was rejected.',
                 default => 'A hotel update requires attention.',
             },
             'url' => '/'.$target.'?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986),
