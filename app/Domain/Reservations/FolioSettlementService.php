@@ -154,6 +154,9 @@ final class FolioSettlementService
         ): array {
             $folio = $this->lockedFolio($hotel, $bookingId);
             $this->assertUnsigned($folio);
+            $isNoShow = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                ->where('id', $bookingId)->where('lifecycle_state', 'no_show')->exists();
+            $postJournal = $isNoShow && config('financial_accounting.enable_no_show_allocation_posting', false);
             if ($amountMinor < 1 || $amountMinor > 100000000000
                 || !in_array($payerKind, ['guest', 'company', 'group'], true)
                 || mb_strlen(trim($payerReference)) < 3 || mb_strlen($payerReference) > 120
@@ -171,6 +174,17 @@ final class FolioSettlementService
                     || (int) ($existing->folio_entry_id ?? 0) !== ($entryId ?? 0)) {
                     throw ValidationException::withMessages(['requestKey' => 'Allocation key already used for different details.']);
                 }
+                if ($postJournal) {
+                    // Replay must not silently backfill an allocation made before activation.
+                    $journal = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+                        ->where('idempotency_key', 'no-show-allocation-'.$existing->id)->first();
+                    if ($journal === null) {
+                        throw ValidationException::withMessages(['allocation' => 'Existing allocation requires separate journal reconciliation.']);
+                    }
+                    $journalId = app(\App\Services\Finance\NoShowAllocationJournalService::class)
+                        ->post($hotel, $bookingId, (int) $folio->id, (int) $existing->id, $actorId);
+                    return ['id' => (string) $existing->id, 'replayed' => true, 'journalId' => (string) $journalId];
+                }
                 return ['id' => (string) $existing->id, 'replayed' => true];
             }
             $payment = $this->payment($hotel, $folio, $paymentId);
@@ -186,8 +200,7 @@ final class FolioSettlementService
                 ->where('hotel_id', $hotel->id)->where('payment_record_id', $paymentId)
                 ->whereIn('status', ['requested', 'approved'])->sum('amount_minor');
             $net = app(FolioAccountingService::class)->summaryFor($folio)['netRecordedChargesMinor'];
-            if (DB::table('reservation_records')->where('hotel_id', $hotel->id)
-                ->where('id', $bookingId)->where('lifecycle_state', 'no_show')->exists()) {
+            if ($isNoShow) {
                 if ($entryId !== null) {
                     throw ValidationException::withMessages(['folioEntryId' => 'No-show fees require a folio-level allocation, not an unused room night.']);
                 }
@@ -227,6 +240,11 @@ final class FolioSettlementService
                 'amount_minor' => $amountMinor, 'idempotency_key' => $key,
                 'allocated_by' => $actorId, 'created_at' => now(),
             ]);
+            if ($postJournal) {
+                $journalId = app(\App\Services\Finance\NoShowAllocationJournalService::class)
+                    ->post($hotel, $bookingId, (int) $folio->id, (int) $id, $actorId);
+                return ['id' => (string) $id, 'replayed' => false, 'journalId' => (string) $journalId];
+            }
             return ['id' => (string) $id, 'replayed' => false];
         }, 3);
     }
