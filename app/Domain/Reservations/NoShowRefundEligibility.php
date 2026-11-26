@@ -96,6 +96,12 @@ final class NoShowRefundEligibility
             return null;
         }
 
+        $corrections = app(\App\Services\Finance\NoShowEffectiveFeeClearance::class);
+        $proposal = $corrections->appliedProposal($hotelId, $bookingId);
+        if ($proposal !== null) {
+            return $corrections->resolve($hotelId, $bookingId, $folioId, $proposal);
+        }
+
         $query = DB::table('no_show_financial_clearances as c')
             ->join('no_show_financial_reviews as v', 'v.id', '=', 'c.review_id')
             ->where('c.hotel_id', $hotelId)->where('v.hotel_id', $hotelId)
