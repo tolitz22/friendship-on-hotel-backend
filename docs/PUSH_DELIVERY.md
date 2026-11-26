@@ -24,3 +24,7 @@ Discovery loads eligible user IDs and preferences in batches of 100, reads only 
 ## PN-8.8 preflight and release gate
 
 Run `php artisan pms:push-check --scan` with delivery disabled. This is read-only and will report missing transport, configuration or schema without printing secrets. Client Demo is the default allowed scope; `PMS_PUSH_ALLOW_NON_DEMO` must remain false until explicit rollout approval. See [release readiness and rollback runbook](PUSH_RELEASE_READINESS.md). Passing preflight is necessary, not sufficient for live activation.
+
+## All-property mode (supersedes single-hotel activation configuration above)
+
+The worker now supports `PMS_PUSH_SCOPE=all`. In this mode omit `PMS_PUSH_HOTEL_ID` and `PMS_PUSH_ALLOW_NON_DEMO`; those settings apply only to legacy `pilot` mode (the default). One worker handles properties with registered devices individually. Newly created properties are included automatically when an administrator opts in. Device eligibility, preferences, message discovery, queue queries and delivery revalidation remain scoped to the individual property. One property failure does not prevent processing the others. Preflight reports aggregate counts for all properties and scans at most ten hotels with --scan. Keep PMS_PUSH_ENABLED=false until dependency, CI and live Client Demo acceptance pass. For live testing only, use pilot scope and the verified Client Demo ID. After acceptance use all scope with explicit activation approval. Review multi-property throughput before broad activation.

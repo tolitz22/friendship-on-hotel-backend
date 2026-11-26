@@ -35,8 +35,7 @@ final class DeliverHotelPush extends Command
             return self::FAILURE;
         }
         try {
-            $hotel = Hotel::find(config('push.hotel_id'));
-            if (! $hotel || ! $readiness->hotelAllowed($hotel)) {
+            if ($readiness->scopeIssues() !== []) {
                 $this->error('Push hotel is missing or outside the authorized pilot scope.');
 
                 return self::FAILURE;
@@ -56,6 +55,30 @@ final class DeliverHotelPush extends Command
             'publicKey' => config('push.public_key'),
             'privateKey' => config('push.private_key'),
         ]], [], 10);
+        $failed = false;
+        // Iterate only properties with registered devices (including revoked devices
+        // whose queued work still needs recovery). Every discovery/send stays hotel scoped.
+        foreach ($readiness->hotels()->whereExists(function ($query): void {
+            $query->selectRaw('1')->from('push_subscriptions')->whereColumn('push_subscriptions.hotel_id', 'hotels.id');
+        })->lazyById(100) as $hotel) {
+            if (! $readiness->hotelAllowed($hotel)) {
+                $failed = true;
+                continue;
+            }
+            try {
+                $this->deliverHotel($hotel, $sender, $notifications, $preferences, $eligibility, $messages, $queue, $discovery);
+            } catch (\Throwable) {
+                // Isolate property failures; never log confidential query values or endpoints.
+                $this->error('Push processing failed for hotel '.$hotel->id.'.');
+                $failed = true;
+            }
+        }
+
+        return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    private function deliverHotel(Hotel $hotel, WebPush $sender, HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery): void
+    {
         $eligible = fn () => $eligibility->forHotel($hotel->id);
 
         $discovery->discover($hotel);
@@ -101,8 +124,7 @@ final class DeliverHotelPush extends Command
             }
         }
 
-        $this->line('Push delivery status: '.json_encode($queue->counts($hotel->id), JSON_THROW_ON_ERROR));
+        $this->line('Hotel '.$hotel->id.' push delivery status: '.json_encode($queue->counts($hotel->id), JSON_THROW_ON_ERROR));
 
-        return self::SUCCESS;
     }
 }

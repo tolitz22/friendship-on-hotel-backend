@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
-use App\Models\Hotel;
 use App\Services\PushDeliveryQueue;
 use App\Services\PushDeliveryReadiness;
 use Illuminate\Console\Command;
@@ -16,15 +15,21 @@ final class PruneHotelPush extends Command
 
     public function handle(PushDeliveryQueue $queue, PushDeliveryReadiness $readiness): int
     {
-        if (! config('push.enabled') || ! config('push.hotel_id')) {
+        if (! config('push.enabled')) {
             return self::SUCCESS;
         }
-        $hotel = Hotel::find(config('push.hotel_id'));
-        if (! $hotel || ! $readiness->hotelAllowed($hotel)) {
-            $this->error('Push pruning hotel is outside the authorized pilot scope.');
+        if ($readiness->scopeIssues() !== []) {
+            $this->error('Push pruning scope is invalid.');
             return self::FAILURE;
         }
-        $removed = $queue->prune($hotel->id);
+        $removed = 0;
+        foreach ($readiness->hotels()->whereExists(function ($query): void {
+            $query->selectRaw('1')->from('push_subscriptions')->whereColumn('push_subscriptions.hotel_id', 'hotels.id');
+        })->lazyById(100) as $hotel) {
+            if ($readiness->hotelAllowed($hotel)) {
+                $removed += $queue->prune($hotel->id);
+            }
+        }
         $this->line('Pruned '.$removed.' terminal push deliveries.');
 
         return self::SUCCESS;

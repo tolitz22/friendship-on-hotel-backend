@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
-use App\Models\Hotel;
 use App\Services\HotelNotificationService;
 use App\Services\PushDeliveryReadiness;
 use App\Services\PushDeviceEligibility;
@@ -23,27 +22,36 @@ final class CheckHotelPush extends Command
         try {
             $schemaIssues = $readiness->schemaIssues();
             $issues = array_merge($issues, $schemaIssues);
-            $hotel = in_array('hotel_id_invalid', $issues, true) ? null : Hotel::find(config('push.hotel_id'));
-            if (! $hotel && ! in_array('hotel_id_invalid', $issues, true)) {
-                $issues[] = 'hotel_not_found';
-            }
-            if ($hotel && ! $readiness->hotelAllowed($hotel)) {
-                $issues[] = 'non_demo_hotel_not_authorized';
-            }
-            if ($hotel && $readiness->hotelAllowed($hotel) && $schemaIssues === []) {
-                $devices = $eligibility->forHotel($hotel->id);
-                $this->line('Eligible devices: '.$devices->count());
-                if ($this->option('scan')) {
-                    $feed = $notifications->feed($hotel, true);
-                    $this->line('Sample hotel alerts: '.count($feed['notifications']));
-                    $users = $devices->select('user_id')->distinct()->orderBy('user_id')->limit(10)->pluck('user_id');
-                    $personal = 0;
-                    foreach ($users as $userId) {
-                        foreach ($messages->all($hotel, (int) $userId, 8) as $alert) {
-                            $personal++;
+            $scopeIssues = $readiness->scopeIssues();
+            $issues = array_merge($issues, $scopeIssues);
+            if ($scopeIssues === [] && $schemaIssues === []) {
+                $hotels = $readiness->hotels();
+                $this->line('Hotel scope: '.config('push.scope'));
+                $this->line('Hotels in scope: '.$hotels->count());
+                $eligible = 0;
+                $sampled = 0;
+                $hotelAlerts = 0;
+                $personal = 0;
+                foreach ($hotels->lazyById(100) as $hotel) {
+                    $devices = $eligibility->forHotel($hotel->id);
+                    $eligible += $devices->count();
+                    if ($this->option('scan') && $sampled < 10) {
+                        $sampled++;
+                        $feed = $notifications->feed($hotel, true);
+                        $hotelAlerts += count($feed['notifications']);
+                        $users = $devices->select('user_id')->distinct()->orderBy('user_id')->limit(10)->pluck('user_id');
+                        foreach ($users as $userId) {
+                            foreach ($messages->all($hotel, (int) $userId, 8) as $alert) {
+                                $personal++;
+                            }
                         }
                     }
-                    $this->line('Sample personal alerts: '.$personal.' (up to ten recipients)');
+                }
+                $this->line('Eligible devices: '.$eligible);
+                if ($this->option('scan')) {
+                    $this->line('Sampled hotels: '.$sampled.' (up to ten)');
+                    $this->line('Sample hotel alerts: '.$hotelAlerts);
+                    $this->line('Sample personal alerts: '.$personal.' (up to ten recipients per sampled hotel)');
                 }
             }
         } catch (\Throwable) {

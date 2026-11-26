@@ -34,3 +34,7 @@ Assessment baseline: backend 59117db4b89e238c082b88678d66fdfdbb63b3fe, frontend 
 ## Current evidence
 
 At assessment, latest full backend validation and latest frontend CI were not complete. Earlier frontend UI/UX validation and quality gate passed. Composer dependency absent in manifest. No actual Railway worker or live-device evidence available. Do not treat this document or preflight success as final production approval.
+
+## All-property mode (supersedes single-hotel activation configuration above)
+
+The worker now supports `PMS_PUSH_SCOPE=all`. In this mode omit `PMS_PUSH_HOTEL_ID` and `PMS_PUSH_ALLOW_NON_DEMO`; those settings apply only to legacy `pilot` mode (the default). One worker handles properties with registered devices individually. Newly created properties are included automatically when an administrator opts in. Device eligibility, preferences, message discovery, queue queries and delivery revalidation remain scoped to the individual property. One property failure does not prevent processing the others. Preflight reports aggregate counts for all properties and scans at most ten hotels with --scan. Keep PMS_PUSH_ENABLED=false until dependency, CI and live Client Demo acceptance pass. For live testing only, use pilot scope and the verified Client Demo ID. After acceptance use all scope with explicit activation approval. Review multi-property throughput before broad activation.

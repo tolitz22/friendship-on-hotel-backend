@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Models\Hotel;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Schema;
 use Minishlink\WebPush\Subscription;
 use Minishlink\WebPush\WebPush;
@@ -31,12 +32,49 @@ final class PushDeliveryReadiness
         )) {
             $issues[] = 'subject_invalid';
         }
+        return array_merge($issues, $this->scopeConfigurationIssues());
+    }
+
+    public function scopeConfigurationIssues(): array
+    {
+        $scope = config('push.scope', 'pilot');
+        if ($scope === 'all') {
+            return [];
+        }
+        if ($scope !== 'pilot') {
+            return ['push_scope_invalid'];
+        }
         $hotelId = config('push.hotel_id');
-        if (! is_scalar($hotelId) || ! preg_match('/^[1-9][0-9]*$/D', (string) $hotelId)) {
-            $issues[] = 'hotel_id_invalid';
+
+        return ! is_scalar($hotelId) || ! preg_match('/^[1-9][0-9]*$/D', (string) $hotelId)
+            ? ['hotel_id_invalid'] : [];
+    }
+
+    public function scopeIssues(): array
+    {
+        $issues = $this->scopeConfigurationIssues();
+        if ($issues !== [] || config('push.scope') === 'all') {
+            return $issues;
+        }
+        $hotel = Hotel::find(config('push.hotel_id'));
+        if (! $hotel) {
+            return ['hotel_not_found'];
         }
 
-        return $issues;
+        return $this->hotelAllowed($hotel) ? [] : ['non_demo_hotel_not_authorized'];
+    }
+
+    public function hotels(): Builder
+    {
+        $query = Hotel::query();
+        if (config('push.scope') === 'all') {
+            return $query;
+        }
+        if ($this->scopeConfigurationIssues() !== []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->whereKey(config('push.hotel_id'));
     }
 
     private function validKey(mixed $value, int $length, bool $public = false): bool
@@ -53,7 +91,7 @@ final class PushDeliveryReadiness
 
     public function hotelAllowed(Hotel $hotel): bool
     {
-        return trim((string) $hotel->name) === 'Client Demo' || config('push.allow_non_demo') === true;
+        return config('push.scope') === 'all' || trim((string) $hotel->name) === 'Client Demo' || config('push.allow_non_demo') === true;
     }
 
     /** Lightweight check of the push schema; full event query smoke is opt-in. */
