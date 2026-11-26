@@ -12,3 +12,7 @@ Railway worker start command: php artisan schedule:work
 Run migrations on the API deployment before enabling the worker. No volume required. Keep one worker for the pilot.
 
 The database outbox deduplicates per subscription and alert ID, retries up to five times, and checks active admin membership at delivery. Delivery is at-least-once; client-side notification tags will be required. Existing alerts may be sent on first activation. This polls current alerts, not a durable business event stream. Ordinary logout intentionally preserves device opt-in. Use explicit device removal or shared-browser reset to stop it. Active administrator membership is rechecked at delivery. Verify ownership concurrency and actual browser navigation before real-hotel activation.
+
+## PN-8.4 reliability
+
+Queue work is scoped to the pilot hotel. Claims are fenced by attempt number and five-minute lease; expired claims cannot finalize a newer attempt. Five attempts maximum, exponential retry with provider Retry-After, and a 24-hour queued-delivery deadline. Urgent alerts sort first among fresh work; older work is promoted after 15 minutes. Provider 404/410 removes the expired subscription (its delivery rows cascade); other permanent failures record a generic failure code. Worker output reports aggregate delivery status counts only. No provider payloads or secrets are logged. A provider accepting a send before a process crash can still result in a repeat; exactly-once delivery is not guaranteed.

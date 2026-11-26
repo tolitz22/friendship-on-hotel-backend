@@ -11,7 +11,8 @@ use App\Services\PushDeviceEligibility;
 use App\Services\PushAlertPayload;
 use App\Services\StaffMessageNotifications;
 use Illuminate\Console\Command;
-use Illuminate\Support\Facades\DB;
+use App\Services\PushDeliveryQueue;
+use App\Services\PushDeliveryOutcome;
 use Minishlink\WebPush\Subscription;
 use Minishlink\WebPush\WebPush;
 
@@ -20,7 +21,7 @@ final class DeliverHotelPush extends Command
     protected $signature = 'pms:push-deliver';
     protected $description = 'Discover and deliver hotel alerts outside web requests';
 
-    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages): int
+    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue): int
     {
         if (! config('push.enabled')) {
             return self::SUCCESS;
@@ -46,14 +47,7 @@ final class DeliverHotelPush extends Command
                 if (! $preferences->allows($hotel->id, $device->user_id, $alert['kind'])) {
                     continue;
                 }
-                DB::table('push_deliveries')->insertOrIgnore([
-                    'push_subscription_id' => $device->id,
-                    'notification_id' => $alert['id'],
-                    'kind' => $alert['kind'],
-                    'available_at' => now(),
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                $queue->enqueue($device->id, $alert);
             }
         }
 
@@ -63,42 +57,25 @@ final class DeliverHotelPush extends Command
                 if (! $preferences->allows($hotel->id, $device->user_id, $alert['kind'])) {
                     continue;
                 }
-                DB::table('push_deliveries')->insertOrIgnore([
-                    'push_subscription_id' => $device->id,
-                    'notification_id' => $alert['id'],
-                    'kind' => $alert['kind'],
-                    'available_at' => now(),
-                    'created_at' => now(),
-                    'updated_at' => now(),
-                ]);
+                $queue->enqueue($device->id, $alert);
             }
         }
 
-        // A crashed worker may leave a claimed delivery. Reclaim after a generous lease.
-        DB::table('push_deliveries')->where('status', 'processing')->where('available_at', '<=', now())
-            ->update(['status' => 'pending', 'updated_at' => now()]);
-        $rows = DB::table('push_deliveries')->where('status', 'pending')->where('available_at', '<=', now())
-            ->whereIn('push_subscription_id', $eligible()->select('push_subscriptions.id'))
-            ->orderBy('id')->limit(100)->get();
-
-        foreach ($rows as $row) {
-            if (! DB::table('push_deliveries')->where('id', $row->id)->where('status', 'pending')->where('attempts', $row->attempts)
-                ->where('available_at', '<=', now())->update([
-                    'status' => 'processing', 'attempts' => $row->attempts + 1,
-                    'available_at' => now()->addMinutes(5), 'updated_at' => now(),
-                ])) {
+        $queue->recover($hotel->id);
+        foreach ($queue->ready($hotel->id) as $row) {
+            if (! $queue->claim($row)) {
                 continue;
             }
             $device = $eligible()->find($row->push_subscription_id);
             if (! $device || ! $preferences->allows($hotel->id, $device->user_id, $row->kind)) {
-                $this->finish($row, 'cancelled');
+                $queue->finish($row, 'cancelled', 'no_longer_eligible');
                 continue;
             }
             $alert = in_array($row->kind, StaffMessageNotifications::KINDS, true)
                 ? $messages->current($hotel, $device->user_id, $row->notification_id)
                 : $notifications->current($hotel, $row->notification_id);
             if (! $alert || $alert['kind'] !== $row->kind) {
-                $this->finish($row, 'cancelled');
+                $queue->finish($row, 'cancelled', 'stale_alert');
                 continue;
             }
             try {
@@ -106,30 +83,27 @@ final class DeliverHotelPush extends Command
                     'endpoint' => $device->endpoint, 'publicKey' => $device->p256dh,
                     'authToken' => $device->auth, 'contentEncoding' => 'aes128gcm',
                 ]), json_encode(PushAlertPayload::make($hotel->id, $alert), JSON_THROW_ON_ERROR), ['TTL' => 300, 'topic' => substr(hash('sha256', $hotel->id.':'.$alert['id']), 0, 32)]);
-                if ($report->isSubscriptionExpired()) {
-                    $device->delete();
+                $response = $report->getResponse();
+                [$status, $code] = PushDeliveryOutcome::classify($response?->getStatusCode(), $report->isSuccess());
+                if ($status === 'expired') {
+                    // Expired endpoints cannot be reused. Remove this subscription
+                    // only if this worker still owns the delivery claim.
+                    if ($queue->finish($row, 'failed', $code)) {
+                        $device->delete();
+                    }
                     continue;
                 }
-                $this->finish($row, $report->isSuccess() ? 'sent' : 'pending');
+                $retry = $response?->getHeaderLine('Retry-After') ?? '';
+                $delay = ctype_digit($retry) ? (int) $retry : ($retry !== '' ? max(0, (strtotime($retry) ?: 0) - time()) : null);
+                $queue->finish($row, $status, $code, $delay);
             } catch (\Throwable) {
-                // Never log subscription endpoints or cryptographic material.
-                $this->finish($row, 'pending');
+                // Never log provider bodies, subscription endpoints or key material.
+                $queue->finish($row, 'pending', 'transport_exception');
             }
         }
 
-        return self::SUCCESS;
-    }
+        $this->line('Push delivery status: '.json_encode($queue->counts($hotel->id), JSON_THROW_ON_ERROR));
 
-    private function finish(object $row, string $status): void
-    {
-        $attempt = $row->attempts + 1;
-        if ($status === 'pending' && $attempt >= 5) {
-            $status = 'failed';
-        }
-        DB::table('push_deliveries')->where('id', $row->id)->where('status', 'processing')
-            ->where('attempts', $attempt)->update([
-                'status' => $status, 'available_at' => now()->addMinutes(2 ** min($attempt, 5)),
-                'updated_at' => now(),
-            ]);
+        return self::SUCCESS;
     }
 }
