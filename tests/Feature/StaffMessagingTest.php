@@ -179,3 +179,95 @@ it('enforces the record picker role matrix and rejects unauthorized record types
     $this->getJson($this->base.'/records?type=housekeeping')->assertForbidden();
     $this->getJson($this->base.'/records?type=maintenance')->assertForbidden();
 });
+
+it('restricts announcement publishing to managers with write capability and hotel channels', function () {
+    $channels=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'));
+    $id=$channels->firstWhere('title','All Staff')['id'];
+    $direct=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $payload=['client_id'=>(string)Str::uuid(),'body'=>'QA announcement','is_announcement'=>true];
+    $this->postJson($this->base.'/conversations/'.$direct.'/messages',$payload)->assertStatus(422);
+    Sanctum::actingAs($this->manager,['hotel:read']);
+    $this->postJson($this->base.'/conversations/'.$id.'/messages',$payload)->assertForbidden();
+    Sanctum::actingAs($this->reception,['hotel:read','hotel:write']);
+    $this->getJson($this->base.'/conversations')->assertOk();
+    $this->postJson($this->base.'/conversations/'.$id.'/messages',$payload)->assertForbidden();
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+    $this->postJson($this->base.'/conversations/'.$id.'/messages',array_replace($payload,['body'=>'   ']))->assertStatus(422);
+    expect(DB::table('staff_messages')->count())->toBe(0);
+});
+
+it('captures announcement recipients once and tracks explicit acknowledgements idempotently', function () {
+    $channels=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'));
+    $id=$channels->firstWhere('title','All Staff')['id'];
+    $url=$this->base.'/conversations/'.$id;
+    $payload=['client_id'=>(string)Str::uuid(),'body'=>'QA announcement','is_announcement'=>true];
+    $mid=$this->postJson($url.'/messages',$payload)->assertOk()
+        ->assertJsonPath('data.is_announcement',true)
+        ->assertJsonPath('data.acknowledgement.total',2)
+        ->assertJsonPath('data.acknowledgement.acknowledged',0)->json('data.id');
+    $this->postJson($url.'/messages',$payload)->assertOk()->assertJsonPath('data.id',$mid);
+    $recipients=DB::table('staff_announcement_recipients')->where('message_id',$mid);
+    expect($recipients->count())->toBe(2);
+    $ack=$url.'/announcements/'.$mid.'/acknowledge';
+    $this->postJson($ack)->assertNotFound();
+    Sanctum::actingAs($this->outsider,['hotel:read','hotel:write']);
+    $this->postJson($ack)->assertNotFound();
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($this->base.'/conversations')->assertOk();
+    $this->postJson($url.'/read',['message_id'=>$mid])->assertOk();
+    $this->getJson($url)->assertOk()->assertJsonPath('data.0.acknowledgement.required',true)->assertJsonPath('data.0.acknowledgement.acknowledged_at',null);
+    $this->postJson($ack)->assertOk();
+    $first=(clone $recipients)->where('user_id',$this->reception->id)->value('acknowledged_at');
+    expect($first)->not->toBeNull();
+    $this->travel(1)->minutes();
+    $this->postJson($ack)->assertOk();
+    expect((clone $recipients)->where('user_id',$this->reception->id)->value('acknowledged_at'))->toBe($first);
+    $this->travelBack();
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+    $this->getJson($url)->assertOk()->assertJsonPath('data.0.acknowledgement.total',2)->assertJsonPath('data.0.acknowledgement.acknowledged',1);
+});
+
+it('limits department announcements to the intended recipients', function () {
+    $channels=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'));
+    $id=$channels->firstWhere('title','Housekeeping')['id'];
+    $url=$this->base.'/conversations/'.$id;
+    $mid=$this->postJson($url.'/messages',['client_id'=>(string)Str::uuid(),'body'=>'QA housekeeping announcement','is_announcement'=>true])->assertOk()
+        ->assertJsonPath('data.acknowledgement.total',1)->json('data.id');
+    expect(DB::table('staff_announcement_recipients')->where('message_id',$mid)->pluck('user_id')->map(fn ($id)=>(int)$id)->all())->toBe([(int)$this->cleaner->id]);
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($this->base.'/conversations')->assertOk();
+    $this->postJson($url.'/announcements/'.$mid.'/acknowledge')->assertNotFound();
+    Sanctum::actingAs($this->cleaner,['hotel:read']);
+    $this->getJson($this->base.'/conversations')->assertOk();
+    $this->postJson($url.'/announcements/'.$mid.'/acknowledge')->assertOk();
+    $this->cleaner->memberships()->where('hotel_id',$this->hotel->id)->update(['role'=>'maintenance']);
+    $this->postJson($url.'/announcements/'.$mid.'/acknowledge')->assertNotFound();
+});
+
+it('validates structured handovers and preserves recipient acknowledgement counts on retries', function () {
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $channels=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'));
+    $id=$channels->firstWhere('title','Reception')['id'];
+    $url=$this->base.'/conversations/'.$id;
+    $direct=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->manager->id]])->assertOk()->json('data.id');
+    $payload=['client_id'=>(string)Str::uuid(),'handover'=>['incoming_shift'=>'Morning','outstanding'=>'Inspect room QA203','reminders'=>'Check arrivals']];
+    $this->postJson($this->base.'/conversations/'.$direct.'/messages',$payload)->assertStatus(422);
+    $this->postJson($url.'/messages',array_replace($payload,['handover'=>['incoming_shift'=>'Morning','outstanding'=>' ']]))->assertStatus(422);
+    $this->postJson($url.'/messages',array_replace($payload,['is_announcement'=>true]))->assertStatus(422);
+    $mid=$this->postJson($url.'/messages',$payload)->assertOk()
+        ->assertJsonPath('data.handover.incoming_shift','Morning')
+        ->assertJsonPath('data.is_announcement',false)
+        ->assertJsonPath('data.acknowledgement.total',1)->json('data.id');
+    $this->postJson($url.'/messages',$payload)->assertOk()->assertJsonPath('data.id',$mid);
+    $changed=$payload;
+    $changed['handover']['outstanding']='Changed task';
+    $this->postJson($url.'/messages',$changed)->assertStatus(409);
+    expect(DB::table('staff_messages')->where('conversation_id',$id)->count())->toBe(1);
+    expect(DB::table('staff_announcement_recipients')->where('message_id',$mid)->count())->toBe(1);
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+    $this->getJson($this->base.'/conversations')->assertOk();
+    $this->getJson($url.'?q=QA203')->assertOk()->assertJsonCount(1,'data');
+    $this->postJson($url.'/announcements/'.$mid.'/acknowledge')->assertOk();
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($url)->assertOk()->assertJsonPath('data.0.acknowledgement.acknowledged',1);
+});
