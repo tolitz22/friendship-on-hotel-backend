@@ -31,6 +31,7 @@ function configureRace(int $hotelId): void
         'financial_accounting.enable_verified_settlement' => true,
         'financial_accounting.enable_guest_deposit_posting' => true,
         'financial_accounting.enable_no_show_allocation_posting' => true,
+        'financial_accounting.enable_cash_guest_deposit_posting' => true,
     ]);
 }
 
@@ -43,6 +44,12 @@ if (($argv[1] ?? '') === 'worker') {
     while (!file_exists($barrier) && microtime(true) < $deadline) usleep(10000);
     if (!file_exists($barrier)) exit(3);
     try {
+        if (in_array($mode, ['deposit-bank', 'deposit-cash'], true)) {
+            $journal = app(\App\Services\Finance\GuestDepositJournalService::class)
+                ->recognize($hotel, (int) $bookingId, (int) $paymentId, (int) $actorId);
+            file_put_contents($barrier.'.journal.'.$index, (string) $journal);
+            exit(0);
+        }
         $result = app(\App\Domain\Reservations\FolioSettlementService::class)->allocate(
             $hotel, (int) $bookingId, (int) $paymentId, (int) $actorId,
             $mode === 'duplicate' ? 'race-shared-allocation' : 'race-allocation-'.$index,
@@ -55,6 +62,9 @@ if (($argv[1] ?? '') === 'worker') {
     }
 }
 
+$mode = $argv[1] ?? 'competing';
+if (!in_array($mode, ['competing', 'duplicate', 'deposit-bank', 'deposit-cash'], true)) throw new RuntimeException('Invalid race mode.');
+$isDeposit = in_array($mode, ['deposit-bank', 'deposit-cash'], true);
 $hotel = Hotel::create(['name' => 'No-show allocation race fixture', 'timezone' => 'Asia/Manila', 'currency' => 'PHP']);
 $actor = User::create([
     'name' => 'No-show race staff', 'email' => 'ns-race-'.bin2hex(random_bytes(5)).'@example.test',
@@ -112,10 +122,27 @@ $review = app(NoShowFinancialReviewService::class)->apply($hotel, $bookingId, $a
 app(\App\Services\Finance\NoShowFinancialClearanceService::class)->approve(
     $hotel, $bookingId, (int) $review['reviewId'], $reviewer->id, 'non_vat', 'Synthetic test tax treatment only.'
 );
-app(\App\Services\Finance\GuestDepositJournalService::class)->recognize($hotel, $bookingId, $paymentId, $reviewer->id);
-
-$mode = $argv[1] ?? 'competing';
-if (!in_array($mode, ['competing', 'duplicate'], true)) throw new RuntimeException('Invalid race mode.');
+if ($mode === 'deposit-cash') {
+    DB::table('folio_payment_records')->where('id', $paymentId)->update(['method' => 'cash']);
+    $shift = DB::table('cashier_shifts')->insertGetId([
+        'hotel_id' => $hotel->id, 'cashier_id' => $actor->id, 'currency' => 'PHP', 'status' => 'reconciled',
+        'opening_float_minor' => 50000, 'expected_cash_minor' => 250000, 'counted_cash_minor' => 250000,
+        'variance_minor' => 0, 'reviewed_by' => $reviewer->id, 'opened_at' => now(),
+        'submitted_at' => now(), 'reconciled_at' => now(), 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    DB::table('cashier_shift_receipts')->insert([
+        'hotel_id' => $hotel->id, 'shift_id' => $shift, 'payment_id' => $paymentId,
+        'reservation_record_id' => $bookingId, 'amount_minor' => 200000,
+        'cash_tendered_minor' => 200000, 'change_given_minor' => 0, 'net_receipt_minor' => 200000, 'created_at' => now(),
+    ]);
+    DB::table('folio_settlement_verifications')->where('payment_record_id', $paymentId)
+        ->update(['evidence_kind' => 'cash_shift', 'evidence_reference' => 'shift-'.$shift]);
+    $beforeShift = DB::table('cashier_shifts')->find($shift);
+    $beforeReceipts = DB::table('cashier_shift_receipts')->where('shift_id', $shift)->get()->all();
+}
+if (!$isDeposit) {
+    app(\App\Services\Finance\GuestDepositJournalService::class)->recognize($hotel, $bookingId, $paymentId, $reviewer->id);
+}
 $barrier = sys_get_temp_dir().'/pms-allocation-race-'.bin2hex(random_bytes(8));
 $workers = [];
 try {
@@ -134,16 +161,32 @@ try {
     sort($statuses);
     $report = app(\App\Services\Finance\NoShowLedgerReconciliationService::class)->report($hotel, $bookingId, $reviewer->id);
     $allocations = DB::table('folio_settlement_allocations')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
-    if ($statuses !== ($mode === 'duplicate' ? [0, 8] : [0, 9])
+    if ($isDeposit) {
+        $receipts = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+            ->where('source_type', 'guest_deposit_receipt')->where('source_reference', 'folio-payment-'.$paymentId)->get();
+        $firstId = @file_get_contents($barrier.'.journal.1');
+        $secondId = @file_get_contents($barrier.'.journal.2');
+        if ($statuses !== [0, 0] || $receipts->count() !== 1 || $firstId === false || $firstId !== $secondId
+            || $firstId !== (string) $receipts->first()->id || (clone $allocations)->exists()
+            || !$report['reconciled'] || $report['matchedJournalMinor']['deposits'] !== 200000
+            || $report['matchedJournalBalances'] !== ['depositLiabilityMinor' => 200000, 'receivableMinor' => 200000]) {
+            throw new RuntimeException('Deposit race failed: '.json_encode([$statuses, $report]));
+        }
+        if ($mode === 'deposit-cash' && (DB::table('cashier_shifts')->find($shift) != $beforeShift
+            || DB::table('cashier_shift_receipts')->where('shift_id', $shift)->get()->all() != $beforeReceipts)) {
+            throw new RuntimeException('Cash deposit recognition changed drawer records.');
+        }
+        echo "$driver passed $mode recognition race.\n";
+    } elseif ($statuses !== ($mode === 'duplicate' ? [0, 8] : [0, 9])
         || (clone $allocations)->count() !== 1 || (int) (clone $allocations)->sum('amount_minor') !== 120000
         || DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('source_type', 'no_show_deposit_allocation')->count() !== 1
         || !$report['reconciled'] || $report['expectedBalances'] !== ['depositLiabilityMinor' => 80000, 'receivableMinor' => 80000]) {
         throw new RuntimeException('Allocation race failed: '.json_encode([$statuses, $report]));
     }
-    echo "$driver passed $mode allocation race.\n";
+    if (!$isDeposit) echo "$driver passed $mode allocation race.\n";
 } finally {
     foreach ($workers as $worker) {
         if (is_resource($worker)) { proc_terminate($worker); proc_close($worker); }
     }
-    foreach ([$barrier, $barrier.'.ready.1', $barrier.'.ready.2'] as $file) if (file_exists($file)) unlink($file);
+    foreach ([$barrier, $barrier.'.ready.1', $barrier.'.ready.2', $barrier.'.journal.1', $barrier.'.journal.2'] as $file) if (file_exists($file)) unlink($file);
 }
