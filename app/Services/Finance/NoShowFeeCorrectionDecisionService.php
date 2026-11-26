@@ -71,11 +71,11 @@ final class NoShowFeeCorrectionDecisionService
 
 
     /**
-     * Internal primitive for the future atomic fee correction workflow.
-     * The caller must hold an outer transaction covering the reversal,
-     * replacement fee, folio credit and new clearance. Never expose directly.
+     * Internal primitive for the atomic fee correction workflow.
+     * The caller must hold an outer transaction covering reversal,
+     * replacement fee and folio credit. Never expose directly.
      */
-    public function reverseApprovedFee(Hotel $hotel, int $proposalId, int $actorId): int
+    private function reverseApprovedFee(Hotel $hotel, int $proposalId, int $actorId): int
     {
         $this->enabled();
         abort_unless(config('financial_accounting.enable_no_show_fee_correction_posting', false),
@@ -134,6 +134,65 @@ final class NoShowFeeCorrectionDecisionService
             $hotelId, $key, 'no_show_fee_reversal', 'proposal-'.$proposalId,
             'Approved no-show fee reversal #'.$proposalId, $lines, $actorId, $originalId
         );
+    }
+
+
+    /**
+     * Staged atomic correction: reverse the old fee, post the replacement and
+     * append the compensating folio credit. Settlement remains blocked until
+     * the separate effective-clearance validator is integrated.
+     */
+    public function applyApprovedCorrection(Hotel $hotel, int $proposalId, int $actorId): array
+    {
+        return DB::transaction(function () use ($hotel, $proposalId, $actorId): array {
+            $reversalId = $this->reverseApprovedFee($hotel, $proposalId, $actorId);
+            $hotelId = (int) $hotel->id;
+            $proposal = DB::table('no_show_fee_correction_proposals')->where('hotel_id', $hotelId)
+                ->where('id', $proposalId)->firstOrFail();
+            $approval = DB::table('no_show_fee_correction_reviews')->where('proposal_id', $proposalId)->firstOrFail();
+            $accounting = app(\App\Domain\Reservations\FolioAccountingService::class);
+            $folio = $accounting->findFolio($hotel, (int) $proposal->booking_id, true);
+            $accounting->assertNotSigned($hotel, $folio);
+            $gross = (int) $proposal->replacement_fee_minor;
+            $credit = (int) $proposal->original_fee_minor - $gross;
+            $vat = (int) $approval->replacement_vat_minor;
+            $revenue = (int) $approval->replacement_revenue_minor;
+            abort_unless($credit > 0 && $gross >= 0 && $vat >= 0 && $revenue >= 0
+                && $vat + $revenue === $gross, 409, 'Invalid replacement amounts.');
+            $replacementJournalId = null;
+            if ($gross > 0) {
+                $lines = [['account_code' => 'AR', 'debit_minor' => $gross, 'credit_minor' => 0]];
+                if ($revenue > 0) $lines[] = ['account_code' => 'NO_SHOW_REV', 'debit_minor' => 0, 'credit_minor' => $revenue];
+                if ($vat > 0) $lines[] = ['account_code' => 'VAT_PAYABLE', 'debit_minor' => 0, 'credit_minor' => $vat];
+                $replacementJournalId = app(FinancialJournalPostingService::class)->post(
+                    $hotelId, 'no-show-fee-replacement-'.$proposalId, 'no_show_fee_replacement',
+                    'proposal-'.$proposalId, 'Approved replacement no-show fee #'.$proposalId, $lines, $actorId
+                );
+            }
+            $adjustmentId = DB::table('folio_adjustments')->insertGetId([
+                'hotel_id' => $hotelId, 'folio_id' => $folio->id,
+                'request_key' => 'no-show-fee-correction-'.$proposalId,
+                'payload_sha256' => hash('sha256', json_encode([$proposalId, $credit, $reversalId, $replacementJournalId], JSON_THROW_ON_ERROR)),
+                'kind' => 'credit', 'amount_minor' => $credit,
+                'reason' => 'Independently approved no-show fee correction #'.$proposalId,
+                'actor_id' => $actorId, 'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $statement = app(\App\Domain\Reservations\FolioSettlementService::class)->statement($hotel, (int) $proposal->booking_id);
+            $snapshot = json_decode($proposal->snapshot, true, 512, JSON_THROW_ON_ERROR);
+            abort_unless($statement['netRecordedChargesMinor'] === $gross
+                && $statement['verifiedPaymentsMinor'] === $snapshot['preview']['verifiedFundsMinor']
+                && $statement['verifiedAllocatedMinor'] === 0 && $statement['verifiedRefundsMinor'] === 0,
+                409, 'Corrected folio or deposit balance does not reconcile.');
+            return [
+                'proposalId' => (string) $proposalId, 'reversalJournalId' => (string) $reversalId,
+                'replacementJournalId' => $replacementJournalId === null ? null : (string) $replacementJournalId,
+                'folioAdjustmentId' => (string) $adjustmentId, 'replacementFeeMinor' => $gross,
+                'verifiedDepositMinor' => $statement['verifiedPaymentsMinor'],
+                'projectedCollectionMinor' => max(0, $gross - $statement['verifiedPaymentsMinor']),
+                'projectedExcessDepositMinor' => max(0, $statement['verifiedPaymentsMinor'] - $gross),
+                'settlementEnabled' => false, 'refundIssued' => false,
+            ];
+        }, 3);
     }
 
     private function snapshot(Hotel $hotel, int $bookingId, int $actorId, int $replacementMinor): array
