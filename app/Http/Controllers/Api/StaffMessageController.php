@@ -74,24 +74,26 @@ final class StaffMessageController
     {
         $this->access($request,$hotel,$conversation);
         $data=$request->validate(['before'=>['nullable','integer','min:1'],'q'=>['nullable','string','max:120']]);
-        $query=DB::table('staff_messages as m')->leftJoin('users as u','u.id','=','m.sender_id')->where('m.conversation_id',$conversation);
+        $query=DB::table('staff_messages as m')->leftJoin('users as u','u.id','=','m.sender_id')->leftJoin('staff_messages as reply',function ($join) { $join->on('reply.id','=','m.reply_to_id')->on('reply.conversation_id','=','m.conversation_id'); })->where('m.conversation_id',$conversation);
         if (!empty($data['before'])) $query->where('m.id','<',$data['before']);
         if (!empty($data['q'])) $query->where('m.body','like','%'.$data['q'].'%');
-        return response()->json(['data'=>$query->orderByDesc('m.id')->limit(100)->get(['m.*','u.name as sender_name'])->reverse()->values()]);
+        return response()->json(['data'=>$query->orderByDesc('m.id')->limit(100)->get(['m.*','u.name as sender_name','reply.body as reply_body'])->reverse()->values()]);
     }
 
     public function send(Request $request, Hotel $hotel, int $conversation): JsonResponse
     {
         $this->access($request,$hotel,$conversation);
-        $data=$request->validate(['body'=>['required','string','max:4000'],'client_id'=>['required','uuid']]);
+        $data=$request->validate(['body'=>['required','string','max:4000'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1']]);
         $body=trim($data['body']); abort_if($body==='',422,'Enter a message.');
         $uid=$request->user()->id;
         $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid) {
             DB::table('staff_conversations')->where('id',$conversation)->lockForUpdate()->first();
             $this->access($request,$hotel,$conversation);
+            $reply=$data['reply_to_id']??null;
+            abort_if($reply!==null && !DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$reply)->exists(),422,'Reply must reference a message in this conversation.');
             $query=DB::table('staff_messages')->where('conversation_id',$conversation)->where('sender_id',$uid)->where('client_id',$data['client_id']);
-            if ($existing=$query->first()) {abort_if($existing->body!==$body,409,'Message identifier already used.'); return $existing;}
-            $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'created_at'=>now(),'updated_at'=>now()]);
+            if ($existing=$query->first()) {abort_if($existing->body!==$body || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
+            $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'reply_to_id'=>$reply,'created_at'=>now(),'updated_at'=>now()]);
             DB::table('staff_conversations')->where('id',$conversation)->update(['updated_at'=>now()]);
             return DB::table('staff_messages')->where('id',$id)->first();
         },3);
