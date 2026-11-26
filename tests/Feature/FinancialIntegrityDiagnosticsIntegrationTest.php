@@ -100,3 +100,14 @@ it('detects a changed submitted cashier count and refuses a repair without expli
     expect(Artisan::call('pms:financial-repair', ['--hotel' => (string) $hotel->id]))->toBe(2);
     expect(integrityQaSnapshot())->toBe($before);
 });
+
+it('fails the financial readiness gate on operational blockers without declaring financial corruption', function (): void {
+    [$hotel] = integrityQaHotel('Readiness gate');
+    $before = integrityQaSnapshot();
+    $exit = Artisan::call('pms:financial-readiness', ['--hotel' => (string) $hotel->id]);
+    $report = json_decode(Artisan::output(), true, 512, JSON_THROW_ON_ERROR);
+    expect($exit)->toBe(1)->and($report['readiness']['status'])->toBe('operational_blocked')
+        ->and($report['readiness']['integrityValid'])->toBeTrue()
+        ->and($report['readiness']['releaseCertified'])->toBeFalse();
+    expect(integrityQaSnapshot())->toBe($before);
+});

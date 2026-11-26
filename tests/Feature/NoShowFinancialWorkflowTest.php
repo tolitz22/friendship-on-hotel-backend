@@ -1493,3 +1493,42 @@ it('isolates extended no-show activation and daily closing to the configured pil
         ->and(DB::table('folio_settlement_allocations')->where('folio_id', $folio)->count())->toBe(0)
         ->and(DB::table('no_show_fee_correction_proposals')->where('hotel_id', $hotel->id)->count())->toBe(0);
 });
+
+it('previews historical rejected payment recovery without changing the financial day or evidence', function (): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this, 'none', 0);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 250000);
+    $payments = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)->where('id', $payment);
+    $payments->update(['status' => 'rejected', 'created_at' => '2026-11-20 00:00:00']);
+    $before = (array) $payments->first();
+    $preview = function () use ($hotel, $payment): array {
+        $exit = \Illuminate\Support\Facades\Artisan::call('pms:financial-repair', ['--hotel' => (string) $hotel->id, '--dry-run' => true]);
+        expect($exit)->toBe(1);
+        $report = json_decode(\Illuminate\Support\Facades\Artisan::output(), true, 512, JSON_THROW_ON_ERROR);
+        expect($report['recordsModified'])->toBeFalse();
+        $proposal = collect($report['proposals'])->first(fn ($item) => $item['reason'] === 'payment_evidence_unresolved'
+            && ($item['context']['paymentId'] ?? null) === (string) $payment);
+        expect($proposal)->not->toBeNull();
+
+        return $proposal;
+    };
+    $first = $preview();
+    expect($first['context']['bookingId'])->toBe((string) $booking)
+        ->and($first['context']['closedDateOrLaterExists'])->toBeTrue()
+        ->and($first['executable'])->toBeFalse()
+        ->and($preview()['fingerprint'])->toBe($first['fingerprint']);
+    expect((array) $payments->first())->toBe($before);
+    $payments->update(['review_note' => 'Synthetic changed review evidence']);
+    expect($preview()['fingerprint'])->not->toBe($first['fingerprint']);
+    $other = Hotel::create(['name' => 'Recovery isolation', 'currency' => 'PHP']);
+    $foreign = app(\App\Services\Finance\FinancialRecoveryProposalEngine::class)->proposals($other, [
+        'businessDate' => '2026-11-22', 'issues' => [['reason' => 'ledger_not_reconciled', 'bookingId' => (string) $booking,
+            'details' => [['reason' => 'payment_evidence_unresolved', 'reference' => 'folio-payment-'.$payment]]]],
+    ]);
+    expect($foreign[0]['context']['sourceFound'])->toBeFalse()
+        ->and(DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->value('business_date'))->toBe('2026-11-22');
+});

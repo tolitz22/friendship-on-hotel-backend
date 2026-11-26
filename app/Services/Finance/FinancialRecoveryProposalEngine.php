@@ -67,7 +67,7 @@ final class FinancialRecoveryProposalEngine
             })
             ->where('p.hotel_id', $hotel->id)->where('p.id', $paymentId)
             ->when($bookingId !== null, fn ($query) => $query->where('r.id', $bookingId))
-            ->first(['p.id', 'p.status', 'p.method', 'p.amount_minor', 'p.created_at', 'p.folio_id',
+            ->first(['p.id', 'p.status', 'p.method', 'p.amount_minor', 'p.created_at', 'p.folio_id', 'p.reference', 'p.reviewed_by', 'p.review_note', 'p.recorded_by', 'p.updated_at',
                 'r.id as booking_id', 'r.lifecycle_state']);
         if ($payment === null) {
             return ['paymentId' => $paymentId, 'sourceFound' => false];
@@ -75,9 +75,13 @@ final class FinancialRecoveryProposalEngine
         $date = CarbonImmutable::parse((string) $payment->created_at, config('app.timezone', 'UTC'))
             ->setTimezone($hotel->timezone ?: 'Asia/Manila')->toDateString();
         $activity = [];
+        $evidenceFingerprints = [];
         foreach (['folio_settlement_verifications', 'folio_settlement_allocations', 'folio_refund_requests'] as $table) {
-            $activity[$table] = DB::table($table)->where('hotel_id', $hotel->id)
-                ->where('payment_record_id', $paymentId)->count();
+            $rows = DB::table($table)->where('hotel_id', $hotel->id)
+                ->where('payment_record_id', $paymentId)->orderBy('id')->get()
+                ->map(fn ($row) => (array) $row)->all();
+            $activity[$table] = count($rows);
+            $evidenceFingerprints[$table] = self::fingerprint($rows);
         }
         return ['paymentId' => $paymentId, 'sourceFound' => true, 'bookingId' => (string) $payment->booking_id,
             'folioId' => (string) $payment->folio_id, 'bookingStatus' => $payment->lifecycle_state,
@@ -86,7 +90,8 @@ final class FinancialRecoveryProposalEngine
                 ->where('hotel_id', $hotel->id)->where('business_date', '>=', $date)->exists(),
             'signedFolio' => DB::table('folio_settlement_signoffs')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $payment->folio_id)->exists(),
-            'relatedActivityCounts' => $activity];
+            'relatedActivityCounts' => $activity, 'relatedEvidenceFingerprints' => $evidenceFingerprints,
+            'paymentEvidenceFingerprint' => self::fingerprint((array) $payment)];
     }
 
     public static function action(string $reason): string
