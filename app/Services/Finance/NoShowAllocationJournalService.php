@@ -14,6 +14,11 @@ final class NoShowAllocationJournalService
     public function post(Hotel $hotel, int $bookingId, int $folioId, int $allocationId, int $actorId): int
     {
         abort_unless(DB::transactionLevel() > 0, 409, 'Allocation transaction required.');
+        abort_unless(config('financial_accounting.enable_guest_deposit_posting', false)
+            && config('financial_accounting.enable_no_show_allocation_posting', false)
+            && config('financial_accounting.enable_verified_settlement', false)
+            && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id), 409,
+            'No-show allocation journal posting is disabled.');
         $hotelId = (int) $hotel->id;
         $allocation = DB::table('folio_settlement_allocations')->where('hotel_id', $hotelId)
             ->where('folio_id', $folioId)->where('id', $allocationId)->first();
@@ -36,6 +41,9 @@ final class NoShowAllocationJournalService
             ->where('account_code', 'guest_deposit_liability')->get();
         abort_unless($credit->count() === 1 && (int) $credit->first()->debit_minor === 0
             && (int) $credit->first()->credit_minor === (int) $payment->amount_minor, 409, 'Deposit liability mismatch.');
+        $existing = (clone $journals)->where('idempotency_key', 'no-show-allocation-'.$allocationId)->first();
+        abort_if($existing !== null && (clone $journals)->where('reverses_journal_id', $existing->id)->exists(),
+            409, 'Allocation journal reversed; correction required.');
         $amount = (int) $allocation->amount_minor;
         abort_unless($amount > 0, 409);
         // Reject legacy allocations or reversals rather than silently backfill.
