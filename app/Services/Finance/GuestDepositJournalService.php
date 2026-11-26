@@ -11,7 +11,7 @@ use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Staged internal bank-deposit posting. No automatic caller or historical
+ * Staged internal guest-deposit posting. No automatic caller or historical
  * backfill: finance must reconcile existing bank receipts before activation.
  */
 final class GuestDepositJournalService
@@ -40,17 +40,41 @@ final class GuestDepositJournalService
             abort_unless($payment !== null, 404);
             $verification = DB::table('folio_settlement_verifications')->where('hotel_id', $hotel->id)
                 ->where('folio_id', $folio->id)->where('payment_record_id', $paymentId)->lockForUpdate()->first();
-            abort_unless($payment->method === 'bank_transfer' && $payment->status === 'staff_confirmed'
+            abort_unless(in_array($payment->method, ['bank_transfer', 'cash'], true) && $payment->status === 'staff_confirmed'
                 && (int) $payment->amount_minor > 0 && $verification !== null
-                && $verification->status === 'verified' && $verification->evidence_kind === 'bank_statement'
+                && $verification->status === 'verified'
+                && $verification->evidence_kind === ($payment->method === 'cash' ? 'cash_shift' : 'bank_statement')
                 && (int) $verification->reviewed_by > 0
                 && (int) $verification->reviewed_by !== (int) $verification->prepared_by
                 && (int) $verification->reviewed_by !== (int) $payment->recorded_by, 409,
-                'Independently verified bank deposit required.');
+                'Independently verified deposit required.');
+            if ($payment->method === 'cash') {
+                abort_unless(config('financial_accounting.enable_cash_guest_deposit_posting', false), 409,
+                    'Cash deposit journal posting is not enabled.');
+                $receipt = DB::table('cashier_shift_receipts as r')
+                    ->join('cashier_shifts as s', function ($join): void {
+                        $join->on('s.id', '=', 'r.shift_id')->on('s.hotel_id', '=', 'r.hotel_id');
+                    })
+                    ->where('r.hotel_id', $hotel->id)->where('r.payment_id', $paymentId)
+                    ->where('r.reservation_record_id', $bookingId)->where('r.amount_minor', $payment->amount_minor)
+                    ->first(['s.id', 's.status', 's.currency', 's.cashier_id', 's.reviewed_by',
+                        's.reconciled_at', 's.expected_cash_minor', 's.counted_cash_minor', 's.variance_minor']);
+                abort_unless($receipt !== null && $receipt->status === 'reconciled' && $receipt->currency === 'PHP'
+                    && $receipt->reconciled_at !== null && (int) $receipt->reviewed_by > 0
+                    && (int) $receipt->reviewed_by !== (int) $receipt->cashier_id
+                    && $receipt->expected_cash_minor !== null && $receipt->counted_cash_minor !== null
+                    && $receipt->variance_minor !== null && (int) $receipt->variance_minor === 0
+                    && (int) $receipt->expected_cash_minor === (int) $receipt->counted_cash_minor
+                    && $verification->evidence_reference === 'shift-'.$receipt->id, 409,
+                    'Matching independently reconciled cash receipt with no variance required.');
+            }
             $key = 'guest-deposit-payment-'.$paymentId;
             $existing = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
                 ->where('idempotency_key', $key)->first();
             if ($existing === null) {
+                abort_if(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+                    ->whereIn('source_reference', ['folio-payment-'.$paymentId, 'opening-payment-'.$paymentId])->exists(),
+                    409, 'A related payment journal already exists; reconcile before posting.');
                 // Never automatically recognize a historical receipt on a later date.
                 abort_unless(CarbonImmutable::parse($payment->created_at, config('app.timezone', 'UTC'))
                     ->setTimezone($hotel->timezone ?: 'Asia/Manila')->toDateString()
@@ -67,8 +91,8 @@ final class GuestDepositJournalService
             $amount = (int) $payment->amount_minor;
             return app(FinancialJournalPostingService::class)->post(
                 (int) $hotel->id, $key, 'guest_deposit_receipt', 'folio-payment-'.$paymentId,
-                'Verified guest bank deposit', [
-                    ['account_code' => 'hotel_bank', 'debit_minor' => $amount, 'credit_minor' => 0],
+                $payment->method === 'cash' ? 'Verified guest cash deposit' : 'Verified guest bank deposit', [
+                    ['account_code' => $payment->method === 'cash' ? 'cashier_cash' : 'hotel_bank', 'debit_minor' => $amount, 'credit_minor' => 0],
                     ['account_code' => 'guest_deposit_liability', 'debit_minor' => 0, 'credit_minor' => $amount],
                 ], $actorId
             );
