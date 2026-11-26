@@ -14,6 +14,10 @@ final class PushDeviceEligibility
     {
         return PushSubscription::query()->where('hotel_id', $hotelId)
             ->whereExists(function ($query): void {
+                $query->selectRaw('1')->from('push_endpoint_owners')
+                    ->whereColumn('push_endpoint_owners.endpoint_hash', 'push_subscriptions.endpoint_hash')
+                    ->whereColumn('push_endpoint_owners.user_id', 'push_subscriptions.user_id');
+            })->whereExists(function ($query): void {
                 $query->selectRaw('1')->from('hotel_memberships')
                     ->whereColumn('hotel_memberships.hotel_id', 'push_subscriptions.hotel_id')
                     ->whereColumn('hotel_memberships.user_id', 'push_subscriptions.user_id')

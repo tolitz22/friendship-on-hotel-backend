@@ -8,6 +8,7 @@ use App\Models\Hotel;
 use App\Models\PushSubscription;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
 
 final class PushSubscriptionController
@@ -31,23 +32,31 @@ final class PushSubscriptionController
         $allowed = in_array($host, ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com', 'notify.windows.com'], true)
             || str_ends_with($host, '.push.apple.com')
             || str_ends_with($host, '.notify.windows.com');
-        if (! $allowed || isset($url['user']) || isset($url['pass']) || isset($url['fragment']) || (isset($url['port']) && $url['port'] !== 443)) {
+        if (! $allowed || ($url['scheme'] ?? '') !== 'https' || empty($url['path']) || preg_match('/[\x00-\x20\x7f]/', $data['endpoint']) || str_contains($data['endpoint'], chr(92)) || isset($url['user']) || isset($url['pass']) || isset($url['fragment']) || (isset($url['port']) && $url['port'] !== 443)) {
             throw ValidationException::withMessages(['endpoint' => ['Unsupported push service endpoint.']]);
         }
         $hash = hash('sha256', $data['endpoint']);
-        if (PushSubscription::query()->where('endpoint_hash', $hash)->where('user_id', '!=', $request->user()->id)->exists()) {
-            throw ValidationException::withMessages(['endpoint' => ['This browser is registered to another account. Reset browser push permissions before registering.']]);
-        }
-        $row = PushSubscription::updateOrCreate([
-            'hotel_id' => $hotel->id,
-            'user_id' => $request->user()->id,
-            'endpoint_hash' => $hash,
-        ], [
-            'endpoint' => $data['endpoint'],
-            'p256dh' => $data['keys']['p256dh'],
-            'auth' => $data['keys']['auth'],
-            'device_name' => $data['deviceName'],
-        ]);
+        $userId = $request->user()->id;
+        $row = DB::transaction(function () use ($hotel, $userId, $hash, $data): PushSubscription {
+            // The unique endpoint hash arbitrates concurrent registrations
+            // even when the accounts belong to different hotels.
+            DB::table('push_endpoint_owners')->insertOrIgnore([
+                'endpoint_hash' => $hash, 'user_id' => $userId,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $owner = DB::table('push_endpoint_owners')->where('endpoint_hash', $hash)->lockForUpdate()->first();
+            if (! $owner || (string) $owner->user_id !== (string) $userId
+                || PushSubscription::query()->where('endpoint_hash', $hash)->where('user_id', '!=', $userId)->exists()) {
+                throw ValidationException::withMessages(['endpoint' => ['This browser is registered to another account. Reset browser push permissions before registering.']]);
+            }
+
+            return PushSubscription::updateOrCreate([
+                'hotel_id' => $hotel->id, 'user_id' => $userId, 'endpoint_hash' => $hash,
+            ], [
+                'endpoint' => $data['endpoint'], 'p256dh' => $data['keys']['p256dh'],
+                'auth' => $data['keys']['auth'], 'device_name' => $data['deviceName'],
+            ]);
+        }, 3);
         return response()->json(['data' => $this->resource($row)]);
     }
 
