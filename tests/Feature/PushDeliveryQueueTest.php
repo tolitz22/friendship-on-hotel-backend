@@ -69,3 +69,21 @@ it('honors retry delay and expires stale queued work', function (): void {
     $this->queue->recover($this->hotel->id);
     expect($this->queue->counts($this->hotel->id))->toMatchArray(['cancelled' => 1]);
 });
+
+it('inserts bounded batches idempotently and prunes only old immutable terminal events in the pilot hotel', function (): void {
+    $entries = [];
+    for ($i = 1; $i <= 105; $i++) {
+        $entries[] = ['deviceId' => $this->device->id, 'alert' => ['id' => 'new_booking:'.$i, 'kind' => 'new_booking']];
+    }
+    $this->queue->enqueueBatch($entries);
+    $this->queue->enqueueBatch($entries);
+    expect($this->queue->counts($this->hotel->id))->toMatchArray(['pending' => 105]);
+    $this->queue->enqueue($this->device->id, ['id' => 'checkout_overdue:1:2026-10-01', 'kind' => 'checkout_overdue']);
+    $this->queue->enqueue($this->otherDevice->id, ['id' => 'new_booking:1', 'kind' => 'new_booking']);
+    DB::table('push_deliveries')->update(['status' => 'sent', 'updated_at' => now()->subDays(31)]);
+    DB::table('push_deliveries')->where('push_subscription_id', $this->device->id)->where('notification_id', 'new_booking:105')->update(['status' => 'pending']);
+    expect($this->queue->prune($this->hotel->id, 20))->toBe(20);
+    expect($this->queue->prune($this->hotel->id))->toBe(84);
+    expect($this->queue->counts($this->hotel->id))->toMatchArray(['sent' => 1, 'pending' => 1]);
+    expect($this->queue->counts($this->other->id))->toMatchArray(['sent' => 1]);
+});

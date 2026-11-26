@@ -12,6 +12,7 @@ use App\Services\PushAlertPayload;
 use App\Services\StaffMessageNotifications;
 use Illuminate\Console\Command;
 use App\Services\PushDeliveryQueue;
+use App\Services\PushDeliveryDiscovery;
 use App\Services\PushDeliveryOutcome;
 use Minishlink\WebPush\Subscription;
 use Minishlink\WebPush\WebPush;
@@ -21,7 +22,7 @@ final class DeliverHotelPush extends Command
     protected $signature = 'pms:push-deliver';
     protected $description = 'Discover and deliver hotel alerts outside web requests';
 
-    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue): int
+    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery): int
     {
         if (! config('push.enabled')) {
             return self::SUCCESS;
@@ -42,24 +43,7 @@ final class DeliverHotelPush extends Command
         ]], [], 10);
         $eligible = fn () => $eligibility->forHotel($hotel->id);
 
-        foreach ($notifications->all($hotel) as $alert) {
-            foreach ($eligible()->lazyById(100) as $device) {
-                if (! $preferences->allows($hotel->id, $device->user_id, $alert['kind'])) {
-                    continue;
-                }
-                $queue->enqueue($device->id, $alert);
-            }
-        }
-
-        // Personal messages are discovered per recipient, never broadcast hotel-wide.
-        foreach ($eligible()->lazyById(100) as $device) {
-            foreach ($messages->all($hotel, $device->user_id) as $alert) {
-                if (! $preferences->allows($hotel->id, $device->user_id, $alert['kind'])) {
-                    continue;
-                }
-                $queue->enqueue($device->id, $alert);
-            }
-        }
+        $discovery->discover($hotel);
 
         $queue->recover($hotel->id);
         foreach ($queue->ready($hotel->id) as $row) {

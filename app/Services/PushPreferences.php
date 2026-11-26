@@ -13,6 +13,26 @@ final class PushPreferences
     public function get(int $hotelId, int $userId): array
     {
         $row = DB::table('push_preferences')->where('hotel_id', $hotelId)->where('user_id', $userId)->first();
+        return $this->values($row);
+    }
+
+    /** Load preferences for a bounded recipient set with one query. */
+    public function forUsers(int $hotelId, array $userIds): array
+    {
+        if ($userIds === []) {
+            return [];
+        }
+        $rows = DB::table('push_preferences')->where('hotel_id', $hotelId)->whereIn('user_id', $userIds)->get()->keyBy('user_id');
+        $result = [];
+        foreach ($userIds as $userId) {
+            $result[$userId] = $this->values($rows->get($userId));
+        }
+
+        return $result;
+    }
+
+    private function values(?object $row): array
+    {
         $result = ['enabled' => $row ? (bool) $row->enabled : true];
         foreach (self::KINDS as $kind) {
             $result[$kind] = $row ? (bool) $row->{$kind} : true;

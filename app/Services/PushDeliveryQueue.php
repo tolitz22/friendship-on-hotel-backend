@@ -19,10 +19,45 @@ final class PushDeliveryQueue
 
     public function enqueue(int $deviceId, array $alert): void
     {
-        DB::table('push_deliveries')->insertOrIgnore([
-            'push_subscription_id' => $deviceId, 'notification_id' => $alert['id'],
-            'kind' => $alert['kind'], 'available_at' => now(), 'created_at' => now(), 'updated_at' => now(),
-        ]);
+        $this->enqueueBatch([['deviceId' => $deviceId, 'alert' => $alert]]);
+    }
+
+    /** Bounded insert batches stay below common SQL parameter limits. */
+    public function enqueueBatch(iterable $entries): void
+    {
+        $rows = [];
+        $now = now();
+        foreach ($entries as $entry) {
+            $rows[] = [
+                'push_subscription_id' => $entry['deviceId'], 'notification_id' => $entry['alert']['id'],
+                'kind' => $entry['alert']['kind'], 'available_at' => $now, 'created_at' => $now, 'updated_at' => $now,
+            ];
+            if (count($rows) >= 100) {
+                DB::table('push_deliveries')->insertOrIgnore($rows);
+                $rows = [];
+            }
+        }
+        if ($rows !== []) {
+            DB::table('push_deliveries')->insertOrIgnore($rows);
+        }
+    }
+
+    /** Only immutable, short-window event IDs are safe to forget. */
+    public function prune(int $hotelId, int $limit = 1000): int
+    {
+        $cutoff = now()->subDays(30);
+        $query = $this->scoped($hotelId)->whereIn('status', ['sent', 'failed', 'cancelled'])
+            ->where('updated_at', '<', $cutoff)
+            ->whereIn('kind', [
+                'new_booking', 'guest_check_in', 'guest_check_out', 'booking_cancelled',
+                'booking_no_show', 'stay_extended', 'payment_recorded', 'payment_voided',
+                'expense_recorded', 'room_inspection_approved', 'room_inspection_rejected',
+                'maintenance_urgent', 'room_blocked', 'approval_approved', 'approval_rejected',
+                'staff_message', 'staff_announcement', 'staff_handover', 'staff_acknowledged',
+                'daily_close_completed',
+            ]);
+        $ids = (clone $query)->orderBy('id')->limit(max(1, min($limit, 1000)))->pluck('id');
+        return $ids->isEmpty() ? 0 : $query->whereIn('id', $ids)->delete();
     }
 
     public function recover(int $hotelId): void
