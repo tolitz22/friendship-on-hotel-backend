@@ -498,3 +498,23 @@ it('keeps announcement history query growth bounded for a full page', function (
     expect($large)->toBeLessThanOrEqual($small+3);
     expect($large)->toBeLessThanOrEqual(25);
 });
+
+it('limits push discovery to the intended administrator and suppresses read messages', function () {
+    $otherAdmin = User::create(['name'=>'Other admin','email'=>Str::uuid().'@example.test','password'=>'test-password','is_active'=>true,'must_change_password'=>false]);
+    $this->hotel->memberships()->create(['user_id'=>$otherAdmin->id,'role'=>'admin','is_active'=>true]);
+    Sanctum::actingAs($this->reception,['hotel:read','hotel:write']);
+    $id = $this->postJson($this->base.'/conversations',['member_ids'=>[$this->manager->id]])->assertOk()->json('data.id');
+    $mid = $this->postJson($this->base.'/conversations/'.$id.'/messages',['body'=>'Private QA content','client_id'=>(string)Str::uuid()])->assertOk()->json('data.id');
+    $service = app(\App\Services\StaffMessageNotifications::class);
+    $event = 'staff_message:'.$mid;
+    $alert = $service->current($this->hotel, $this->manager->id, $event);
+    expect($alert)->not->toBeNull();
+    expect($alert['conversationId'])->toBe((string)$id);
+    expect(json_encode($alert))->not->toContain('Private QA content');
+    expect($service->current($this->hotel, $otherAdmin->id, $event))->toBeNull();
+    expect($service->current($this->otherHotel, $this->manager->id, $event))->toBeNull();
+    expect($service->current($this->hotel, $this->reception->id, $event))->toBeNull();
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+    $this->postJson($this->base.'/conversations/'.$id.'/read',['message_id'=>$mid])->assertOk();
+    expect($service->current($this->hotel, $this->manager->id, $event))->toBeNull();
+});
