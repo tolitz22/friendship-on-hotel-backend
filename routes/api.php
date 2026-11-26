@@ -377,6 +377,7 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/dates/preview', [FrontDeskReservationController::class, 'previewAmendment'])->whereNumber('booking')->middleware('throttle:30,1');
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
+                Route::get('/bookings/{booking}/no-show-refunds', \App\Http\Controllers\Api\NoShowRefundOverviewController::class)->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
                 Route::get('/bookings/{booking}/no-show-allocations', [\App\Http\Controllers\Api\NoShowAllocationController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
                 Route::post('/bookings/{booking}/no-show-allocations/{payment}', [\App\Http\Controllers\Api\NoShowAllocationController::class, 'allocate'])->whereNumber('booking')->whereNumber('payment')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
                 Route::get('/bookings/{booking}/no-show-deposits', [\App\Http\Controllers\Api\NoShowDepositController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
