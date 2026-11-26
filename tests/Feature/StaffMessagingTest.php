@@ -73,3 +73,62 @@ it('restricts realtime subscriptions to the authenticated user and hotel', funct
     $this->postJson($this->base.'/realtime/auth',['socket_id'=>$socket,'channel_name'=>'private-staff.hotel.'.$this->hotel->id.'.user.'.$this->cleaner->id])->assertForbidden();
     $this->postJson($this->base.'/realtime/auth',['socket_id'=>'invalid','channel_name'=>$channel])->assertStatus(422);
 });
+
+it('validates attachment content, size and required fields before persistence', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id.'/messages';
+    foreach ([
+        ['filename'=>'fake.png','content'=>base64_encode('<html>Not an image</html>')],
+        ['filename'=>'broken.pdf','content'=>'!!!invalid!!!'],
+        ['filename'=>'empty.pdf','content'=>''],
+        ['filename'=>'large.pdf','content'=>base64_encode('%PDF-1.4'.str_repeat('x',2097152))],
+        ['filename'=>'missing.pdf'],
+        ['content'=>base64_encode('%PDF-1.4')],
+    ] as $attachment) {
+        $this->postJson($url,['client_id'=>(string)Str::uuid(),'attachment'=>$attachment])->assertStatus(422);
+    }
+    expect(DB::table('staff_messages')->where('conversation_id',$id)->count())->toBe(0);
+    expect(DB::table('staff_message_attachments')->count())->toBe(0);
+});
+
+it('stores one private attachment on retry and sanitizes its filename', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id;
+    $bytes="%PDF-1.4\n% Synthetic QA document\n%%EOF\n";
+    $payload=['client_id'=>(string)Str::uuid(),'attachment'=>['filename'=>'../../room"report.exe','content'=>base64_encode($bytes)]];
+    $mid=$this->postJson($url.'/messages',$payload)->assertOk()->json('data.id');
+    $this->postJson($url.'/messages',$payload)->assertOk()->assertJsonPath('data.id',$mid);
+    $changed=$payload;
+    $changed['attachment']['content']=base64_encode($bytes.'changed');
+    $this->postJson($url.'/messages',$changed)->assertStatus(409);
+    expect(DB::table('staff_message_attachments')->where('message_id',$mid)->count())->toBe(1);
+    $meta=$this->getJson($url)->assertOk()->json('data.0.attachment');
+    expect($meta['filename'])->toBe('room_report.pdf');
+    expect($meta['mime'])->toBe('application/pdf');
+    expect((int)$meta['size'])->toBe(strlen($bytes));
+    expect(array_key_exists('encoded_content',$meta))->toBeFalse();
+    expect(array_key_exists('sha256',$meta))->toBeFalse();
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $download=$this->get($url.'/attachments/'.$meta['id'])->assertOk()
+        ->assertHeader('Content-Type','application/octet-stream')
+        ->assertHeader('X-Content-Type-Options','nosniff');
+    expect($download->getContent())->toBe($bytes);
+    expect($download->headers->get('Content-Disposition'))->toContain('attachment; filename="room_report.pdf"');
+    expect($download->headers->get('Cache-Control'))->toContain('no-store');
+});
+
+it('blocks attachment downloads outside the authorized conversation and hotel', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id;
+    $mid=$this->postJson($url.'/messages',['client_id'=>(string)Str::uuid(),'attachment'=>['filename'=>'test.pdf','content'=>base64_encode("%PDF-1.4\n%%EOF\n")]])->assertOk()->json('data.id');
+    $aid=DB::table('staff_message_attachments')->where('message_id',$mid)->value('id');
+    $other=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->cleaner->id]])->assertOk()->json('data.id');
+    $this->getJson($this->base.'/conversations/'.$other.'/attachments/'.$aid)->assertNotFound();
+    Sanctum::actingAs($this->cleaner,['hotel:read']);
+    $this->getJson($url.'/attachments/'.$aid)->assertNotFound();
+    Sanctum::actingAs($this->outsider,['hotel:read','hotel:write']);
+    $this->getJson($url.'/attachments/'.$aid)->assertNotFound();
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->reception->memberships()->where('hotel_id',$this->hotel->id)->update(['is_active'=>false]);
+    $this->getJson($url.'/attachments/'.$aid)->assertNotFound();
+});
