@@ -89,6 +89,11 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/hotels', [HotelController::class, 'index']);
 
         Route::prefix('hotels/{hotel}')->middleware('hotel.member')->group(function (): void {
+            Route::prefix('push-subscriptions')->middleware(['hotel.admin', 'throttle:30,1'])->group(function (): void {
+                Route::get('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'index']);
+                Route::post('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'store']);
+                Route::delete('/{subscription}', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'destroy'])->whereNumber('subscription');
+            });
             Route::prefix('staff-messaging')->group(function (): void {
                 Route::post('/realtime/auth', [\App\Http\Controllers\Api\StaffMessageController::class, 'realtimeAuth'])->middleware('throttle:30,1');
                 Route::post('/conversations/{conversation}/announcements/{message}/acknowledge', [\App\Http\Controllers\Api\StaffMessageController::class, 'acknowledge'])->whereNumber('conversation')->whereNumber('message')->middleware('throttle:60,1');
