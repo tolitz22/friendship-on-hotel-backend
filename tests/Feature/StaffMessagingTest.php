@@ -310,3 +310,41 @@ it('excludes inactive staff from the participant list and denies their conversat
     Sanctum::actingAs($this->reception,['hotel:read']);
     $this->getJson($this->base.'/conversations/'.$id)->assertNotFound();
 });
+
+it('preserves independent inbox previews and unread counts across conversations', function () {
+    $first=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $second=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->cleaner->id]])->assertOk()->json('data.id');
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $firstMessage=$this->postJson($this->base.'/conversations/'.$first.'/messages',['body'=>'Reception first','client_id'=>(string)Str::uuid()])->assertOk()->json('data.id');
+    $this->postJson($this->base.'/conversations/'.$first.'/messages',['body'=>'Reception latest','client_id'=>(string)Str::uuid()])->assertOk();
+    Sanctum::actingAs($this->cleaner,['hotel:read']);
+    $this->postJson($this->base.'/conversations/'.$second.'/messages',['body'=>'Housekeeping latest','client_id'=>(string)Str::uuid()])->assertOk();
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+    $this->postJson($this->base.'/conversations/'.$first.'/read',['message_id'=>$firstMessage])->assertOk();
+    $this->postJson($this->base.'/conversations/'.$second.'/messages',['body'=>'Manager latest','client_id'=>(string)Str::uuid()])->assertOk();
+    $rows=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'))->keyBy('id');
+    expect($rows->get($first)['latest']['body'])->toBe('Reception latest');
+    expect($rows->get($first)['unread'])->toBe(1);
+    expect($rows->get($second)['latest']['body'])->toBe('Manager latest');
+    expect($rows->get($second)['unread'])->toBe(1);
+    expect(collect($rows->get($first)['members'])->pluck('id')->map(fn ($id)=>(int)$id)->contains((int)$this->cleaner->id))->toBeFalse();
+});
+
+it('keeps acknowledgement metadata distinct when loading multiple announcements', function () {
+    $channel=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'))->firstWhere('title','All Staff')['id'];
+    $url=$this->base.'/conversations/'.$channel;
+    $first=$this->postJson($url.'/messages',['body'=>'Announcement one','is_announcement'=>true,'client_id'=>(string)Str::uuid()])->assertOk()->json('data.id');
+    $second=$this->postJson($url.'/messages',['body'=>'Announcement two','is_announcement'=>true,'client_id'=>(string)Str::uuid()])->assertOk()->json('data.id');
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($this->base.'/conversations')->assertOk();
+    $this->postJson($url.'/announcements/'.$first.'/acknowledge')->assertOk();
+    $rows=collect($this->getJson($url)->assertOk()->json('data'))->keyBy('id');
+    expect($rows->get($first)['acknowledgement']['acknowledged_at'])->not->toBeNull();
+    expect($rows->get($second)['acknowledgement']['acknowledged_at'])->toBeNull();
+    expect(array_key_exists('total',$rows->get($first)['acknowledgement']))->toBeFalse();
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+    $rows=collect($this->getJson($url)->assertOk()->json('data'))->keyBy('id');
+    expect($rows->get($first)['acknowledgement']['total'])->toBe(2);
+    expect($rows->get($first)['acknowledgement']['acknowledged'])->toBe(1);
+    expect($rows->get($second)['acknowledgement']['acknowledged'])->toBe(0);
+});
