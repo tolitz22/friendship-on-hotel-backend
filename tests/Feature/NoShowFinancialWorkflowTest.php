@@ -659,3 +659,77 @@ it('recognizes only independently reconciled cash deposits without changing draw
         ->and(DB::table('cashier_shift_events')->where('shift_id', $shift)->count())->toBe($beforeEvents);
 })->with(['success', 'disabled', 'unreconciled', 'variance', 'self reconciled', 'missing receipt',
     'wrong amount', 'wrong reference', 'existing journal', 'unauthorized']);
+
+it('posts no-show allocations atomically and rejects unsafe ledger states', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 200000);
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    config()->set('financial_accounting.enable_guest_deposit_posting', true);
+    if ($scenario !== 'missing receipt') {
+        $receipt = app(\App\Services\Finance\GuestDepositJournalService::class)
+            ->recognize($hotel, $booking, $payment, $reviewer->id);
+        if ($scenario === 'reversed receipt') {
+            app(FinancialJournalPostingService::class)->post($hotel->id, 'qa-deposit-reverse-'.$payment,
+                'reversal', 'qa-reverse-'.$payment, 'Reverse synthetic deposit', [
+                    ['account_code' => 'hotel_bank', 'debit_minor' => 0, 'credit_minor' => 200000],
+                    ['account_code' => 'guest_deposit_liability', 'debit_minor' => 200000, 'credit_minor' => 0],
+                ], $reviewer->id, $receipt);
+        }
+    }
+    $service = app(\App\Domain\Reservations\FolioSettlementService::class);
+    $allocate = fn (string $key, int $amount) => $service->allocate($hotel, $booking, $payment,
+        $reviewer->id, $key, 'guest', 'Demo guest', $amount, null);
+    $allocations = DB::table('folio_settlement_allocations')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('source_type', 'no_show_deposit_allocation');
+    config()->set('financial_accounting.enable_no_show_allocation_posting', $scenario !== 'legacy replay');
+    if ($scenario === 'legacy replay') {
+        $allocate('qa-allocation-first', 80000);
+        config()->set('financial_accounting.enable_no_show_allocation_posting', true);
+    }
+    if ($scenario === 'closed date') {
+        DB::table('financial_day_closes')->insert([
+            'hotel_id' => $hotel->id, 'business_date' => '2026-11-22', 'status' => 'completed',
+            'closed_by' => $author->id, 'closed_at' => now(), 'reconciliation_snapshot' => '{}',
+        ]);
+    }
+    if ($scenario !== 'success') {
+        $before = $allocations->count();
+        try {
+            $allocate('qa-allocation-first', 80000);
+            $this->fail('Unsafe allocation accepted.');
+        } catch (\Illuminate\Validation\ValidationException $exception) {
+            expect(in_array($scenario, ['legacy replay', 'closed date'], true))->toBeTrue();
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+            expect($exception->getStatusCode())->toBe(409);
+        }
+        expect($allocations->count())->toBe($before)->and($journals->count())->toBe(0);
+        return;
+    }
+    $first = $allocate('qa-allocation-first', 80000);
+    $replay = $allocate('qa-allocation-first', 80000);
+    expect($replay['replayed'])->toBeTrue()->and($replay['journalId'])->toBe($first['journalId'])
+        ->and($replay['id'])->toBe($first['id'])->and($journals->count())->toBe(1);
+    try {
+        $allocate('qa-allocation-over', 120001);
+        $this->fail('Over-allocation accepted.');
+    } catch (\Illuminate\Validation\ValidationException $exception) {
+        expect($allocations->count())->toBe(1);
+    }
+    $second = $allocate('qa-allocation-second', 120000);
+    expect($allocations->count())->toBe(2)->and($journals->count())->toBe(2);
+    foreach ([[$first, 80000], [$second, 120000]] as [$result, $amount]) {
+        $lines = DB::table('financial_posting_lines')->where('journal_id', $result['journalId'])->orderBy('line_number')->get();
+        expect($lines->count())->toBe(2)
+            ->and($lines[0]->account_code)->toBe('guest_deposit_liability')
+            ->and((int) $lines[0]->debit_minor)->toBe($amount)
+            ->and((int) $lines[0]->credit_minor)->toBe(0)
+            ->and($lines[1]->account_code)->toBe('AR')
+            ->and((int) $lines[1]->credit_minor)->toBe($amount)
+            ->and((int) $lines[1]->debit_minor)->toBe(0);
+    }
+    expect(app(NoShowRefundEligibility::class)->review($hotel, $booking)['settled'])->toBeTrue();
+})->with(['success', 'missing receipt', 'reversed receipt', 'legacy replay', 'closed date']);
