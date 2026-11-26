@@ -825,3 +825,93 @@ it('reconciles external no-show refunds atomically without sending funds', funct
     expect($remaining['verifiedRefundsMinor'])->toBe(100000)
         ->and($remaining['maximumRefundRequestMinor'])->toBe(0);
 })->with(['success', 'disabled', 'missing deposit', 'reversed deposit', 'closed date']);
+
+it('reports no-show matched ledger balances and transaction discrepancies without writes', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 200000);
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_allocation_posting' => true,
+    ]);
+    $reporter = app(\App\Services\Finance\NoShowLedgerReconciliationService::class);
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id);
+    if ($scenario === 'unauthorized' || $scenario === 'cross hotel') {
+        $actor = $scenario === 'unauthorized'
+            ? noShowActor($hotel, 'front_desk')
+            : noShowActor(Hotel::create(['name' => 'Foreign reconciliation property']), 'admin');
+        try {
+            $reporter->report($hotel, $booking, $actor->id);
+            $this->fail('Unauthorized ledger report accepted.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+            expect($exception->getStatusCode())->toBe(403);
+        }
+        return;
+    }
+    $receipt = null;
+    if ($scenario !== 'missing deposit') {
+        $receipt = app(\App\Services\Finance\GuestDepositJournalService::class)
+            ->recognize($hotel, $booking, $payment, $reviewer->id);
+    }
+    if ($scenario === 'duplicate deposit') {
+        app(FinancialJournalPostingService::class)->post($hotel->id, 'qa-duplicate-'.$payment,
+            'guest_deposit_receipt', 'folio-payment-'.$payment, 'Synthetic duplicate receipt', [
+                ['account_code' => 'hotel_bank', 'debit_minor' => 200000, 'credit_minor' => 0],
+                ['account_code' => 'guest_deposit_liability', 'debit_minor' => 0, 'credit_minor' => 200000],
+            ], $reviewer->id);
+    }
+    if ($scenario === 'reversed deposit') {
+        app(FinancialJournalPostingService::class)->post($hotel->id, 'qa-reconcile-reversal-'.$payment,
+            'reversal', 'qa-reconcile-reversal-'.$payment, 'Reverse synthetic deposit receipt', [
+                ['account_code' => 'hotel_bank', 'debit_minor' => 0, 'credit_minor' => 200000],
+                ['account_code' => 'guest_deposit_liability', 'debit_minor' => 200000, 'credit_minor' => 0],
+            ], $reviewer->id, $receipt);
+    }
+    if ($scenario === 'mismatched deposit') {
+        // Deliberately corrupt synthetic ledger data to exercise detection.
+        DB::table('financial_posting_lines')->where('journal_id', $receipt)
+            ->where('account_code', 'guest_deposit_liability')->update(['credit_minor' => 199999]);
+    }
+    if (in_array($scenario, ['partial', 'settled', 'missing allocation'], true)) {
+        config()->set('financial_accounting.enable_no_show_allocation_posting', $scenario !== 'missing allocation');
+        app(\App\Domain\Reservations\FolioSettlementService::class)->allocate(
+            $hotel, $booking, $payment, $reviewer->id, 'qa-reconcile-allocation', 'guest', 'Demo guest',
+            $scenario === 'settled' ? 200000 : 80000, null
+        );
+    }
+    $before = $journals->orderBy('id')->get()->all();
+    $result = $reporter->report($hotel, $booking, $reviewer->id);
+    expect($result['readOnly'])->toBeTrue()->and($result['closingCertified'])->toBeFalse()
+        ->and($result['expectedMinor']['deposits'])->toBe(200000)
+        ->and($result['expectedMinor']['fees'])->toBe(200000)
+        ->and($journals->get()->all())->toEqual($before);
+    if (in_array($scenario, ['unallocated', 'partial', 'settled'], true)) {
+        $balance = match ($scenario) {
+            'partial' => 120000,
+            'settled' => 0,
+            default => 200000,
+        };
+        expect($result['reconciled'])->toBeTrue()
+            ->and($result['settled'])->toBe($scenario === 'settled')
+            ->and($result['issues'])->toBe([])
+            ->and($result['expectedMinor'])->toBe($result['matchedJournalMinor'])
+            ->and($result['expectedBalances'])->toBe([
+                'depositLiabilityMinor' => $balance, 'receivableMinor' => $balance,
+            ])->and($result['matchedJournalBalances'])->toBe($result['expectedBalances']);
+        return;
+    }
+    $reason = match ($scenario) {
+        'duplicate deposit' => 'duplicate_journal',
+        'reversed deposit' => 'reversed_journal',
+        'mismatched deposit' => 'journal_mismatch',
+        default => 'missing_journal',
+    };
+    expect($result['reconciled'])->toBeFalse()->and($result['settled'])->toBeFalse()
+        ->and(array_column($result['issues'], 'reason'))->toContain($reason)
+        ->and(array_column($result['issues'], 'kind'))->toContain($scenario === 'missing allocation' ? 'allocation' : 'deposit');
+})->with(['unallocated', 'partial', 'settled', 'missing deposit', 'duplicate deposit',
+    'reversed deposit', 'mismatched deposit', 'missing allocation', 'unauthorized', 'cross hotel']);
