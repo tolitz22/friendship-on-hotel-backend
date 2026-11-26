@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
+use App\Support\StaffMessageRecordAccess;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -54,6 +55,36 @@ final class StaffMessageController
             ->where('m.user_id',$request->user()->id)->where(fn ($q)=>$q->where('c.kind','!=','channel')->orWhereIn('c.direct_key',$keys))->exists(),404);
     }
 
+    public function records(Request $request, Hotel $hotel): JsonResponse
+    {
+        $data=$request->validate(['type'=>['required','in:room,booking,housekeeping,maintenance'],'q'=>['nullable','string','max:120']]);
+        $access=app(StaffMessageRecordAccess::class);
+        $type=$data['type'];
+        $query=$access->query($request,$hotel,$type);
+        abort_unless($query,403);
+        $term=trim($data['q']??'');
+        if ($term!=='') {
+            $column=match ($type) {'room'=>'number','booking'=>'reference',default=>null};
+            $query->where(function ($q) use ($term,$column): void {
+                $q->whereRaw('1 = 0');
+                if (preg_match('/^[1-9][0-9]{0,17}$/D',$term)) $q->orWhere('id',$term);
+                if ($column) $q->orWhereRaw("LOWER($column) LIKE ? ESCAPE '!'",['%'.str_replace(['!','%','_'],['!!','!%','!_'],mb_strtolower($term)).'%']);
+            });
+        }
+        return response()->json(['data'=>$query->orderByDesc('id')->limit(30)->get($access->columns($type))->map(fn ($row)=>$access->present($type,$row))]);
+    }
+
+    private function presentReference(Request $request, Hotel $hotel, object $row): void
+    {
+        $row->record=null;
+        $row->record_unavailable=false;
+        if ($row->record_type!==null && $row->record_id!==null) {
+            $row->record=app(StaffMessageRecordAccess::class)->resolve($request,$hotel,$row->record_type,(string)$row->record_id);
+            $row->record_unavailable=$row->record===null;
+        }
+        unset($row->record_type,$row->record_id);
+    }
+
     public function directory(Request $request, Hotel $hotel): JsonResponse
     {
         return response()->json(['data'=>$this->active($hotel)->where('u.id','!=',$request->user()->id)
@@ -69,7 +100,7 @@ final class StaffMessageController
             ->where('c.hotel_id',$hotel->id)->where('m.user_id',$uid)
             ->where(fn ($q)=>$q->where('c.kind','!=','channel')->orWhereIn('c.direct_key',$keys))
             ->orderByDesc('c.updated_at')->orderByDesc('c.id')->get(['c.*','m.last_read_message_id']);
-        $rows->each(function ($c) use ($uid,$hotel): void {
+        $rows->each(function ($c) use ($uid,$hotel,$request): void {
             $c->members=DB::table('staff_conversation_members as m')->join('users as u','u.id','=','m.user_id')
                 ->where('m.conversation_id',$c->id)->get(['u.id','u.name','m.last_read_message_id']);
             if ($c->kind==='channel') {
@@ -79,6 +110,7 @@ final class StaffMessageController
                 $c->members=$eligible->leftJoin('staff_conversation_members as cm',function ($join) use ($c) { $join->on('cm.user_id','=','u.id')->where('cm.conversation_id',$c->id); })->get(['u.id','u.name','cm.last_read_message_id']);
             }
             $c->latest=DB::table('staff_messages')->where('conversation_id',$c->id)->orderByDesc('id')->first();
+            if ($c->latest) $this->presentReference($request,$hotel,$c->latest);
             $c->unread=DB::table('staff_messages')->where('conversation_id',$c->id)
                 ->where('id','>',$c->last_read_message_id)->where('sender_id','!=',$uid)->count();
         });
@@ -117,14 +149,17 @@ final class StaffMessageController
         if (!empty($data['q'])) $query->where('m.body','like','%'.$data['q'].'%');
         $rows=$query->orderByDesc('m.id')->limit(100)->get(['m.*','u.name as sender_name','reply.body as reply_body'])->reverse()->values();
         $attachments=DB::table('staff_message_attachments')->whereIn('message_id',$rows->pluck('id'))->get(['id','message_id','filename','mime','size'])->keyBy('message_id');
-        $rows->each(fn ($row)=>$row->attachment=$attachments->get($row->id));
+        $rows->each(function ($row) use ($attachments,$request,$hotel): void {
+            $row->attachment=$attachments->get($row->id);
+            $this->presentReference($request,$hotel,$row);
+        });
         return response()->json(['data'=>$rows]);
     }
 
     public function send(Request $request, Hotel $hotel, int $conversation): JsonResponse
     {
         $this->access($request,$hotel,$conversation);
-        $data=$request->validate(['body'=>['nullable','string','max:4000'],'attachment'=>['nullable','array'],'attachment.filename'=>['required_with:attachment','string','max:200'],'attachment.content'=>['required_with:attachment','string','max:2796204'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1']]);
+        $data=$request->validate(['body'=>['nullable','string','max:4000'],'attachment'=>['nullable','array'],'attachment.filename'=>['required_with:attachment','string','max:200'],'attachment.content'=>['required_with:attachment','string','max:2796204'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1'],'record_type'=>['nullable','required_with:record_id','in:room,booking,housekeeping,maintenance'],'record_id'=>['nullable','required_with:record_type','integer','min:1']]);
         $body=trim($data['body']??'');
         $attachment=null;
         if (!empty($data['attachment'])) {
@@ -137,20 +172,25 @@ final class StaffMessageController
             $name=preg_replace('/[^a-zA-Z0-9 _.-]/','_',pathinfo(basename($file['filename']),PATHINFO_FILENAME));
             $attachment=['filename'=>substr($name?:'attachment',0,180).'.'.$extensions[$mime],'mime'=>$mime,'size'=>strlen($bytes),'sha256'=>hash('sha256',$bytes),'encoded_content'=>base64_encode($bytes)];
         }
-        abort_if($body==='' && !$attachment,422,'Enter a message or attach a file.');
+        $recordType=$data['record_type']??null;
+        $recordId=$data['record_id']??null;
+        abort_if(($recordType===null)!==($recordId===null),422,'Select a complete record reference.');
+        abort_if($body==='' && !$attachment && !$recordType,422,'Enter a message, attach a file or share a record.');
         $uid=$request->user()->id;
-        $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment) {
+        $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment,$recordType,$recordId) {
             DB::table('staff_conversations')->where('id',$conversation)->lockForUpdate()->first();
             $this->access($request,$hotel,$conversation);
+            if ($recordType!==null) abort_unless(app(StaffMessageRecordAccess::class)->resolve($request,$hotel,$recordType,(string)$recordId),422,'Record unavailable for sharing.');
             $reply=$data['reply_to_id']??null;
             abort_if($reply!==null && !DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$reply)->exists(),422,'Reply must reference a message in this conversation.');
             $query=DB::table('staff_messages')->where('conversation_id',$conversation)->where('sender_id',$uid)->where('client_id',$data['client_id']);
-            if ($existing=$query->first()) { $prior=DB::table('staff_message_attachments')->where('message_id',$existing->id)->first(); abort_if(($prior->sha256??null)!==($attachment['sha256']??null) || ($prior->filename??null)!==($attachment['filename']??null) || $existing->body!==$body || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
-            $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'reply_to_id'=>$reply,'created_at'=>now(),'updated_at'=>now()]);
+            if ($existing=$query->first()) { $prior=DB::table('staff_message_attachments')->where('message_id',$existing->id)->first(); abort_if(($prior->sha256??null)!==($attachment['sha256']??null) || ($prior->filename??null)!==($attachment['filename']??null) || $existing->body!==$body || $existing->record_type!==$recordType || (string)$existing->record_id!==(string)$recordId || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
+            $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'reply_to_id'=>$reply,'record_type'=>$recordType,'record_id'=>$recordId,'created_at'=>now(),'updated_at'=>now()]);
             if ($attachment) DB::table('staff_message_attachments')->insert(['message_id'=>$id,...$attachment]);
             DB::table('staff_conversations')->where('id',$conversation)->update(['updated_at'=>now()]);
             return DB::table('staff_messages')->where('id',$id)->first();
         },3);
+        $this->presentReference($request,$hotel,$message);
         return response()->json(['data'=>$message]);
     }
 
