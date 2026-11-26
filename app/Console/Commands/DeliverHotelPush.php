@@ -8,6 +8,7 @@ use App\Models\Hotel;
 use App\Models\PushSubscription;
 use App\Services\HotelNotificationService;
 use App\Services\PushPreferences;
+use App\Services\PushAlertPayload;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Minishlink\WebPush\Subscription;
@@ -72,7 +73,7 @@ final class DeliverHotelPush extends Command
             ->orderBy('id')->limit(100)->get();
 
         foreach ($rows as $row) {
-            if (! DB::table('push_deliveries')->where('id', $row->id)->where('status', 'pending')
+            if (! DB::table('push_deliveries')->where('id', $row->id)->where('status', 'pending')->where('attempts', $row->attempts)
                 ->where('available_at', '<=', now())->update([
                     'status' => 'processing', 'attempts' => $row->attempts + 1,
                     'available_at' => now()->addMinutes(5), 'updated_at' => now(),
@@ -84,22 +85,16 @@ final class DeliverHotelPush extends Command
                 $this->finish($row, 'cancelled');
                 continue;
             }
+            $alert = $notifications->current($hotel, $row->notification_id);
+            if (! $alert || $alert['kind'] !== $row->kind) {
+                $this->finish($row, 'cancelled');
+                continue;
+            }
             try {
                 $report = $sender->sendOneNotification(Subscription::create([
                     'endpoint' => $device->endpoint, 'publicKey' => $device->p256dh,
                     'authToken' => $device->auth, 'contentEncoding' => 'aes128gcm',
-                ]), json_encode([
-                    'id' => $row->notification_id,
-                    'title' => 'Friendship On Hotel PMS',
-                    'body' => match ($row->kind) {
-                        'new_booking' => 'New booking received.',
-                        'checkout_overdue' => 'An overdue checkout requires attention.',
-                        'checkout_due' => 'A checkout is due today.',
-                        'room_assignment' => 'An arrival needs a room assignment.',
-                        default => 'A hotel update requires attention.',
-                    },
-                    'url' => '/front-desk',
-                ], JSON_THROW_ON_ERROR), ['TTL' => 300]);
+                ]), json_encode(PushAlertPayload::make($hotel->id, $alert), JSON_THROW_ON_ERROR), ['TTL' => 300, 'topic' => substr(hash('sha256', $hotel->id.':'.$alert['id']), 0, 32)]);
                 if ($report->isSubscriptionExpired()) {
                     $device->delete();
                     continue;

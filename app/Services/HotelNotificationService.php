@@ -66,6 +66,21 @@ final class HotelNotificationService
         }
     }
 
+    public function current(Hotel $hotel, string $id): ?array
+    {
+        if (! preg_match('/^([a-z_]+):([1-9][0-9]*)(?::[0-9]{4}-[0-9]{2}-[0-9]{2})?$/D', $id, $parts)) {
+            return null;
+        }
+        $query = $this->queues($hotel)[$parts[1]] ?? null;
+        $booking = $query?->where('id', $parts[2])->first(['id', 'reference', 'check_in', 'check_out']);
+        if (! $booking) {
+            return null;
+        }
+        $alert = $this->notification($parts[1], $booking);
+
+        return $alert['id'] === $id ? $alert : null;
+    }
+
     private function notification(string $kind, object $booking): array
     {
         $date = str_starts_with($kind, 'checkout_') ? $booking->check_out : $booking->check_in;
