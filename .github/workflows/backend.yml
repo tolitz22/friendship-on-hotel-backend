@@ -144,6 +144,10 @@ jobs:
           php scripts/real-engine-no-show-allocation-race.php close-deposit
           php scripts/real-engine-no-show-allocation-race.php close-allocation
           php scripts/real-engine-no-show-allocation-race.php close-refund
+          php scripts/real-engine-no-show-room-correction-race.php proposal
+          php scripts/real-engine-no-show-room-correction-race.php approval
+          php scripts/real-engine-no-show-room-correction-race.php posting
+          php scripts/real-engine-no-show-room-correction-race.php closing
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
 
@@ -219,5 +223,9 @@ jobs:
           php scripts/real-engine-no-show-allocation-race.php close-deposit
           php scripts/real-engine-no-show-allocation-race.php close-allocation
           php scripts/real-engine-no-show-allocation-race.php close-refund
+          php scripts/real-engine-no-show-room-correction-race.php proposal
+          php scripts/real-engine-no-show-room-correction-race.php approval
+          php scripts/real-engine-no-show-room-correction-race.php posting
+          php scripts/real-engine-no-show-room-correction-race.php closing
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
