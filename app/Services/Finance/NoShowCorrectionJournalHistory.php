@@ -26,6 +26,7 @@ final class NoShowCorrectionJournalHistory
             $folio = DB::table('reservation_folios')->where('hotel_id', $hotelId)
                 ->where('reservation_record_id', $bookingId)->first();
             abort_unless($folio !== null && $folio->currency === 'PHP', 409, 'PHP folio required.');
+            $integrity = app(NoShowJournalIntegrityService::class)->report($hotel);
             $groups = [];
             $movements = [];
             foreach (['room', 'fee'] as $kind) {
@@ -42,9 +43,17 @@ final class NoShowCorrectionJournalHistory
                         ? app(NoShowRoomCorrectionCompletion::class)->valid($hotelId, (int) $folio->id)
                         : app(NoShowEffectiveFeeClearance::class)->resolve($hotelId, $bookingId, (int) $folio->id, $proposal) !== null);
                     $journalHistory = [];
+                    $journalIds = $rows->map(fn ($row): string => (string) $row->id)->all();
+                    $integrityIssues = array_values(array_filter($integrity['issues'],
+                        static fn (array $issue): bool => in_array($issue['journalId'], $journalIds, true)
+                            || in_array($issue['firstJournalId'] ?? null, $journalIds, true)));
+                    $originalLines = [];
+                    $correctionLines = [];
                     foreach ($rows as $row) {
                         $entry = $this->journal($hotelId, $row);
                         $journalHistory[] = $entry;
+                        $originalLines = array_merge($originalLines, $entry['originalLines']);
+                        $correctionLines = array_merge($correctionLines, $entry['lines']);
                         foreach ($entry['lines'] as $line) {
                             $key = $line['accountCode'];
                             $movements[$key] ??= ['accountCode' => $key, 'debitMinor' => 0, 'creditMinor' => 0];
@@ -53,6 +62,11 @@ final class NoShowCorrectionJournalHistory
                         }
                     }
                     $snapshotValid = hash_equals($proposal->snapshot_sha256, hash('sha256', $proposal->snapshot));
+                    $independentReview = $approval !== null && (int) $approval->reviewed_by > 0
+                        && (int) $approval->reviewed_by !== (int) $proposal->proposed_by;
+                    $actorMatches = $approval !== null && $rows->every(
+                        fn ($row): bool => (int) $row->posted_by === (int) $approval->reviewed_by);
+                    $valid = $valid && $snapshotValid && $independentReview && $actorMatches && $integrityIssues === [];
                     $groups[] = [
                         'kind' => $kind, 'proposalId' => (string) $proposal->id,
                         'businessDate' => $proposal->business_date, 'proposedBy' => (string) $proposal->proposed_by,
@@ -61,6 +75,14 @@ final class NoShowCorrectionJournalHistory
                         'reviewedBy' => $approval === null ? null : (string) $approval->reviewed_by,
                         'reviewedAt' => $approval?->created_at, 'reviewReason' => $approval?->reason,
                         'snapshotIntegrityValid' => $snapshotValid,
+                        'independentReview' => $independentReview,
+                        'postingActorMatchesReviewer' => $rows->isEmpty() ? null : $actorMatches,
+                        'integrityIssues' => $integrityIssues,
+                        'originalJournalIds' => array_values(array_unique(array_filter(array_column($journalHistory, 'originalJournalId')))),
+                        'replacementJournalIds' => array_values(array_column(array_filter($journalHistory,
+                            static fn (array $entry): bool => $entry['sourceType'] === 'no_show_fee_replacement'), 'journalId')),
+                        'accountMovements' => self::accountMovements($originalLines, $correctionLines),
+                        'movementBasis' => 'linked_original_and_correction_lines_not_account_balances',
                         'status' => !$rows->isEmpty() ? ($valid ? 'posted_verified' : 'posted_requires_reconciliation')
                             : (!$snapshotValid ? 'invalid_snapshot' : ($approval === null ? 'awaiting_review' : 'approved_unposted')),
                         'originalFeeMinor' => $kind === 'fee' ? (int) $proposal->original_fee_minor : null,
@@ -74,9 +96,34 @@ final class NoShowCorrectionJournalHistory
                 'bookingId' => (string) $bookingId, 'currency' => 'PHP', 'businessDate' => $clock?->business_date,
                 'corrections' => $groups, 'postedCorrectionMovements' => array_values($movements),
                 'scope' => 'linked_correction_journals_only', 'readOnly' => true, 'closingCertified' => false,
-                'orphanDetectionIncluded' => false,
+                'orphanDetectionIncluded' => true,
+                'hotelJournalIntegrity' => [
+                    'integrityValid' => $integrity['integrityValid'],
+                    'scannedJournalCount' => $integrity['scannedJournalCount'],
+                    'issueCount' => count($integrity['issues']),
+                    'scope' => 'hotel_wide_no_show_journal_sources',
+                ],
             ];
         }, 3);
+    }
+
+    /** Net debit-positive movements, not a historical trial balance. */
+    public static function accountMovements(array $original, array $correction): array
+    {
+        $accounts = [];
+        foreach (['originalNetMinor' => $original, 'correctionNetMinor' => $correction] as $field => $lines) {
+            foreach ($lines as $line) {
+                $key = $line['accountCode'];
+                $accounts[$key] ??= ['accountCode' => $key, 'originalNetMinor' => 0, 'correctionNetMinor' => 0];
+                $accounts[$key][$field] += $line['debitMinor'] - $line['creditMinor'];
+            }
+        }
+        ksort($accounts);
+        foreach ($accounts as &$account) {
+            $account['combinedNetMinor'] = $account['originalNetMinor'] + $account['correctionNetMinor'];
+        }
+        unset($account);
+        return array_values($accounts);
     }
 
     private function journal(int $hotelId, object $row): array
@@ -100,6 +147,12 @@ final class NoShowCorrectionJournalHistory
                 ->where('reverses_journal_id', $row->id)->exists(),
             'businessDateClosed' => DB::table('financial_day_closes')->where('hotel_id', $hotelId)
                 ->where('business_date', $row->business_date)->where('status', 'completed')->exists(),
+            'originalLines' => $original === null ? [] : DB::table('financial_posting_lines')
+                ->where('journal_id', $original->id)->orderBy('line_number')->get()
+                ->map(fn ($line): array => [
+                    'accountCode' => $line->account_code, 'debitMinor' => (int) $line->debit_minor,
+                    'creditMinor' => (int) $line->credit_minor,
+                ])->all(),
             'lines' => $lines,
         ];
     }
