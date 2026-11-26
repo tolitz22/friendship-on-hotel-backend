@@ -48,11 +48,15 @@ final class NoShowCorrectionJournalHistory
                         static fn (array $issue): bool => in_array($issue['journalId'], $journalIds, true)
                             || in_array($issue['firstJournalId'] ?? null, $journalIds, true)));
                     $originalLines = [];
+                    $seenOriginals = [];
                     $correctionLines = [];
                     foreach ($rows as $row) {
                         $entry = $this->journal($hotelId, $row);
                         $journalHistory[] = $entry;
-                        $originalLines = array_merge($originalLines, $entry['originalLines']);
+                        if ($entry['originalJournalId'] !== null && !isset($seenOriginals[$entry['originalJournalId']])) {
+                            $originalLines = array_merge($originalLines, $entry['originalLines']);
+                            $seenOriginals[$entry['originalJournalId']] = true;
+                        }
                         $correctionLines = array_merge($correctionLines, $entry['lines']);
                         foreach ($entry['lines'] as $line) {
                             $key = $line['accountCode'];
@@ -62,6 +66,18 @@ final class NoShowCorrectionJournalHistory
                         }
                     }
                     $snapshotValid = hash_equals($proposal->snapshot_sha256, hash('sha256', $proposal->snapshot));
+                    $snapshot = $snapshotValid ? json_decode($proposal->snapshot, true) : null;
+                    $snapshotValid = $snapshotValid && is_array($snapshot);
+                    if ($kind === 'fee' && !$rows->isEmpty()) {
+                        $expectedOriginal = (string) ($snapshot['preview']['originalJournalId'] ?? '');
+                        foreach ($journalHistory as $entry) {
+                            if ($entry['sourceType'] === 'no_show_fee_reversal'
+                                && ($expectedOriginal === '' || $entry['originalJournalId'] !== $expectedOriginal)) {
+                                $integrityIssues[] = ['reason' => 'correction_original_not_in_snapshot',
+                                    'journalId' => $entry['journalId'], 'sourceType' => $entry['sourceType']];
+                            }
+                        }
+                    }
                     $independentReview = $approval !== null && (int) $approval->reviewed_by > 0
                         && (int) $approval->reviewed_by !== (int) $proposal->proposed_by;
                     $actorMatches = $approval !== null && $rows->every(
