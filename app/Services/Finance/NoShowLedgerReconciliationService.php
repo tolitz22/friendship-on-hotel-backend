@@ -28,12 +28,15 @@ final class NoShowLedgerReconciliationService
             $eligibility = app(NoShowRefundEligibility::class)->review($hotel, $bookingId);
             $statement = app(FolioSettlementService::class)->statement($hotel, $bookingId);
             $issues = [];
+            $trace = [];
             $posted = ['deposits' => 0, 'fees' => 0, 'allocations' => 0, 'refunds' => 0];
             $clearance = NoShowRefundEligibility::clearance($hotelId, $bookingId, (int) $folio->id);
             if ($clearance === null || !$eligibility['financialClearanceValid']) {
                 $issues[] = ['kind' => 'fee', 'reference' => (string) $bookingId, 'reason' => 'invalid_clearance'];
             } else {
                 $posted['fees'] = (int) $clearance->gross_minor;
+                $trace[] = ['kind' => 'fee', 'reference' => 'booking-'.$bookingId, 'amountMinor' => $posted['fees'],
+                    'journalIds' => $clearance->journal_id === null ? [] : [(string) $clearance->journal_id], 'status' => 'matched'];
             }
             foreach ($statement['payments'] as $payment) {
                 if ($payment['status'] !== 'staff_confirmed' || $payment['verificationStatus'] !== 'verified') {
@@ -46,14 +49,14 @@ final class NoShowLedgerReconciliationService
                 $debit = $rows->count() === 1 && $rows->first()->source_type === 'guest_deposit_opening_reclassification'
                     ? 'guest_deposit_opening_clearing' : ($payment['method'] === 'cash' ? 'cashier_cash' : 'hotel_bank');
                 $posted['deposits'] += $this->check($hotelId, $rows, $reference, 'deposit', $debit,
-                    'guest_deposit_liability', (int) $payment['amountMinor'], $issues);
+                    'guest_deposit_liability', (int) $payment['amountMinor'], $issues, $trace);
             }
             foreach ($statement['allocations'] as $allocation) {
                 $reference = 'folio-allocation-'.$allocation['id'];
                 $rows = DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
                     ->where('source_reference', $reference)->where('source_type', 'no_show_deposit_allocation')->get();
                 $posted['allocations'] += $this->check($hotelId, $rows, $reference, 'allocation',
-                    'guest_deposit_liability', 'AR', (int) $allocation['amountMinor'], $issues);
+                    'guest_deposit_liability', 'AR', (int) $allocation['amountMinor'], $issues, $trace);
             }
             $refunds = DB::table('folio_refund_disbursement_evidence')->where('hotel_id', $hotelId)
                 ->where('folio_id', $folio->id)->where('status', 'verified')->get();
@@ -62,7 +65,7 @@ final class NoShowLedgerReconciliationService
                 $rows = DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
                     ->where('source_reference', $reference)->where('source_type', 'no_show_deposit_refund')->get();
                 $posted['refunds'] += $this->check($hotelId, $rows, $reference, 'refund',
-                    'guest_deposit_liability', 'hotel_bank', (int) $refund->amount_minor, $issues);
+                    'guest_deposit_liability', 'hotel_bank', (int) $refund->amount_minor, $issues, $trace);
             }
             $expected = [
                 'deposits' => (int) $eligibility['verifiedPaymentsMinor'],
@@ -80,7 +83,7 @@ final class NoShowLedgerReconciliationService
                 'businessDate' => $clock?->business_date, 'scope' => 'current_no_show_matched_journals_only',
                 'expectedMinor' => $expected, 'matchedJournalMinor' => $posted,
                 'expectedBalances' => $balances($expected), 'matchedJournalBalances' => $balances($posted),
-                'issues' => $issues, 'reconciled' => $valid,
+                'issues' => $issues, 'journalTrace' => $trace, 'reconciled' => $valid,
                 'settled' => $valid && $eligibility['settled'], 'readOnly' => true,
                 'closingCertified' => false,
             ];
@@ -88,7 +91,7 @@ final class NoShowLedgerReconciliationService
     }
 
     private function check(int $hotelId, object $rows, string $reference, string $kind,
-        string $debit, string $credit, int $amount, array &$issues): int
+        string $debit, string $credit, int $amount, array &$issues, array &$trace): int
     {
         $reason = null;
         if ($rows->count() !== 1) {
@@ -108,8 +111,11 @@ final class NoShowLedgerReconciliationService
                 }
             }
         }
+        $ids = $rows->pluck('id')->map(fn ($id): string => (string) $id)->sort()->values()->all();
+        $trace[] = ['kind' => $kind, 'reference' => $reference, 'amountMinor' => $amount,
+            'journalIds' => $ids, 'status' => $reason ?? 'matched'];
         if ($reason !== null) {
-            $issues[] = ['kind' => $kind, 'reference' => $reference, 'reason' => $reason];
+            $issues[] = ['kind' => $kind, 'reference' => $reference, 'reason' => $reason, 'journalIds' => $ids];
             return 0;
         }
         return $amount;
