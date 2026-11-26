@@ -116,7 +116,15 @@ final class FolioRefundDisbursementService
                     'reviewed_by' => $reviewerId, 'review_note' => trim($note),
                     'reviewed_at' => now(), 'updated_at' => now(),
                 ]);
-            return $this->present(DB::table('folio_refund_disbursement_evidence')->find($evidenceId));
+            $result = $this->present(DB::table('folio_refund_disbursement_evidence')->find($evidenceId));
+            if ($decision === 'verify' && config('financial_accounting.enable_no_show_refund_posting', false)
+                && DB::table('reservation_records')->where('hotel_id', $hotel->id)
+                    ->where('id', $bookingId)->where('lifecycle_state', 'no_show')->exists()) {
+                $journal = app(\App\Services\Finance\NoShowRefundJournalService::class)
+                    ->post($hotel, $bookingId, (int) $folio->id, $evidenceId, $reviewerId);
+                $result['journalId'] = (string) $journal;
+            }
+            return $result;
         }, 3);
     }
 
