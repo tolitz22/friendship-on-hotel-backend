@@ -28,3 +28,7 @@ Run `php artisan pms:push-check --scan` with delivery disabled. This is read-onl
 ## All-property mode (supersedes single-hotel activation configuration above)
 
 The worker now supports `PMS_PUSH_SCOPE=all`. In this mode omit `PMS_PUSH_HOTEL_ID` and `PMS_PUSH_ALLOW_NON_DEMO`; those settings apply only to legacy `pilot` mode (the default). One worker handles properties with registered devices individually. Newly created properties are included automatically when an administrator opts in. Device eligibility, preferences, message discovery, queue queries and delivery revalidation remain scoped to the individual property. One property failure does not prevent processing the others. Preflight reports aggregate counts for all properties and scans at most ten hotels with --scan. Keep PMS_PUSH_ENABLED=false until dependency, CI and live Client Demo acceptance pass. For live testing only, use pilot scope and the verified Client Demo ID. After acceptance use all scope with explicit activation approval. Review multi-property throughput before broad activation.
+
+## Web Push v11 transport initialization
+
+The locked v11 constructor takes a PSR-18 client as its third argument. `PushTransport` supplies Guzzle with explicit connect and request timeouts, TLS verification, redirects disabled, and PSR-17 factories. Both delivery and read-only preflight initialize the same transport. The transport tests use synthetic VAPID keys and a mock HTTP handler; no live notification is sent by CI.

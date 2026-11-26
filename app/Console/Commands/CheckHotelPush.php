@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Services\HotelNotificationService;
 use App\Services\PushDeliveryReadiness;
+use App\Services\PushTransport;
 use App\Services\PushDeviceEligibility;
 use App\Services\StaffMessageNotifications;
 use Illuminate\Console\Command;
@@ -15,9 +16,17 @@ final class CheckHotelPush extends Command
     protected $signature = 'pms:push-check {--scan : Read a bounded sample of the notification sources without enqueuing or sending}';
     protected $description = 'Read-only push delivery preflight; never sends notifications';
 
-    public function handle(PushDeliveryReadiness $readiness, HotelNotificationService $notifications, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages): int
+    public function handle(PushDeliveryReadiness $readiness, HotelNotificationService $notifications, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushTransport $transport): int
     {
         $issues = $readiness->configurationIssues();
+        if ($issues === []) {
+            try {
+                // Initialize the actual locked transport without making any request.
+                $transport->make();
+            } catch (\Throwable) {
+                $issues[] = 'transport_initialization_failed';
+            }
+        }
         $this->line('Delivery switch: '.(config('push.enabled') ? 'enabled' : 'disabled'));
         try {
             $schemaIssues = $readiness->schemaIssues();

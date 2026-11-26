@@ -15,6 +15,7 @@ use App\Services\PushDeliveryQueue;
 use App\Services\PushDeliveryDiscovery;
 use App\Services\PushDeliveryOutcome;
 use App\Services\PushDeliveryReadiness;
+use App\Services\PushTransport;
 use Minishlink\WebPush\Subscription;
 use Minishlink\WebPush\WebPush;
 
@@ -23,7 +24,7 @@ final class DeliverHotelPush extends Command
     protected $signature = 'pms:push-deliver';
     protected $description = 'Discover and deliver hotel alerts outside web requests';
 
-    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery, PushDeliveryReadiness $readiness): int
+    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery, PushDeliveryReadiness $readiness, PushTransport $transport): int
     {
         if (! config('push.enabled')) {
             return self::SUCCESS;
@@ -50,11 +51,13 @@ final class DeliverHotelPush extends Command
 
             return self::FAILURE;
         }
-        $sender = new WebPush(['VAPID' => [
-            'subject' => config('push.subject'),
-            'publicKey' => config('push.public_key'),
-            'privateKey' => config('push.private_key'),
-        ]], [], 10);
+        try {
+            $sender = $transport->make();
+        } catch (\Throwable) {
+            $this->error('Push transport initialization failed. Check the installed dependency and VAPID configuration.');
+
+            return self::FAILURE;
+        }
         $failed = false;
         // Iterate only properties with registered devices (including revoked devices
         // whose queued work still needs recovery). Every discovery/send stays hotel scoped.
