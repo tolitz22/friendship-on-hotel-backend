@@ -411,3 +411,90 @@ it('disables realtime for insecure or incomplete provider configuration', functi
     config(['staff_messaging.realtime.http_url'=>'https://realtime.example.test','staff_messaging.realtime.secret'=>null]);
     expect($realtime->enabled())->toBeFalse();
 });
+
+it('keeps inbox query growth bounded as conversations increase to fifty', function () {
+    $seed=function (int $start,int $end) {
+        for ($i=$start;$i<=$end;$i++) {
+            $id=DB::table('staff_conversations')->insertGetId(['hotel_id'=>$this->hotel->id,'kind'=>'group','title'=>'QA group '.$i,'created_at'=>now(),'updated_at'=>now()]);
+            DB::table('staff_conversation_members')->insert([
+                ['conversation_id'=>$id,'user_id'=>$this->manager->id,'created_at'=>now(),'updated_at'=>now()],
+                ['conversation_id'=>$id,'user_id'=>$this->reception->id,'created_at'=>now(),'updated_at'=>now()],
+            ]);
+            DB::table('staff_messages')->insert(['conversation_id'=>$id,'sender_id'=>$this->reception->id,'client_id'=>(string)Str::uuid(),'body'=>'QA preview '.$i,'created_at'=>now(),'updated_at'=>now()]);
+        }
+    };
+    $this->getJson($this->base.'/conversations')->assertOk(); // Warm lazy channel provisioning.
+    $measure=function () {
+        DB::flushQueryLog();DB::enableQueryLog();
+        try {
+            $response=$this->getJson($this->base.'/conversations')->assertOk();
+            return [$response->json('data'),count(DB::getQueryLog())];
+        } finally {
+            DB::disableQueryLog();DB::flushQueryLog();
+        }
+    };
+    $seed(1,5);
+    [$small,$smallQueries]=$measure();
+    $seed(6,50);
+    [$large,$largeQueries]=$measure();
+    expect(collect($small)->where('kind','group')->count())->toBe(5);
+    $groups=collect($large)->where('kind','group');
+    expect($groups->count())->toBe(50);
+    expect($groups->sum('unread'))->toBe(50);
+    expect($groups->firstWhere('title','QA group 50')['latest']['body'])->toBe('QA preview 50');
+    expect($largeQueries)->toBeLessThanOrEqual($smallQueries+3);
+    expect($largeQueries)->toBeLessThanOrEqual(40);
+});
+
+it('paginates a thousand messages without omissions or duplicates', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id;
+    foreach (array_chunk(range(1,1000),100) as $chunk) {
+        DB::table('staff_messages')->insert(array_map(fn ($i)=>['conversation_id'=>$id,'sender_id'=>$this->reception->id,'client_id'=>(string)Str::uuid(),'body'=>'QA history '.$i,'created_at'=>now(),'updated_at'=>now()],$chunk));
+    }
+    $cursor=null;$seen=[];
+    for ($page=0;$page<10;$page++) {
+        $data=$this->getJson($url.($cursor===null?'':'?before='.$cursor))->assertOk()->assertJsonCount(100,'data')->json('data');
+        $ids=array_map('intval',array_column($data,'id'));
+        $sorted=$ids;sort($sorted);
+        expect($ids)->toBe($sorted);
+        expect(array_intersect($seen,$ids))->toBe([]);
+        $seen=array_merge($seen,$ids);
+        $cursor=$ids[0];
+    }
+    expect(count(array_unique($seen)))->toBe(1000);
+    $this->getJson($url.'?before='.$cursor)->assertOk()->assertJsonCount(0,'data');
+    $this->getJson($url.'?q=QA%20history%201000')->assertOk()->assertJsonCount(1,'data')->assertJsonPath('data.0.body','QA history 1000');
+});
+
+it('keeps announcement history query growth bounded for a full page', function () {
+    $id=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'))->firstWhere('title','All Staff')['id'];
+    $url=$this->base.'/conversations/'.$id;
+    $seed=function (int $start,int $end) use ($id) {
+        for ($i=$start;$i<=$end;$i++) {
+            $mid=DB::table('staff_messages')->insertGetId(['conversation_id'=>$id,'sender_id'=>$this->manager->id,'client_id'=>(string)Str::uuid(),'body'=>'QA notice '.$i,'is_announcement'=>true,'created_at'=>now(),'updated_at'=>now()]);
+            DB::table('staff_announcement_recipients')->insert([
+                ['message_id'=>$mid,'user_id'=>$this->reception->id,'acknowledged_at'=>now()],
+                ['message_id'=>$mid,'user_id'=>$this->cleaner->id,'acknowledged_at'=>null],
+            ]);
+        }
+    };
+    $measure=function (int $expected) use ($url) {
+        DB::flushQueryLog();DB::enableQueryLog();
+        try {
+            $response=$this->getJson($url)->assertOk()->assertJsonCount($expected,'data');
+            $count=count(DB::getQueryLog());
+        } finally {
+            DB::disableQueryLog();DB::flushQueryLog();
+        }
+        foreach ($response->json('data') as $row) {
+            expect($row['acknowledgement']['total'])->toBe(2);
+            expect($row['acknowledgement']['acknowledged'])->toBe(1);
+        }
+        return $count;
+    };
+    $seed(1,5);$small=$measure(5);
+    $seed(6,100);$large=$measure(100);
+    expect($large)->toBeLessThanOrEqual($small+3);
+    expect($large)->toBeLessThanOrEqual(25);
+});
