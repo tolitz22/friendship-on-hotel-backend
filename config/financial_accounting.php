@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Enable only after no-show journal migration and acceptance for existing folios.
+    'enable_no_show_closing_integrity' => (bool) env('FINANCE_ENABLE_NO_SHOW_CLOSING_INTEGRITY', false),
     // Keep fee reversal posting off until atomic folio and replacement integration passes acceptance.
     'enable_no_show_fee_correction_posting' => (bool) env('FINANCE_ENABLE_NO_SHOW_FEE_CORRECTION_POSTING', false),
     // Fee correction review is staged; approval does not post any journals.
