@@ -915,3 +915,32 @@ it('reports no-show matched ledger balances and transaction discrepancies withou
         ->and(array_column($result['issues'], 'kind'))->toContain($scenario === 'missing allocation' ? 'allocation' : 'deposit');
 })->with(['unallocated', 'partial', 'settled', 'missing deposit', 'duplicate deposit',
     'reversed deposit', 'mismatched deposit', 'missing allocation', 'unauthorized', 'cross hotel']);
+
+it('exposes no-show ledger reconciliation only to authorized hotel administrators', function (): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    noShowPayment($hotel, $folio, $author, $reviewer, 200000);
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    $endpoint = $path.'/no-show-ledger-reconciliation';
+    $before = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->count();
+    $response = $this->getJson($endpoint)->assertOk()
+        ->assertJsonPath('data.bookingId', (string) $booking)
+        ->assertJsonPath('data.currency', 'PHP')
+        ->assertJsonPath('data.readOnly', true)
+        ->assertJsonPath('data.closingCertified', false)
+        ->assertJsonPath('data.reconciled', false)
+        ->assertJsonPath('data.expectedMinor.deposits', 200000)
+        ->assertJsonPath('data.matchedJournalMinor.deposits', 0)
+        ->assertJsonPath('data.issues.0.reason', 'missing_journal');
+    expect($response->headers->get('Cache-Control'))->toContain('no-store');
+    noShowSignIn(noShowActor($hotel, 'front_desk'));
+    $this->getJson($endpoint)->assertForbidden();
+    $other = Hotel::create(['name' => 'Foreign ledger API property']);
+    noShowSignIn(noShowActor($other, 'admin'));
+    $this->getJson($endpoint)->assertNotFound();
+    $this->getJson('/api/v1/hotels/'.$other->id.'/bookings/'.$booking.'/no-show-ledger-reconciliation')->assertNotFound();
+    expect(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->count())->toBe($before);
+});
