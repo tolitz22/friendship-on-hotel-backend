@@ -1323,3 +1323,51 @@ it('exposes the fee correction approval and posting lifecycle with immutable aud
     'full waiver' => [0, 'success'],
     'stale evidence' => [100000, 'stale'],
 ]);
+
+
+it('rejects direct financial API access after role or property access is lost', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_allocation_posting' => true,
+        'financial_accounting.enable_no_show_refund_posting' => true,
+        'financial_accounting.enable_no_show_fee_correction_review' => true,
+        'financial_accounting.enable_no_show_fee_correction_posting' => true,
+    ]);
+    $reads = ['/no-show-deposits', '/no-show-allocations', '/no-show-refunds', '/no-show-corrections', '/no-show-ledger-reconciliation'];
+    foreach ($reads as $suffix) $this->getJson($path.$suffix)->assertOk()->assertJsonPath('data.bookingId', (string) $booking);
+    $writes = [
+        ['/no-show-deposits/'.$payment.'/recognize', ['acknowledged' => true]],
+        ['/no-show-allocations/'.$payment, ['requestKey' => 'qa-access-allocation', 'amountMinor' => 10000, 'payerKind' => 'guest', 'payerReference' => 'Demo guest', 'acknowledged' => true]],
+        ['/no-show-corrections/fee', ['replacementMinor' => 100000, 'reason' => 'Synthetic unauthorized correction request.']],
+        ['/refund-requests', ['requestKey' => 'qa-access-refund', 'paymentRecordId' => $payment, 'amountMinor' => 10000, 'reason' => 'Synthetic unauthorized refund.']],
+    ];
+    $tables = ['financial_posting_journals', 'folio_adjustments', 'folio_settlement_allocations', 'folio_refund_requests', 'no_show_fee_correction_proposals'];
+    $snapshot = fn () => collect($tables)->mapWithKeys(fn ($table) => [$table => DB::table($table)->where('hotel_id', $hotel->id)->orderBy('id')->get()->all()])->all();
+    $before = $snapshot();
+    if ($scenario === 'foreign administrator') {
+        $other = Hotel::create(['name' => 'Isolated authorization property', 'currency' => 'PHP', 'timezone' => 'Asia/Manila']);
+        noShowSignIn(noShowActor($other, 'admin'));
+        foreach ($reads as $suffix) {
+            $this->getJson($path.$suffix)->assertNotFound();
+            $this->getJson('/api/v1/hotels/'.$other->id.'/bookings/'.$booking.$suffix)->assertNotFound();
+        }
+        foreach ($writes as [$suffix, $payload]) $this->postJson($path.$suffix, $payload)->assertNotFound();
+    } else {
+        if ($scenario === 'reception') noShowSignIn(noShowActor($hotel, 'front_desk'));
+        elseif ($scenario === 'revoked membership') DB::table('hotel_memberships')->where('hotel_id', $hotel->id)->where('user_id', $reviewer->id)->update(['is_active' => false]);
+        elseif ($scenario === 'inactive user') {
+            $reviewer->update(['is_active' => false]);
+            noShowSignIn($reviewer->fresh());
+        }
+        foreach ($reads as $suffix) expect($this->getJson($path.$suffix)->getStatusCode())->toBeIn([401,403,404]);
+        foreach ($writes as [$suffix, $payload]) expect($this->postJson($path.$suffix, $payload)->getStatusCode())->toBeIn([401,403,404]);
+    }
+    expect($snapshot())->toEqual($before);
+})->with(['reception', 'revoked membership', 'inactive user', 'foreign administrator']);
