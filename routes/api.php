@@ -365,6 +365,7 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/dates/preview', [FrontDeskReservationController::class, 'previewAmendment'])->whereNumber('booking')->middleware('throttle:30,1');
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
+                Route::get('/bookings/{booking}/no-show-ledger-reconciliation', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'ledgerReconciliation'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
                 Route::get('/bookings/{booking}/no-show-financial-review', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
                 Route::post('/bookings/{booking}/no-show-financial-review', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'apply'])
                     ->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
