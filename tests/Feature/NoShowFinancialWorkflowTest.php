@@ -944,3 +944,74 @@ it('exposes no-show ledger reconciliation only to authorized hotel administrator
     $this->getJson('/api/v1/hotels/'.$other->id.'/bookings/'.$booking.'/no-show-ledger-reconciliation')->assertNotFound();
     expect(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->count())->toBe($before);
 });
+
+
+it('requires an independently approved complete room journal reversal before no-show fee accounting', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    config()->set([
+        'financial_accounting.enable_live_folio_tax' => true,
+        'financial_accounting.enable_no_show_room_correction_review' => true,
+        'financial_accounting.enable_no_show_room_correction_posting' => true,
+    ]);
+    DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['business_date' => '2026-11-20']);
+    $policy = DB::table('financial_tax_policies')->insertGetId([
+        'hotel_id' => $hotel->id, 'classification' => 'vat_standard', 'price_mode' => 'inclusive',
+        'rate_bps' => 1200, 'effective_from' => '2026-11-20', 'status' => 'approved',
+        'approved_by' => $reviewer->id, 'approved_at' => now(),
+    ]);
+    $entry = (int) DB::table('folio_entries')->where('folio_id', $folio)->where('entry_type', 'room_night')->orderBy('stay_date')->value('id');
+    $assessment = app(\App\Services\Finance\FolioNightAssessmentService::class);
+    $draft = $assessment->prepare($hotel->id, $entry, $policy, $author->id);
+    $assessment->approve($hotel->id, (int) $draft['id'], $reviewer->id);
+    DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['business_date' => '2026-11-22']);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $this->getJson($path.'/no-show-financial-review')->assertOk()->assertJsonPath('data.canApply', false);
+    $service = app(\App\Services\Finance\NoShowRoomNightCorrectionDecisionService::class);
+    $completion = app(\App\Services\Finance\NoShowRoomCorrectionCompletion::class);
+    $reason = 'Independent review of unused room accounting.';
+    $proposal = $service->propose($hotel, $booking, $author->id, $reason);
+    expect($completion->valid($hotel->id, $folio))->toBeFalse();
+    if ($scenario === 'self approval') {
+        expect(fn () => $service->approve($hotel, $proposal, $author->id, $reason))
+            ->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        expect(DB::table('no_show_room_correction_reviews')->where('proposal_id', $proposal)->count())->toBe(0);
+        return;
+    }
+    if ($scenario === 'stale snapshot') {
+        noShowPayment($hotel, $folio, $author, $reviewer, 10000);
+        expect(fn () => $service->approve($hotel, $proposal, $reviewer->id, $reason))
+            ->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        return;
+    }
+    $service->approve($hotel, $proposal, $reviewer->id, $reason);
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('source_type', 'no_show_room_correction');
+    expect((clone $journals)->count())->toBe(0);
+    if ($scenario === 'disabled posting' || $scenario === 'changed date') {
+        if ($scenario === 'disabled posting') config()->set('financial_accounting.enable_no_show_room_correction_posting', false);
+        else DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['business_date' => '2026-11-23']);
+        expect(fn () => $service->post($hotel, $proposal, $reviewer->id))
+            ->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
+        expect((clone $journals)->count())->toBe(0);
+        return;
+    }
+    $posted = $service->post($hotel, $proposal, $reviewer->id);
+    expect($posted['replayed'])->toBeFalse()
+        ->and(count($posted['journalIds']))->toBe(2)
+        ->and($completion->valid($hotel->id, $folio))->toBeTrue()
+        ->and($service->post($hotel, $proposal, $reviewer->id)['journalIds'])->toBe($posted['journalIds'])
+        ->and((clone $journals)->count())->toBe(2);
+    if ($scenario === 'damaged reversal') {
+        $journal = (clone $journals)->first();
+        DB::table('financial_posting_lines')->where('journal_id', $journal->id)->where('line_number', 1)
+            ->update(['account_code' => 'INVALID']);
+        expect($completion->valid($hotel->id, $folio))->toBeFalse();
+        $this->getJson($path.'/no-show-financial-review')->assertOk()->assertJsonPath('data.canApply', false);
+        return;
+    }
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated()->assertJsonPath('data.grossMinor', 200000);
+    expect(NoShowClosingGuard::unresolved($hotel->id, '2026-11-22'))->toBe(0);
+    expect((int) DB::table('folio_adjustments')->where('folio_id', $folio)->where('kind', 'credit')->sum('amount_minor'))->toBe(600000);
+})->with(['success', 'self approval', 'stale snapshot', 'disabled posting', 'changed date', 'damaged reversal']);
