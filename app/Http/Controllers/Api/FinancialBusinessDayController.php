@@ -168,7 +168,8 @@ final class FinancialBusinessDayController
         }
 
         $noShowIntegrity = null;
-        if (config('financial_accounting.enable_no_show_closing_integrity', false)) {
+        if (\App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id)
+            && config('financial_accounting.enable_no_show_closing_integrity', false)) {
             $noShowIntegrity = app(\App\Services\Finance\NoShowClosingIntegrityService::class)
                 ->report($hotel, $date, (int) ($request ?? request())->user()->id);
             if (!$noShowIntegrity['integrityValid']) {
