@@ -55,12 +55,12 @@ if (($argv[1] ?? '') === 'worker') {
             file_put_contents($barrier.'.journal.'.$index, (string) $journal);
             exit(0);
         }
-        if ($mode === 'refund-competing') {
-            app(\App\Domain\Reservations\RefundRequestService::class)->create($hotel, (int) $bookingId, (int) $actorId, [
-                'requestKey' => 'race-refund-'.$index, 'paymentRecordId' => (int) $paymentId,
-                'amountMinor' => 70000, 'reason' => 'Return synthetic excess deposit.',
+        if (in_array($mode, ['refund-competing', 'refund-duplicate', 'refund-key-conflict'], true)) {
+            $result = app(\App\Domain\Reservations\RefundRequestService::class)->create($hotel, (int) $bookingId, (int) $actorId, [
+                'requestKey' => $mode === 'refund-competing' ? 'race-refund-'.$index : 'race-refund-shared', 'paymentRecordId' => (int) $paymentId,
+                'amountMinor' => $mode === 'refund-key-conflict' && $index === '2' ? 60000 : 70000, 'reason' => 'Return synthetic excess deposit.',
             ]);
-            exit(0);
+            exit($result['replayed'] ? 8 : 0);
         }
         if (in_array($mode, ['refund-verify', 'close-refund'], true) || ($mode === 'refund-allocation' && $index === '1')) {
             app(\App\Domain\Reservations\FolioRefundDisbursementService::class)->review(
@@ -84,12 +84,14 @@ if (($argv[1] ?? '') === 'worker') {
             && str_contains($exception->getMessage(), 'Historical deposit requires')) exit(9);
         if ($mode === 'refund-competing' && $exception->getStatusCode() === 409
             && str_contains($exception->getMessage(), 'No-show refund exceeds verified excess funds')) exit(9);
+        if ($mode === 'refund-key-conflict' && $exception->getStatusCode() === 409
+            && str_contains($exception->getMessage(), 'Refund request key already used with different details')) exit(9);
         throw $exception;
     }
 }
 
 $mode = $argv[1] ?? 'competing';
-if (!in_array($mode, ['competing', 'duplicate', 'deposit-bank', 'deposit-cash', 'refund-competing', 'refund-verify', 'refund-allocation', 'close-deposit', 'close-allocation', 'close-refund'], true)) throw new RuntimeException('Invalid race mode.');
+if (!in_array($mode, ['competing', 'duplicate', 'deposit-bank', 'deposit-cash', 'refund-competing', 'refund-duplicate', 'refund-key-conflict', 'refund-verify', 'refund-allocation', 'close-deposit', 'close-allocation', 'close-refund'], true)) throw new RuntimeException('Invalid race mode.');
 $isDeposit = in_array($mode, ['deposit-bank', 'deposit-cash'], true);
 $isRefund = str_starts_with($mode, 'refund-') || $mode === 'close-refund';
 $isClose = str_starts_with($mode, 'close-');
@@ -266,13 +268,17 @@ try {
         $allocationJournals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
             ->where('source_type', 'no_show_deposit_allocation');
         $mixed = $mode === 'refund-allocation';
-        $competing = $mode === 'refund-competing';
+        $competing = in_array($mode, ['refund-competing', 'refund-duplicate', 'refund-key-conflict'], true);
+        $expectedStatuses = $mixed ? [0, 0] : ($mode === 'refund-duplicate' ? [0, 8] : [0, 9]);
+        $requestedAmount = (int) (clone $requests)->sum('amount_minor');
+        $validAmount = $mode === 'refund-key-conflict' ? in_array($requestedAmount, [60000, 70000], true)
+            : $requestedAmount === ($competing ? 70000 : 100000);
         $expectedBalances = [
             'depositLiabilityMinor' => $competing ? 300000 : ($mixed ? 0 : 200000),
             'receivableMinor' => $mixed ? 0 : 200000,
         ];
-        if ($statuses !== ($mixed ? [0, 0] : [0, 9]) || (clone $requests)->count() !== 1
-            || (int) (clone $requests)->sum('amount_minor') !== ($competing ? 70000 : 100000)
+        if ($statuses !== $expectedStatuses || (clone $requests)->count() !== 1
+            || !$validAmount
             || (clone $verified)->count() !== ($competing ? 0 : 1)
             || (int) (clone $verified)->sum('amount_minor') !== ($competing ? 0 : 100000)
             || $refundJournals->count() !== ($competing ? 0 : 1)
