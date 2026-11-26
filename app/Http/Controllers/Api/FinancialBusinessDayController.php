@@ -20,7 +20,7 @@ use Illuminate\Validation\ValidationException;
  */
 final class FinancialBusinessDayController
 {
-    public function show(Hotel $hotel): JsonResponse
+    public function show(Hotel $hotel, Request $request): JsonResponse
     {
         $clock = DB::table('financial_business_clocks')
             ->where('hotel_id', $hotel->id)->first();
@@ -167,7 +167,17 @@ final class FinancialBusinessDayController
             }
         }
 
+        $noShowIntegrity = null;
+        if (config('financial_accounting.enable_no_show_closing_integrity', false)) {
+            $noShowIntegrity = app(\App\Services\Finance\NoShowClosingIntegrityService::class)
+                ->report($hotel, $date, (int) $request->user()->id);
+            if (!$noShowIntegrity['integrityValid']) {
+                $blockers[] = \App\Services\Finance\NoShowClosingIntegrityService::blockerMessage($noShowIntegrity);
+            }
+        }
+
         return response()->json(['data' => [
+            'noShowIntegrity' => $noShowIntegrity,
             'businessDate' => $date,
             'nextBusinessDate' => $nextDate,
             'status' => $clock->status,
