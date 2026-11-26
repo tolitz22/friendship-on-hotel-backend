@@ -115,27 +115,55 @@ final class StaffMessageController
         $query=DB::table('staff_messages as m')->leftJoin('users as u','u.id','=','m.sender_id')->leftJoin('staff_messages as reply',function ($join) { $join->on('reply.id','=','m.reply_to_id')->on('reply.conversation_id','=','m.conversation_id'); })->where('m.conversation_id',$conversation);
         if (!empty($data['before'])) $query->where('m.id','<',$data['before']);
         if (!empty($data['q'])) $query->where('m.body','like','%'.$data['q'].'%');
-        return response()->json(['data'=>$query->orderByDesc('m.id')->limit(100)->get(['m.*','u.name as sender_name','reply.body as reply_body'])->reverse()->values()]);
+        $rows=$query->orderByDesc('m.id')->limit(100)->get(['m.*','u.name as sender_name','reply.body as reply_body'])->reverse()->values();
+        $attachments=DB::table('staff_message_attachments')->whereIn('message_id',$rows->pluck('id'))->get(['id','message_id','filename','mime','size'])->keyBy('message_id');
+        $rows->each(fn ($row)=>$row->attachment=$attachments->get($row->id));
+        return response()->json(['data'=>$rows]);
     }
 
     public function send(Request $request, Hotel $hotel, int $conversation): JsonResponse
     {
         $this->access($request,$hotel,$conversation);
-        $data=$request->validate(['body'=>['required','string','max:4000'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1']]);
-        $body=trim($data['body']); abort_if($body==='',422,'Enter a message.');
+        $data=$request->validate(['body'=>['nullable','string','max:4000'],'attachment'=>['nullable','array'],'attachment.filename'=>['required_with:attachment','string','max:200'],'attachment.content'=>['required_with:attachment','string','max:2796204'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1']]);
+        $body=trim($data['body']??'');
+        $attachment=null;
+        if (!empty($data['attachment'])) {
+            $file=$data['attachment'];
+            $bytes=base64_decode($file['content'],true);
+            abort_if($bytes===false || strlen($bytes)===0 || strlen($bytes)>2097152,422,'File must be at most 2 MB.');
+            $mime=(new \finfo(FILEINFO_MIME_TYPE))->buffer($bytes);
+            $extensions=['image/jpeg'=>'jpg','image/png'=>'png','image/webp'=>'webp','application/pdf'=>'pdf'];
+            abort_unless(isset($extensions[$mime]),422,'Only JPEG, PNG, WebP and PDF files are allowed.');
+            $name=preg_replace('/[^a-zA-Z0-9 _.-]/','_',pathinfo(basename($file['filename']),PATHINFO_FILENAME));
+            $attachment=['filename'=>substr($name?:'attachment',0,180).'.'.$extensions[$mime],'mime'=>$mime,'size'=>strlen($bytes),'sha256'=>hash('sha256',$bytes),'encoded_content'=>base64_encode($bytes)];
+        }
+        abort_if($body==='' && !$attachment,422,'Enter a message or attach a file.');
         $uid=$request->user()->id;
-        $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid) {
+        $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment) {
             DB::table('staff_conversations')->where('id',$conversation)->lockForUpdate()->first();
             $this->access($request,$hotel,$conversation);
             $reply=$data['reply_to_id']??null;
             abort_if($reply!==null && !DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$reply)->exists(),422,'Reply must reference a message in this conversation.');
             $query=DB::table('staff_messages')->where('conversation_id',$conversation)->where('sender_id',$uid)->where('client_id',$data['client_id']);
-            if ($existing=$query->first()) {abort_if($existing->body!==$body || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
+            if ($existing=$query->first()) { $prior=DB::table('staff_message_attachments')->where('message_id',$existing->id)->first(); abort_if(($prior->sha256??null)!==($attachment['sha256']??null) || ($prior->filename??null)!==($attachment['filename']??null) || $existing->body!==$body || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
             $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'reply_to_id'=>$reply,'created_at'=>now(),'updated_at'=>now()]);
+            if ($attachment) DB::table('staff_message_attachments')->insert(['message_id'=>$id,...$attachment]);
             DB::table('staff_conversations')->where('id',$conversation)->update(['updated_at'=>now()]);
             return DB::table('staff_messages')->where('id',$id)->first();
         },3);
         return response()->json(['data'=>$message]);
+    }
+
+    public function download(Request $request, Hotel $hotel, int $conversation, int $attachment): \Illuminate\Http\Response
+    {
+        $this->access($request,$hotel,$conversation);
+        $file=DB::table('staff_message_attachments as a')->join('staff_messages as m','m.id','=','a.message_id')->where('m.conversation_id',$conversation)->where('a.id',$attachment)->first(['a.*']);
+        abort_unless($file,404);
+        return response(base64_decode($file->encoded_content,true),200,[
+            'Content-Type'=>'application/octet-stream',
+            'Content-Disposition'=>'attachment; filename="'.$file->filename.'"',
+            'X-Content-Type-Options'=>'nosniff','Cache-Control'=>'private, no-store',
+        ]);
     }
 
     public function read(Request $request, Hotel $hotel, int $conversation): JsonResponse
