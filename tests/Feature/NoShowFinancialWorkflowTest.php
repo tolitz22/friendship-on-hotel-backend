@@ -1187,3 +1187,66 @@ it('enforces staged closing integrity and preserves the clock on failure', funct
     expect(DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->value('business_date'))->toBe('2026-11-22')
         ->and(DB::table('financial_day_closes')->where('hotel_id', $hotel->id)->where('business_date', '2026-11-22')->exists())->toBeFalse();
 })->with(['clean', 'missing deposit', 'duplicate', 'orphan']);
+
+
+it('completes the administrator no-show settlement workflow through the new API surfaces', function (): void {
+    [$hotel, $author, $reviewer, $booking, $folio, $base, $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $originalEntries = DB::table('folio_entries')->where('folio_id', $folio)->orderBy('id')->get()->all();
+    $review = noShowApply($this, $path);
+    noShowApprove($this, $path, $review)->assertConflict();
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_allocation_posting' => true,
+        'financial_accounting.enable_no_show_refund_posting' => true,
+        'financial_accounting.enable_no_show_closing_integrity' => true,
+    ]);
+    $allocations = $path.'/no-show-allocations';
+    $this->getJson($allocations)->assertOk()->assertJsonPath('data.payments.0.maximumMinor', 0);
+    $this->getJson($base.'/finance/business-day')->assertOk()->assertJsonPath('data.noShowIntegrity.integrityValid', false);
+    $this->postJson($path.'/no-show-deposits/'.$payment.'/recognize', ['acknowledged' => true])->assertSuccessful();
+    $this->getJson($allocations)->assertOk()->assertJsonPath('data.payments.0.maximumMinor', 200000);
+    $input = ['requestKey' => 'qa-complete-allocation-001', 'payerKind' => 'guest',
+        'payerReference' => 'Demo Guest', 'amountMinor' => 120000, 'acknowledged' => true];
+    $endpoint = $allocations.'/'.$payment;
+    $this->postJson($endpoint, array_replace($input, ['amountMinor' => 200001]))->assertConflict();
+    $this->postJson($endpoint, $input)->assertCreated()->assertJsonPath('data.replayed', false);
+    $this->postJson($endpoint, $input)->assertOk()->assertJsonPath('data.replayed', true);
+    $this->getJson($allocations)->assertOk()->assertJsonPath('data.remainingFeeMinor', 80000)
+        ->assertJsonPath('data.payments.0.maximumMinor', 80000);
+    $this->postJson($endpoint, array_replace($input, ['requestKey' => 'qa-complete-allocation-002', 'amountMinor' => 80000]))->assertCreated();
+    $this->getJson($path.'/no-show-refunds')->assertOk()->assertJsonPath('data.maximumRefundMinor', 100000);
+    noShowSignIn($author);
+    $refundInput = ['requestKey' => 'qa-complete-refund-001', 'paymentRecordId' => $payment,
+        'amountMinor' => 100000, 'reason' => 'Return verified excess deposit after fee allocation.'];
+    $refund = $this->postJson($path.'/refund-requests', $refundInput)->assertCreated()->json('data.id');
+    $this->postJson($path.'/refund-requests', $refundInput)->assertOk()->assertJsonPath('data.replayed', true);
+    $approval = ['decision' => 'approve', 'note' => 'Independent review of excess deposit.'];
+    $this->postJson($path.'/refund-requests/'.$refund.'/review', $approval)->assertForbidden();
+    noShowSignIn($reviewer);
+    $this->postJson($path.'/refund-requests/'.$refund.'/review', $approval)->assertOk();
+    $evidence = $this->postJson($path.'/refund-requests/'.$refund.'/disbursement-evidence', [
+        'externalReference' => 'QA-COMPLETE-REFUND-001',
+    ])->assertCreated()->assertJsonPath('data.fundsSentByPms', false)->json('data.id');
+    $verify = ['decision' => 'verify', 'note' => 'Verified against independent synthetic bank evidence.'];
+    $this->postJson($path.'/refund-disbursements/'.$evidence.'/review', $verify)->assertUnprocessable();
+    noShowSignIn($author);
+    $this->postJson($path.'/refund-disbursements/'.$evidence.'/review', $verify)->assertOk();
+    $this->getJson($path.'/no-show-ledger-reconciliation')->assertOk()
+        ->assertJsonPath('data.reconciled', true)->assertJsonPath('data.settled', true)
+        ->assertJsonPath('data.expectedBalances.receivableMinor', 0)
+        ->assertJsonPath('data.expectedBalances.depositLiabilityMinor', 0);
+    $this->getJson($path.'/no-show-refunds')->assertOk()->assertJsonPath('data.maximumRefundMinor', 0);
+    $this->getJson($base.'/finance/business-day')->assertOk()->assertJsonPath('data.noShowIntegrity.integrityValid', true);
+    expect(DB::table('folio_entries')->where('folio_id', $folio)->orderBy('id')->get()->all())->toEqual($originalEntries);
+    foreach (['guest_deposit_receipt' => 1, 'no_show_fee' => 1, 'no_show_deposit_allocation' => 2, 'no_show_deposit_refund' => 1] as $type => $count) {
+        expect(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('source_type', $type)->count())->toBe($count);
+    }
+    noShowSignIn(noShowActor($hotel, 'front_desk'));
+    $this->getJson($allocations)->assertForbidden();
+    $this->getJson($path.'/no-show-refunds')->assertForbidden();
+});
