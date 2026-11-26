@@ -1371,3 +1371,60 @@ it('rejects direct financial API access after role or property access is lost', 
     }
     expect($snapshot())->toEqual($before);
 })->with(['reception', 'revoked membership', 'inactive user', 'foreign administrator']);
+
+
+it('isolates extended no-show activation and daily closing to the configured pilot hotel', function (): void {
+    [$hotel, $author, $reviewer, $booking, $folio, $base, $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_allocation_posting' => true,
+        'financial_accounting.enable_no_show_refund_posting' => true,
+        'financial_accounting.enable_no_show_room_correction_review' => true,
+        'financial_accounting.enable_no_show_room_correction_posting' => true,
+        'financial_accounting.enable_no_show_fee_correction_review' => true,
+        'financial_accounting.enable_no_show_fee_correction_posting' => true,
+        'financial_accounting.enable_no_show_closing_integrity' => true,
+    ]);
+    $other = Hotel::create(['name' => 'Non-pilot financial property', 'currency' => 'PHP', 'timezone' => 'Asia/Manila']);
+    $otherAdmin = noShowActor($other, 'admin');
+    $otherBase = '/api/v1/hotels/'.$other->id;
+    noShowSignIn($otherAdmin);
+    $this->postJson($otherBase.'/finance/business-day/initialize', ['businessDate' => '2026-11-22'])->assertCreated();
+    $this->getJson($otherBase.'/finance/business-day')->assertOk()->assertJsonPath('data.noShowIntegrity', null);
+    $close = app(\App\Services\Finance\FinancialBusinessDayCloseService::class)->close($other->id, '2026-11-22', $otherAdmin->id);
+    expect($close['next_business_date'])->toBe('2026-11-23')
+        ->and(array_key_exists('no_show_integrity', $close['snapshot']))->toBeFalse();
+    noShowSignIn($reviewer);
+    $this->getJson($base.'/finance/business-day')->assertOk()->assertJsonPath('data.noShowIntegrity.integrityValid', false);
+    $this->getJson($path.'/no-show-deposits')->assertOk()->assertJsonPath('data.postingEnabled', true);
+    $this->getJson($path.'/no-show-corrections')->assertOk()->assertJsonPath('data.feeReviewEnabled', true);
+    $this->getJson($path.'/no-show-corrections')->assertOk()->assertJsonPath('data.feePostingEnabled', true);
+    expect(DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->value('business_date'))->toBe('2026-11-22');
+    $before = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->orderBy('id')->get()->all();
+    // Simulate removing a previously enrolled hotel while global switches remain on.
+    config()->set('booking.no_show_adjustments_hotel_ids', (string) $other->id);
+    $this->getJson($path.'/no-show-deposits')->assertOk()->assertJsonPath('data.postingEnabled', false);
+    $this->getJson($path.'/no-show-allocations')->assertOk()->assertJsonPath('data.postingEnabled', false);
+    $this->getJson($path.'/no-show-refunds')->assertOk()->assertJsonPath('data.workflowEnabled', false)->assertJsonPath('data.postingEnabled', false);
+    $this->getJson($path.'/no-show-corrections')->assertOk()
+        ->assertJsonPath('data.roomReviewEnabled', false)->assertJsonPath('data.roomPostingEnabled', false)
+        ->assertJsonPath('data.feeReviewEnabled', false)->assertJsonPath('data.feePostingEnabled', false);
+    $this->getJson($base.'/finance/business-day')->assertOk()->assertJsonPath('data.noShowIntegrity', null);
+    $this->postJson($path.'/no-show-deposits/'.$payment.'/recognize', ['acknowledged' => true])->assertConflict();
+    $this->postJson($path.'/no-show-allocations/'.$payment, [
+        'requestKey' => 'qa-excluded-allocation', 'amountMinor' => 10000, 'payerKind' => 'guest',
+        'payerReference' => 'Demo guest', 'acknowledged' => true,
+    ])->assertConflict();
+    $this->postJson($path.'/no-show-corrections/fee', [
+        'replacementMinor' => 100000, 'reason' => 'Synthetic excluded property correction.',
+    ])->assertConflict();
+    expect(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->orderBy('id')->get()->all())->toEqual($before)
+        ->and(DB::table('folio_settlement_allocations')->where('folio_id', $folio)->count())->toBe(0)
+        ->and(DB::table('no_show_fee_correction_proposals')->where('hotel_id', $hotel->id)->count())->toBe(0);
+});
