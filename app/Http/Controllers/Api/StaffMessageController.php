@@ -50,6 +50,7 @@ final class StaffMessageController
     private function access(Request $request, Hotel $hotel, int $conversation): void
     {
         $keys=$this->channelKeys($hotel,(int)$request->user()->id);
+        abort_if(!$keys,404);
         abort_unless(DB::table('staff_conversations as c')
             ->join('staff_conversation_members as m','m.conversation_id','=','c.id')
             ->where('c.hotel_id',$hotel->id)->where('c.id',$conversation)
@@ -149,6 +150,7 @@ final class StaffMessageController
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
         $uid=$request->user()->id;
+        abort_unless($this->active($hotel)->where('u.id',$uid)->exists(),404);
         $this->ensureChannels($hotel,(int)$uid);
         $keys=$this->channelKeys($hotel,(int)$uid);
         $rows=DB::table('staff_conversations as c')->join('staff_conversation_members as m','m.conversation_id','=','c.id')
@@ -157,7 +159,7 @@ final class StaffMessageController
             ->orderByDesc('c.updated_at')->orderByDesc('c.id')->get(['c.*','m.last_read_message_id']);
         $rows->each(function ($c) use ($uid,$hotel,$request): void {
             $c->members=DB::table('staff_conversation_members as m')->join('users as u','u.id','=','m.user_id')
-                ->where('m.conversation_id',$c->id)->get(['u.id','u.name','m.last_read_message_id']);
+                ->where('m.conversation_id',$c->id)->whereIn('u.id',$this->active($hotel)->select('u.id'))->get(['u.id','u.name','m.last_read_message_id']);
             if ($c->kind==='channel') {
                 $eligible=$this->active($hotel);
                 $role=substr($c->direct_key,8);
@@ -175,7 +177,7 @@ final class StaffMessageController
     public function create(Request $request, Hotel $hotel): JsonResponse
     {
         $data=$request->validate(['member_ids'=>['required','array','min:1','max:50'],
-            'member_ids.*'=>['required','integer','distinct'],'title'=>['nullable','string','max:120']]);
+            'member_ids.*'=>['required','integer','min:1','distinct'],'title'=>['nullable','string','max:120']]);
         $uid=(int)$request->user()->id;
         $ids=array_values(array_unique(array_map('intval',$data['member_ids'])));
         abort_if(in_array($uid,$ids,true),422,'Select other staff members.');
@@ -202,7 +204,7 @@ final class StaffMessageController
         $data=$request->validate(['before'=>['nullable','integer','min:1'],'q'=>['nullable','string','max:120']]);
         $query=DB::table('staff_messages as m')->leftJoin('users as u','u.id','=','m.sender_id')->leftJoin('staff_messages as reply',function ($join) { $join->on('reply.id','=','m.reply_to_id')->on('reply.conversation_id','=','m.conversation_id'); })->where('m.conversation_id',$conversation);
         if (!empty($data['before'])) $query->where('m.id','<',$data['before']);
-        if (!empty($data['q'])) $query->where('m.body','like','%'.$data['q'].'%');
+        if (isset($data['q']) && trim($data['q'])!=='') $query->whereRaw("LOWER(m.body) LIKE ? ESCAPE '!'",['%'.str_replace(['!','%','_'],['!!','!%','!_'],mb_strtolower(trim($data['q']))).'%']);
         $rows=$query->orderByDesc('m.id')->limit(100)->get(['m.*','u.name as sender_name','reply.body as reply_body'])->reverse()->values();
         $attachments=DB::table('staff_message_attachments')->whereIn('message_id',$rows->pluck('id'))->get(['id','message_id','filename','mime','size'])->keyBy('message_id');
         $rows->each(function ($row) use ($attachments,$request,$hotel): void {
@@ -216,7 +218,7 @@ final class StaffMessageController
     public function send(Request $request, Hotel $hotel, int $conversation): JsonResponse
     {
         $this->access($request,$hotel,$conversation);
-        $data=$request->validate(['body'=>['nullable','string','max:4000'],'attachment'=>['nullable','array'],'attachment.filename'=>['required_with:attachment','string','max:200'],'attachment.content'=>['required_with:attachment','string','max:2796204'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1'],'record_type'=>['nullable','required_with:record_id','in:room,booking,housekeeping,maintenance'],'record_id'=>['nullable','required_with:record_type','integer','min:1'],'is_announcement'=>['sometimes','boolean'],'handover'=>['nullable','array:incoming_shift,outstanding,reminders'],'handover.incoming_shift'=>['required_with:handover','string','max:80'],'handover.outstanding'=>['required_with:handover','string','max:2000'],'handover.reminders'=>['nullable','string','max:1000']]);
+        $data=$request->validate(['body'=>['nullable','string','max:4000'],'attachment'=>['nullable','array:filename,content','required_array_keys:filename,content'],'attachment.filename'=>['required_with:attachment','string','max:200'],'attachment.content'=>['required_with:attachment','string','max:2796204'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1'],'record_type'=>['nullable','required_with:record_id','in:room,booking,housekeeping,maintenance'],'record_id'=>['nullable','required_with:record_type','integer','min:1'],'is_announcement'=>['sometimes','boolean'],'handover'=>['nullable','array:incoming_shift,outstanding,reminders','required_array_keys:incoming_shift,outstanding'],'handover.incoming_shift'=>['required_with:handover','string','max:80'],'handover.outstanding'=>['required_with:handover','string','max:2000'],'handover.reminders'=>['nullable','string','max:1000']]);
         $body=trim($data['body']??'');
         $attachment=null;
         if (!empty($data['attachment'])) {
@@ -249,7 +251,7 @@ final class StaffMessageController
         abort_if($body==='' && !$attachment && !$recordType,422,'Enter a message, attach a file or share a record.');
         $uid=$request->user()->id;
         $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment,$recordType,$recordId,$announcement,$handover) {
-            DB::table('staff_conversations')->where('id',$conversation)->lockForUpdate()->first();
+            DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('id',$conversation)->lockForUpdate()->first();
             $this->access($request,$hotel,$conversation);
             $channel=DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('id',$conversation)->first();
             if ($announcement) {
@@ -284,7 +286,9 @@ final class StaffMessageController
         $this->access($request,$hotel,$conversation);
         $file=DB::table('staff_message_attachments as a')->join('staff_messages as m','m.id','=','a.message_id')->where('m.conversation_id',$conversation)->where('a.id',$attachment)->first(['a.*']);
         abort_unless($file,404);
-        return response(base64_decode($file->encoded_content,true),200,[
+        $bytes=base64_decode($file->encoded_content,true);
+        abort_unless($bytes!==false && strlen($bytes)===(int)$file->size && hash_equals($file->sha256,hash('sha256',$bytes)),409,'Attachment integrity check failed.');
+        return response($bytes,200,[
             'Content-Type'=>'application/octet-stream',
             'Content-Disposition'=>'attachment; filename="'.$file->filename.'"',
             'X-Content-Type-Options'=>'nosniff','Cache-Control'=>'private, no-store',
