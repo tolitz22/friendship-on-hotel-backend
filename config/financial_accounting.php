@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Historical clearing reclassification requires a reconciled opening import and separate acceptance.
+    'enable_historical_guest_deposit_posting' => (bool) env('FINANCE_ENABLE_HISTORICAL_GUEST_DEPOSIT_POSTING', false),
     // Staged no-show bank deposit journals; keep off until reconciliation and acceptance.
     'enable_guest_deposit_posting' => (bool) env('FINANCE_ENABLE_GUEST_DEPOSIT_POSTING', false),
     // Enable only after reimbursement acceptance and finance sign-off.
