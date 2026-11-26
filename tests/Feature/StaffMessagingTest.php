@@ -1,0 +1,75 @@
+<?php
+
+use App\Models\Hotel;
+use App\Models\User;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
+use Laravel\Sanctum\Sanctum;
+
+beforeEach(function () {
+    config(['staff_messaging.realtime.enabled' => false]);
+    $this->hotel = Hotel::create(['name'=>'Messaging QA','timezone'=>'Asia/Manila','currency'=>'PHP']);
+    $this->otherHotel = Hotel::create(['name'=>'Other QA','timezone'=>'Asia/Manila','currency'=>'PHP']);
+    $staff = function (Hotel $hotel, string $role): User {
+        $user = User::create(['name'=>$role,'email'=>Str::uuid().'@example.test','password'=>'test-password','is_active'=>true,'must_change_password'=>false]);
+        $hotel->memberships()->create(['user_id'=>$user->id,'role'=>$role,'is_active'=>true]);
+        return $user;
+    };
+    $this->manager = $staff($this->hotel,'admin');
+    $this->reception = $staff($this->hotel,'front_desk');
+    $this->cleaner = $staff($this->hotel,'housekeeping');
+    $this->outsider = $staff($this->otherHotel,'admin');
+    $this->base = '/api/v1/hotels/'.$this->hotel->id.'/staff-messaging';
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+});
+
+it('isolates directory and conversation creation by hotel', function () {
+    $ids = collect($this->getJson($this->base.'/directory')->assertOk()->json('data'))->pluck('id')->map(fn ($id)=>(int)$id);
+    expect($ids->contains($this->reception->id))->toBeTrue();
+    expect($ids->contains($this->outsider->id))->toBeFalse();
+    $this->postJson($this->base.'/conversations',['member_ids'=>[$this->outsider->id]])->assertStatus(422);
+    Sanctum::actingAs($this->outsider,['hotel:read','hotel:write']);
+    $this->getJson($this->base.'/conversations')->assertNotFound();
+});
+
+it('reuses direct conversations and prevents duplicate messages and unauthorized access', function () {
+    $payload=['member_ids'=>[$this->reception->id]];
+    $id=$this->postJson($this->base.'/conversations',$payload)->assertOk()->json('data.id');
+    $this->postJson($this->base.'/conversations',$payload)->assertOk()->assertJsonPath('data.id',$id);
+    $message=['body'=>'QA message','client_id'=>(string)Str::uuid()];
+    $url=$this->base.'/conversations/'.$id;
+    $mid=$this->postJson($url.'/messages',$message)->assertOk()->json('data.id');
+    $this->postJson($url.'/messages',$message)->assertOk()->assertJsonPath('data.id',$mid);
+    $this->postJson($url.'/messages',array_replace($message,['body'=>'Changed']))->assertStatus(409);
+    expect(DB::table('staff_messages')->where('conversation_id',$id)->count())->toBe(1);
+    Sanctum::actingAs($this->cleaner,['hotel:read']);
+    $this->getJson($url)->assertNotFound();
+    $this->postJson($url.'/messages',['body'=>'Unauthorized','client_id'=>(string)Str::uuid()])->assertNotFound();
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($url)->assertOk()->assertJsonPath('data.0.body','QA message');
+    $this->postJson($url.'/read',['message_id'=>$mid])->assertOk();
+    expect((int)DB::table('staff_conversation_members')->where('conversation_id',$id)->where('user_id',$this->reception->id)->value('last_read_message_id'))->toBe((int)$mid);
+});
+
+it('revokes department access immediately after a role change', function () {
+    Sanctum::actingAs($this->cleaner,['hotel:read']);
+    $channels=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'));
+    $id=$channels->firstWhere('title','Housekeeping')['id'];
+    expect($channels->pluck('title')->contains('Maintenance'))->toBeFalse();
+    $this->getJson($this->base.'/conversations/'.$id)->assertOk();
+    $this->cleaner->memberships()->where('hotel_id',$this->hotel->id)->update(['role'=>'maintenance']);
+    $this->getJson($this->base.'/conversations/'.$id)->assertNotFound();
+    $channels=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'));
+    expect($channels->pluck('title')->contains('Housekeeping'))->toBeFalse();
+    expect($channels->pluck('title')->contains('Maintenance'))->toBeTrue();
+});
+
+it('restricts realtime subscriptions to the authenticated user and hotel', function () {
+    config(['staff_messaging.realtime.enabled'=>true,'staff_messaging.realtime.app_id'=>'test-app','staff_messaging.realtime.key'=>'test-key','staff_messaging.realtime.secret'=>'test-secret']);
+    $channel='private-staff.hotel.'.$this->hotel->id.'.user.'.$this->manager->id;
+    $socket='123.456';
+    $this->postJson($this->base.'/realtime/auth',['socket_id'=>$socket,'channel_name'=>$channel])->assertOk()
+        ->assertJsonPath('auth','test-key:'.hash_hmac('sha256',$socket.':'.$channel,'test-secret'));
+    $this->postJson($this->base.'/realtime/auth',['socket_id'=>$socket,'channel_name'=>'private-staff.hotel.'.$this->hotel->id.'.user.'.$this->cleaner->id])->assertForbidden();
+    $this->postJson($this->base.'/realtime/auth',['socket_id'=>'invalid','channel_name'=>$channel])->assertStatus(422);
+});
