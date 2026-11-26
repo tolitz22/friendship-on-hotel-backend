@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Review only; no room-night reversal posting is activated by this flag.
+    'enable_no_show_room_correction_review' => (bool) env('FINANCE_ENABLE_NO_SHOW_ROOM_CORRECTION_REVIEW', false),
     // External no-show refund journals require separate financial acceptance.
     'enable_no_show_refund_posting' => (bool) env('FINANCE_ENABLE_NO_SHOW_REFUND_POSTING', false),
     // No-show deposit allocation journals require staged end-to-end acceptance.
