@@ -1064,13 +1064,22 @@ it('corrects cleared no-show fees atomically and preserves financial evidence', 
             DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['business_date' => '2026-11-23']);
             expect(fn () => $apply($reviewer->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
         } elseif ($scenario === 'rollback') {
-            // Force a failure at the final validation boundary, after all three writes.
-            $validator = Mockery::mock(\App\Services\Finance\NoShowEffectiveFeeClearance::class);
-            $validator->shouldReceive('appliedProposal')->andReturnNull();
-            $validator->shouldReceive('resolve')->once()->andReturnNull();
-            app()->instance(\App\Services\Finance\NoShowEffectiveFeeClearance::class, $validator);
-            expect(fn () => $apply($reviewer->id))->toThrow(\Symfony\Component\HttpKernel\Exception\HttpException::class);
-            app()->forgetInstance(\App\Services\Finance\NoShowEffectiveFeeClearance::class);
+            // Inject a failure immediately after the credit insert, without mocking
+            // final service classes or relying on database-specific triggers.
+            $armed = true;
+            $injected = false;
+            DB::listen(function (\Illuminate\Database\Events\QueryExecuted $event) use (&$armed, &$injected): void {
+                if ($armed && preg_match('/^insert\s+into\s+["`]?folio_adjustments["`]?\s/i', ltrim($event->sql))) {
+                    $injected = true;
+                    throw new \RuntimeException('Synthetic correction rollback probe.');
+                }
+            });
+            try {
+                expect(fn () => $apply($reviewer->id))->toThrow(\RuntimeException::class, 'Synthetic correction rollback probe.');
+            } finally {
+                $armed = false;
+            }
+            expect($injected)->toBeTrue();
         } else {
             $result = $apply($reviewer->id);
             expect($result['replayed'])->toBeFalse()
