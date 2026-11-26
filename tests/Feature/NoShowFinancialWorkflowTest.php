@@ -155,7 +155,13 @@ it('preserves snapshotted policy and original folio while reconciling deposits',
     noShowApprove($this, $path, $id)->assertConflict();
     $this->getJson($base.'/finance/business-day')->assertOk()->assertJsonPath('data.unresolvedNoShowCount', 0);
     $result = app(NoShowRefundEligibility::class)->review($hotel, $booking);
-    expect($result['remainingCollectionMinor'])->toBe($due)
+    expect($result['reconciliationValid'])->toBeTrue()
+        ->and($result['netVerifiedFundsMinor'])->toBe($deposit)
+        ->and($result['unallocatedVerifiedFundsMinor'])->toBe($deposit)
+        ->and($result['unallocatedFeeMinor'])->toBe($penalty)
+        ->and($result['pendingRefundsMinor'])->toBe(0)
+        ->and($result['verifiedRefundsMinor'])->toBe(0)
+        ->and($result['remainingCollectionMinor'])->toBe($due)
         ->and($result['maximumRefundRequestMinor'])->toBe($refundable)
         ->and(DB::table('folio_entries')->where('folio_id', $folio)->orderBy('id')->get()->all())->toEqual($before)
         ->and(DB::table('financial_day_closes')->where('hotel_id', $hotel->id)->count())->toBe(1);
@@ -260,7 +266,16 @@ it('caps multiple refunds and rechecks evidence through independent disbursement
     $this->postJson($verifyPath, $verify)->assertUnprocessable();
     noShowSignIn($author);
     $this->postJson($verifyPath, $verify)->assertOk()->assertJsonPath('data.fundsSentByPms', false);
-    expect(app(NoShowRefundEligibility::class)->review($hotel, $booking)['maximumRefundRequestMinor'])->toBe(0);
+    $afterRefund = app(NoShowRefundEligibility::class)->review($hotel, $booking);
+    expect($afterRefund['maximumRefundRequestMinor'])->toBe(0)
+        ->and($afterRefund['verifiedRefundsMinor'])->toBe(100000)
+        ->and($afterRefund['pendingRefundsMinor'])->toBe(0)
+        ->and($afterRefund['netVerifiedFundsMinor'])->toBe(200000)
+        ->and($afterRefund['unallocatedVerifiedFundsMinor'])->toBe(200000);
+    $replayedReview = app(NoShowRefundEligibility::class)->review($hotel, $booking, (int) $refund);
+    expect($replayedReview['maximumRefundRequestMinor'])->toBe(0)
+        ->and($replayedReview['reservedRefundsMinor'])->toBe(100000)
+        ->and($replayedReview['settled'])->toBeFalse();
 
     $entry = DB::table('folio_entries')->where('folio_id', $folio)->value('id');
     $allocation = $path.'/payment-records/'.$payment.'/allocations';
@@ -270,7 +285,11 @@ it('caps multiple refunds and rechecks evidence through independent disbursement
     $this->postJson($path.'/payment-records/'.$otherPayment.'/allocations', array_replace($input, [
         'requestKey' => 'no-show-allocation-second', 'amountMinor' => 120000,
     ]))->assertSuccessful();
-    expect(app(NoShowRefundEligibility::class)->review($hotel, $booking)['settled'])->toBeTrue();
+    $settled = app(NoShowRefundEligibility::class)->review($hotel, $booking);
+    expect($settled['settled'])->toBeTrue()
+        ->and($settled['reconciliationValid'])->toBeTrue()
+        ->and($settled['unallocatedFeeMinor'])->toBe(0)
+        ->and($settled['unallocatedVerifiedFundsMinor'])->toBe(0);
 });
 
 it('rolls back the entire review on a database conflict after the reversal insert', function (): void {
