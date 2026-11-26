@@ -423,3 +423,99 @@ it('rejects unsafe staged deposit postings without creating a journal', function
     'historical' => ['historical', 409],
     'closed date' => ['closed date', 422],
 ]);
+
+it('documents a historical deposit with independent approval and no journal posting', function (): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    config()->set('financial_accounting.enable_guest_deposit_posting', true);
+    $preview = app(\App\Services\Finance\HistoricalGuestDepositReviewService::class)->review($hotel, $booking, $author->id);
+    expect($preview['canPost'])->toBeFalse()
+        ->and($preview['openingBalanceMinor'])->toBeNull()
+        ->and($preview['historicalPayments'][0]['reviewStatus'])->toBe('opening_balance_review_required');
+    $service = app(\App\Services\Finance\HistoricalGuestDepositDecisionService::class);
+    $before = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->count();
+    $id = $service->propose($hotel, $booking, $payment, $author->id, 'OPENING-QA-001', 'Matched original bank receipt to opening balance evidence.');
+    $approval = $service->approve($hotel, $id, $reviewer->id, 'Independently checked the opening balance evidence.');
+    $decision = DB::table('historical_guest_deposit_decisions')->find($id);
+    expect((int) $decision->amount_minor)->toBe(300000)
+        ->and($decision->snapshot_sha256)->toBe(hash('sha256', $decision->snapshot))
+        ->and((int) DB::table('historical_guest_deposit_approvals')->where('id', $approval)->value('reviewed_by'))->toBe((int) $reviewer->id)
+        ->and(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->count())->toBe($before);
+});
+
+it('rejects unsafe historical deposit decisions without posting money', function (string $scenario, int $status): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    config()->set('financial_accounting.enable_guest_deposit_posting', true);
+    $service = app(\App\Services\Finance\HistoricalGuestDepositDecisionService::class);
+    $propose = fn (int $actor) => $service->propose($hotel, $booking, $payment, $actor,
+        'OPENING-QA-002', 'Matched original bank receipt to opening balance evidence.');
+    $reason = 'Independently checked the opening balance evidence.';
+    $before = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->count();
+    $approvedCount = 0;
+    try {
+        switch ($scenario) {
+            case 'disabled':
+                config()->set('financial_accounting.enable_guest_deposit_posting', false);
+                $propose($author->id);
+                break;
+            case 'unauthorized':
+                $propose(noShowActor($hotel, 'front_desk')->id);
+                break;
+            case 'cross hotel':
+                $other = Hotel::create(['name' => 'Other historical deposit property']);
+                $propose(noShowActor($other, 'admin')->id);
+                break;
+            default:
+                $id = $propose($author->id);
+                switch ($scenario) {
+                    case 'duplicate proposal':
+                        $propose($author->id);
+                        break;
+                    case 'self approval':
+                        $service->approve($hotel, $id, $author->id, $reason);
+                        break;
+                    case 'duplicate approval':
+                        $service->approve($hotel, $id, $reviewer->id, $reason);
+                        $approvedCount = 1;
+                        $service->approve($hotel, $id, $reviewer->id, $reason);
+                        break;
+                    case 'changed evidence':
+                        DB::table('folio_settlement_verifications')->where('payment_record_id', $payment)
+                            ->update(['evidence_reference' => 'BANK-QA-CHANGED']);
+                        $service->approve($hotel, $id, $reviewer->id, $reason);
+                        break;
+                    case 'changed amount':
+                        DB::table('folio_payment_records')->where('id', $payment)->update(['amount_minor' => 200000]);
+                        $service->approve($hotel, $id, $reviewer->id, $reason);
+                        break;
+                    case 'closed date':
+                        DB::table('financial_day_closes')->insert([
+                            'hotel_id' => $hotel->id, 'business_date' => '2026-11-22', 'status' => 'completed',
+                            'closed_by' => $author->id, 'closed_at' => now(), 'reconciliation_snapshot' => '{}',
+                        ]);
+                        $service->approve($hotel, $id, $reviewer->id, $reason);
+                        break;
+                }
+        }
+        $this->fail('Unsafe historical deposit decision was accepted.');
+    } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+        expect($exception->getStatusCode())->toBe($status);
+    }
+    expect(DB::table('historical_guest_deposit_approvals')->count())->toBe($approvedCount)
+        ->and(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->count())->toBe($before);
+})->with([
+    'disabled' => ['disabled', 409],
+    'unauthorized' => ['unauthorized', 403],
+    'cross hotel' => ['cross hotel', 403],
+    'duplicate proposal' => ['duplicate proposal', 409],
+    'self approval' => ['self approval', 403],
+    'duplicate approval' => ['duplicate approval', 409],
+    'changed evidence' => ['changed evidence', 409],
+    'changed amount' => ['changed amount', 409],
+    'closed date' => ['closed date', 409],
+]);
