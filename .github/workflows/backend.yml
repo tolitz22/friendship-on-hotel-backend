@@ -136,6 +136,8 @@ jobs:
           php scripts/real-engine-no-show-race.php
           php scripts/real-engine-no-show-allocation-race.php competing
           php scripts/real-engine-no-show-allocation-race.php duplicate
+          php scripts/real-engine-no-show-allocation-race.php deposit-bank
+          php scripts/real-engine-no-show-allocation-race.php deposit-cash
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
 
@@ -203,5 +205,7 @@ jobs:
           php scripts/real-engine-no-show-race.php
           php scripts/real-engine-no-show-allocation-race.php competing
           php scripts/real-engine-no-show-allocation-race.php duplicate
+          php scripts/real-engine-no-show-allocation-race.php deposit-bank
+          php scripts/real-engine-no-show-allocation-race.php deposit-cash
         env:
           FINANCE_ENABLE_VERIFIED_SETTLEMENT: 'false'
