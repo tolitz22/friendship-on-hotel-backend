@@ -334,3 +334,92 @@ it('protects signed guest accounts and isolates no-show records by hotel', funct
     $this->postJson($path.'/no-show')->assertNotFound();
     $this->getJson('/api/v1/hotels/'.$other->id.'/bookings/'.$booking.'/no-show-financial-review')->assertNotFound();
 });
+
+it('posts a verified bank deposit to liability exactly once', function (): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    config()->set('financial_accounting.enable_guest_deposit_posting', true);
+    $service = app(\App\Services\Finance\GuestDepositJournalService::class);
+    $journal = $service->recognize($hotel, $booking, $payment, $reviewer->id);
+    expect($service->recognize($hotel, $booking, $payment, $reviewer->id))->toBe($journal);
+    $header = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('id', $journal)->first();
+    expect($header->source_type)->toBe('guest_deposit_receipt')
+        ->and($header->source_reference)->toBe('folio-payment-'.$payment)
+        ->and(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+            ->where('source_type', 'guest_deposit_receipt')->count())->toBe(1);
+    $lines = DB::table('financial_posting_lines')->where('journal_id', $journal)->orderBy('line_number')->get();
+    expect($lines->count())->toBe(2)
+        ->and($lines[0]->account_code)->toBe('hotel_bank')
+        ->and((int) $lines[0]->debit_minor)->toBe(300000)
+        ->and((int) $lines[0]->credit_minor)->toBe(0)
+        ->and($lines[1]->account_code)->toBe('guest_deposit_liability')
+        ->and((int) $lines[1]->credit_minor)->toBe(300000)
+        ->and((int) $lines[1]->debit_minor)->toBe(0);
+});
+
+it('rejects unsafe staged deposit postings without creating a journal', function (string $scenario, int $status): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    if ($scenario !== 'historical') {
+        $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    }
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    config()->set('financial_accounting.enable_guest_deposit_posting', true);
+    $actor = $reviewer->id;
+    switch ($scenario) {
+        case 'disabled':
+            config()->set('financial_accounting.enable_guest_deposit_posting', false);
+            break;
+        case 'settlement disabled':
+            config()->set('financial_accounting.enable_verified_settlement', false);
+            break;
+        case 'outside allowlist':
+            config()->set('booking.no_show_adjustments_hotel_ids', '');
+            break;
+        case 'unverified':
+            DB::table('folio_settlement_verifications')->where('payment_record_id', $payment)
+                ->update(['status' => 'pending']);
+            break;
+        case 'self verified':
+            DB::table('folio_settlement_verifications')->where('payment_record_id', $payment)
+                ->update(['reviewed_by' => $author->id]);
+            break;
+        case 'unauthorized':
+            $actor = noShowActor($hotel, 'front_desk')->id;
+            break;
+        case 'cross hotel actor':
+            $other = Hotel::create(['name' => 'Other deposit property']);
+            $actor = noShowActor($other, 'admin')->id;
+            break;
+        case 'closed date':
+            DB::table('financial_day_closes')->insert([
+                'hotel_id' => $hotel->id, 'business_date' => '2026-11-22', 'status' => 'completed',
+                'closed_by' => $author->id, 'closed_at' => now(), 'reconciliation_snapshot' => '{}',
+            ]);
+            break;
+    }
+
+    try {
+        app(\App\Services\Finance\GuestDepositJournalService::class)->recognize($hotel, $booking, $payment, $actor);
+        $this->fail('Unsafe deposit posting was accepted.');
+    } catch (\Illuminate\Validation\ValidationException $exception) {
+        expect($status)->toBe(422);
+    } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+        expect($exception->getStatusCode())->toBe($status);
+    }
+    expect(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+        ->where('source_type', 'guest_deposit_receipt')->count())->toBe(0);
+})->with([
+    'disabled' => ['disabled', 409],
+    'settlement disabled' => ['settlement disabled', 409],
+    'outside allowlist' => ['outside allowlist', 409],
+    'unverified' => ['unverified', 409],
+    'self verified' => ['self verified', 409],
+    'unauthorized' => ['unauthorized', 403],
+    'cross hotel actor' => ['cross hotel actor', 403],
+    'historical' => ['historical', 409],
+    'closed date' => ['closed date', 422],
+]);
