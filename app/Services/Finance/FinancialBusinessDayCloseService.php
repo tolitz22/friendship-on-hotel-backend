@@ -61,6 +61,14 @@ final class FinancialBusinessDayCloseService
                 ]);
             }
 
+            $noShowIntegrity = null;
+            if (config('financial_accounting.enable_no_show_closing_integrity', false)) {
+                $hotel = \App\Models\Hotel::query()->findOrFail($hotelId);
+                $guard = app(NoShowClosingIntegrityService::class);
+                $noShowIntegrity = $guard->report($hotel, $expectedBusinessDate, $actorId);
+                $guard->assertClear($noShowIntegrity);
+            }
+
             // Do not advance the business clock with unreviewed or unearned
             // accounting for room nights belonging to this financial date.
             if (Schema::hasTable('financial_folio_night_assessments')
@@ -185,6 +193,14 @@ final class FinancialBusinessDayCloseService
                 'currency' => 'PHP',
                 'scope' => 'financial_journals_only',
             ];
+            if ($noShowIntegrity !== null) {
+                $snapshot['no_show_integrity'] = [
+                    'scope' => $noShowIntegrity['scope'],
+                    'scanned_booking_count' => $noShowIntegrity['scannedBookingCount'],
+                    'scanned_journal_count' => $noShowIntegrity['scannedJournalCount'],
+                    'issue_count' => 0,
+                ];
+            }
             $now = now();
             DB::table('financial_day_closes')->insert([
                 'hotel_id' => $hotelId,
