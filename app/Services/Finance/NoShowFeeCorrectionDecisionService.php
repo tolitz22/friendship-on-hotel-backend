@@ -120,8 +120,7 @@ final class NoShowFeeCorrectionDecisionService
         $key = 'no-show-fee-reversal-'.$proposalId;
         $existing = DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
             ->where('idempotency_key', $key)->first();
-        // A completed correction must be replayed by the future orchestration
-        // service, which can validate BOTH the ledger and operational folio.
+        // Only the outer orchestration may replay the complete correction.
         abort_if($existing !== null, 409, 'Fee reversal already posted; verify the complete correction.');
         $snapshot = $this->snapshot($hotel, (int) $proposal->booking_id, $actorId, $gross);
         abort_unless((string) $proposal->business_date === (string) $clock->business_date
@@ -139,20 +138,49 @@ final class NoShowFeeCorrectionDecisionService
 
     /**
      * Staged atomic correction: reverse the old fee, post the replacement and
-     * append the compensating folio credit. Settlement remains blocked until
-     * the separate effective-clearance validator is integrated.
+     * append the compensating folio credit and validate the effective clearance.
      */
     public function applyApprovedCorrection(Hotel $hotel, int $proposalId, int $actorId): array
     {
         return DB::transaction(function () use ($hotel, $proposalId, $actorId): array {
-            $reversalId = $this->reverseApprovedFee($hotel, $proposalId, $actorId);
+            $this->enabled();
+            abort_unless(config('financial_accounting.enable_no_show_fee_correction_posting', false)
+                && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id),
+                409, 'Fee correction posting is disabled.');
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
             $hotelId = (int) $hotel->id;
+            abort_unless(DB::table('hotel_memberships')->where('hotel_id', $hotelId)
+                ->where('user_id', $actorId)->where('role', 'admin')->where('is_active', true)->exists()
+                && DB::table('users')->where('id', $actorId)->where('is_active', true)->exists(), 403);
+            DB::table('financial_business_clocks')->where('hotel_id', $hotelId)->lockForUpdate()->first();
             $proposal = DB::table('no_show_fee_correction_proposals')->where('hotel_id', $hotelId)
-                ->where('id', $proposalId)->firstOrFail();
-            $approval = DB::table('no_show_fee_correction_reviews')->where('proposal_id', $proposalId)->firstOrFail();
+                ->where('id', $proposalId)->lockForUpdate()->first();
+            abort_unless($proposal !== null, 404);
+            $approval = DB::table('no_show_fee_correction_reviews')->where('proposal_id', $proposalId)->first();
+            abort_unless($approval !== null && (int) $approval->reviewed_by === $actorId
+                && (int) $proposal->proposed_by !== $actorId, 403, 'Independent approving administrator required.');
             $accounting = app(\App\Domain\Reservations\FolioAccountingService::class);
             $folio = $accounting->findFolio($hotel, (int) $proposal->booking_id, true);
+            abort_unless(DB::table('reservation_records')->where('hotel_id', $hotelId)
+                ->where('id', $proposal->booking_id)->where('lifecycle_state', 'no_show')->exists(),
+                409, 'Booking must remain a no-show.');
+            $validator = app(NoShowEffectiveFeeClearance::class);
+            $reference = 'proposal-'.$proposalId;
+            $hasJournal = DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
+                ->where(function ($query) use ($reference, $proposalId): void {
+                    $query->where(fn ($q) => $q->where('source_reference', $reference)
+                        ->whereIn('source_type', ['no_show_fee_reversal', 'no_show_fee_replacement']))
+                        ->orWhereIn('idempotency_key', ['no-show-fee-reversal-'.$proposalId, 'no-show-fee-replacement-'.$proposalId]);
+                })->exists();
+            $hasCredit = DB::table('folio_adjustments')->where('hotel_id', $hotelId)
+                ->where('request_key', 'no-show-fee-correction-'.$proposalId)->exists();
+            if ($hasJournal || $hasCredit) {
+                $effective = $validator->resolve($hotelId, (int) $proposal->booking_id, (int) $folio->id, $proposal);
+                abort_unless($effective !== null, 409, 'Incomplete or invalid fee correction requires reconciliation.');
+                return $this->correctionResult($proposal, $effective, true);
+            }
             $accounting->assertNotSigned($hotel, $folio);
+            $reversalId = $this->reverseApprovedFee($hotel, $proposalId, $actorId);
             $gross = (int) $proposal->replacement_fee_minor;
             $credit = (int) $proposal->original_fee_minor - $gross;
             $vat = (int) $approval->replacement_vat_minor;
@@ -183,16 +211,33 @@ final class NoShowFeeCorrectionDecisionService
                 && $statement['verifiedPaymentsMinor'] === $snapshot['preview']['verifiedFundsMinor']
                 && $statement['verifiedAllocatedMinor'] === 0 && $statement['verifiedRefundsMinor'] === 0,
                 409, 'Corrected folio or deposit balance does not reconcile.');
-            return [
-                'proposalId' => (string) $proposalId, 'reversalJournalId' => (string) $reversalId,
-                'replacementJournalId' => $replacementJournalId === null ? null : (string) $replacementJournalId,
-                'folioAdjustmentId' => (string) $adjustmentId, 'replacementFeeMinor' => $gross,
-                'verifiedDepositMinor' => $statement['verifiedPaymentsMinor'],
-                'projectedCollectionMinor' => max(0, $gross - $statement['verifiedPaymentsMinor']),
-                'projectedExcessDepositMinor' => max(0, $statement['verifiedPaymentsMinor'] - $gross),
-                'settlementEnabled' => false, 'refundIssued' => false,
-            ];
+            $effective = $validator->resolve($hotelId, (int) $proposal->booking_id, (int) $folio->id, $proposal);
+            abort_unless($effective !== null
+                && (int) $effective->reversal_journal_id === $reversalId
+                && (int) $effective->folio_adjustment_id === $adjustmentId
+                && ($effective->journal_id === null ? null : (int) $effective->journal_id) === $replacementJournalId,
+                409, 'Completed correction failed effective clearance validation.');
+            return $this->correctionResult($proposal, $effective, false);
         }, 3);
+    }
+
+    /** Stable posting receipt; projections reflect the approved snapshot, not later settlements. */
+    private function correctionResult(object $proposal, object $effective, bool $replayed): array
+    {
+        $snapshot = json_decode($proposal->snapshot, true, 512, JSON_THROW_ON_ERROR);
+        $gross = (int) $effective->gross_minor;
+        $funds = (int) $snapshot['preview']['verifiedFundsMinor'];
+        return [
+            'proposalId' => (string) $proposal->id,
+            'reversalJournalId' => (string) $effective->reversal_journal_id,
+            'replacementJournalId' => $effective->journal_id === null ? null : (string) $effective->journal_id,
+            'folioAdjustmentId' => (string) $effective->folio_adjustment_id,
+            'replacementFeeMinor' => $gross, 'verifiedDepositMinor' => $funds,
+            'projectedCollectionMinor' => max(0, $gross - $funds),
+            'projectedExcessDepositMinor' => max(0, $funds - $gross),
+            'projectionBasis' => 'approved_correction_snapshot',
+            'effectiveClearanceValid' => true, 'replayed' => $replayed, 'refundIssued' => false,
+        ];
     }
 
     private function snapshot(Hotel $hotel, int $bookingId, int $actorId, int $replacementMinor): array
