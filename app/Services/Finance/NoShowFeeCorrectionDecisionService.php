@@ -69,6 +69,73 @@ final class NoShowFeeCorrectionDecisionService
         }, 3);
     }
 
+
+    /**
+     * Internal primitive for the future atomic fee correction workflow.
+     * The caller must hold an outer transaction covering the reversal,
+     * replacement fee, folio credit and new clearance. Never expose directly.
+     */
+    public function reverseApprovedFee(Hotel $hotel, int $proposalId, int $actorId): int
+    {
+        $this->enabled();
+        abort_unless(config('financial_accounting.enable_no_show_fee_correction_posting', false),
+            409, 'Fee correction posting is disabled.');
+        abort_unless(DB::transactionLevel() > 0, 409, 'An atomic fee correction transaction is required.');
+
+        app(ReadinessWriteGuard::class)->lockHotel($hotel);
+        $hotelId = (int) $hotel->id;
+        abort_unless(DB::table('hotel_memberships')->where('hotel_id', $hotelId)
+            ->where('user_id', $actorId)->where('role', 'admin')->where('is_active', true)->exists()
+            && DB::table('users')->where('id', $actorId)->where('is_active', true)->exists(), 403);
+        $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotelId)->lockForUpdate()->first();
+        abort_unless($clock !== null && $clock->status === 'open'
+            && !DB::table('financial_day_closes')->where('hotel_id', $hotelId)
+                ->where('business_date', $clock->business_date)->exists(), 409, 'Open business date required.');
+        $proposal = DB::table('no_show_fee_correction_proposals')->where('hotel_id', $hotelId)
+            ->where('id', $proposalId)->lockForUpdate()->first();
+        abort_unless($proposal !== null, 404);
+        $approval = DB::table('no_show_fee_correction_reviews')->where('proposal_id', $proposalId)->first();
+        abort_unless($approval !== null && (int) $approval->reviewed_by === $actorId
+            && (int) $proposal->proposed_by !== $actorId, 403, 'Independent approving administrator required.');
+        abort_unless(hash_equals($proposal->snapshot_sha256, hash('sha256', $proposal->snapshot)),
+            409, 'Invalid approved fee snapshot.');
+        $approved = json_decode($proposal->snapshot, true, 512, JSON_THROW_ON_ERROR);
+        $preview = $approved['preview'];
+        $gross = (int) $proposal->replacement_fee_minor;
+        abort_unless($gross >= 0 && $gross < (int) $proposal->original_fee_minor
+            && $gross === $preview['replacementFeeMinor']
+            && (int) $proposal->original_fee_minor === $preview['originalFeeMinor']
+            && (string) $proposal->clearance_id === $preview['clearanceId']
+            && (string) $proposal->booking_id === $preview['bookingId']
+            && in_array($approval->tax_classification, ['vat_standard', 'vat_zero', 'vat_exempt', 'non_vat'], true),
+            409, 'Approved fee decision is inconsistent.');
+        $tax = app(PhilippineTaxCalculator::class)->calculate(
+            $gross, $approval->tax_classification, 'inclusive', $approval->tax_classification === 'vat_standard' ? 1200 : 0
+        );
+        abort_unless((int) $approval->replacement_vat_minor === $tax['tax_minor']
+            && (int) $approval->replacement_revenue_minor === $gross - $tax['tax_minor'],
+            409, 'Approved replacement tax calculation changed.');
+
+        $originalId = (int) $preview['originalJournalId'];
+        $key = 'no-show-fee-reversal-'.$proposalId;
+        $existing = DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
+            ->where('idempotency_key', $key)->first();
+        // A completed correction must be replayed by the future orchestration
+        // service, which can validate BOTH the ledger and operational folio.
+        abort_if($existing !== null, 409, 'Fee reversal already posted; verify the complete correction.');
+        $snapshot = $this->snapshot($hotel, (int) $proposal->booking_id, $actorId, $gross);
+        abort_unless((string) $proposal->business_date === (string) $clock->business_date
+            && hash_equals($proposal->snapshot_sha256, hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR))),
+            409, 'Fee correction evidence changed; reversal blocked.');
+        $lines = $preview['proposedReversalLines'];
+        abort_unless($originalId > 0 && count($lines) >= 2, 409, 'Verified original fee journal required.');
+
+        return app(FinancialJournalPostingService::class)->post(
+            $hotelId, $key, 'no_show_fee_reversal', 'proposal-'.$proposalId,
+            'Approved no-show fee reversal #'.$proposalId, $lines, $actorId, $originalId
+        );
+    }
+
     private function snapshot(Hotel $hotel, int $bookingId, int $actorId, int $replacementMinor): array
     {
         $preview = app(NoShowFeeReversalPreview::class)->preview($hotel, $bookingId, $actorId, $replacementMinor);
