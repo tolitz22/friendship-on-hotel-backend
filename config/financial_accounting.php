@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Fee correction review is staged; approval does not post any journals.
+    'enable_no_show_fee_correction_review' => (bool) env('FINANCE_ENABLE_NO_SHOW_FEE_CORRECTION_REVIEW', false),
     // Atomic room-night reversals require independent approval and separate acceptance.
     'enable_no_show_room_correction_posting' => (bool) env('FINANCE_ENABLE_NO_SHOW_ROOM_CORRECTION_POSTING', false),
     // Review only; no room-night reversal posting is activated by this flag.
