@@ -19,6 +19,7 @@ final class PushSubscriptionController
 
     public function store(Request $request, Hotel $hotel): JsonResponse
     {
+        abort_if($request->user()->must_change_password, 403);
         $data = $request->validate([
             'endpoint' => ['required', 'string', 'url:https', 'max:2048'],
             'keys.p256dh' => ['required', 'string', 'regex:/^[A-Za-z0-9_-]+$/', 'size:87'],
@@ -33,10 +34,14 @@ final class PushSubscriptionController
         if (! $allowed || isset($url['user']) || isset($url['pass']) || isset($url['fragment']) || (isset($url['port']) && $url['port'] !== 443)) {
             throw ValidationException::withMessages(['endpoint' => ['Unsupported push service endpoint.']]);
         }
+        $hash = hash('sha256', $data['endpoint']);
+        if (PushSubscription::query()->where('endpoint_hash', $hash)->where('user_id', '!=', $request->user()->id)->exists()) {
+            throw ValidationException::withMessages(['endpoint' => ['This browser is registered to another account. Reset browser push permissions before registering.']]);
+        }
         $row = PushSubscription::updateOrCreate([
             'hotel_id' => $hotel->id,
             'user_id' => $request->user()->id,
-            'endpoint_hash' => hash('sha256', $data['endpoint']),
+            'endpoint_hash' => $hash,
         ], [
             'endpoint' => $data['endpoint'],
             'p256dh' => $data['keys']['p256dh'],
