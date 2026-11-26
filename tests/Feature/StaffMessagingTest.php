@@ -348,3 +348,66 @@ it('keeps acknowledgement metadata distinct when loading multiple announcements'
     expect($rows->get($first)['acknowledgement']['acknowledged'])->toBe(1);
     expect($rows->get($second)['acknowledgement']['acknowledged'])->toBe(0);
 });
+
+it('broadcasts only generic private invalidation events and does not rebroadcast retries', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    config(['staff_messaging.realtime.enabled'=>true,'staff_messaging.realtime.app_id'=>'qa-app','staff_messaging.realtime.key'=>'qa-key','staff_messaging.realtime.secret'=>'qa-secret','staff_messaging.realtime.http_url'=>'https://realtime.example.test']);
+    \Illuminate\Support\Facades\Http::preventStrayRequests();
+    \Illuminate\Support\Facades\Http::fake(['https://realtime.example.test/*'=>\Illuminate\Support\Facades\Http::response([],200)]);
+    $url=$this->base.'/conversations/'.$id;
+    $payload=['body'=>'Confidential QA content','client_id'=>(string)Str::uuid()];
+    $mid=$this->postJson($url.'/messages',$payload)->assertOk()->json('data.id');
+    $this->postJson($url.'/messages',$payload)->assertOk()->assertJsonPath('data.id',$mid);
+    \Illuminate\Support\Facades\Http::assertSentCount(1);
+    \Illuminate\Support\Facades\Http::assertSent(function ($request) {
+        $body=json_decode($request->body(),true,512,JSON_THROW_ON_ERROR);
+        $channels=$body['channels'];sort($channels);
+        $expected=['private-staff.hotel.'.$this->hotel->id.'.user.'.$this->manager->id,'private-staff.hotel.'.$this->hotel->id.'.user.'.$this->reception->id];sort($expected);
+        $parts=parse_url($request->url());parse_str($parts['query'],$params);
+        $signature=$params['auth_signature'];unset($params['auth_signature']);ksort($params);
+        return $request->method()==='POST' && $channels===$expected && $body['data']==='{}'
+            && $body['name']==='staff-messaging.changed' && $params['body_md5']===md5($request->body())
+            && hash_equals(hash_hmac('sha256',"POST\n".$parts['path']."\n".http_build_query($params,'','&',PHP_QUERY_RFC3986),'qa-secret'),$signature)
+            && !str_contains($request->body(),'Confidential QA content');
+    });
+});
+
+it('preserves committed messaging when the realtime provider fails', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    config(['staff_messaging.realtime.enabled'=>true,'staff_messaging.realtime.app_id'=>'qa-app','staff_messaging.realtime.key'=>'qa-key','staff_messaging.realtime.secret'=>'qa-secret','staff_messaging.realtime.http_url'=>'https://realtime.example.test']);
+    \Illuminate\Support\Facades\Http::preventStrayRequests();
+    \Illuminate\Support\Facades\Http::fake(['https://realtime.example.test/*'=>\Illuminate\Support\Facades\Http::response('Unavailable',503)]);
+    $url=$this->base.'/conversations/'.$id;
+    $mid=$this->postJson($url.'/messages',['body'=>'Persist despite outage','client_id'=>(string)Str::uuid()])->assertOk()->json('data.id');
+    $this->assertDatabaseHas('staff_messages',['id'=>$mid,'body'=>'Persist despite outage']);
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($url)->assertOk()->assertJsonPath('data.0.body','Persist despite outage');
+    \Illuminate\Support\Facades\Http::assertSentCount(1);
+});
+
+it('deduplicates realtime recipients and chunks broadcasts within provider limits', function () {
+    config(['staff_messaging.realtime.enabled'=>true,'staff_messaging.realtime.app_id'=>'qa-app','staff_messaging.realtime.key'=>'qa-key','staff_messaging.realtime.secret'=>'qa-secret','staff_messaging.realtime.http_url'=>'https://realtime.example.test']);
+    \Illuminate\Support\Facades\Http::preventStrayRequests();
+    \Illuminate\Support\Facades\Http::fake(['https://realtime.example.test/*'=>\Illuminate\Support\Facades\Http::response([],200)]);
+    app(\App\Support\StaffMessagingRealtime::class)->notify((int)$this->hotel->id,array_merge(range(1,205),[1,2,3]));
+    \Illuminate\Support\Facades\Http::assertSentCount(3);
+    $channels=[];
+    foreach (\Illuminate\Support\Facades\Http::recorded() as [$request,$response]) {
+        $batch=json_decode($request->body(),true,512,JSON_THROW_ON_ERROR)['channels'];
+        expect(count($batch))->toBeLessThanOrEqual(100);
+        $channels=array_merge($channels,$batch);
+    }
+    expect(count($channels))->toBe(205);
+    expect(count(array_unique($channels)))->toBe(205);
+});
+
+it('disables realtime for insecure or incomplete provider configuration', function () {
+    config(['staff_messaging.realtime.enabled'=>true,'staff_messaging.realtime.app_id'=>'qa-app','staff_messaging.realtime.key'=>'qa-key','staff_messaging.realtime.secret'=>'qa-secret']);
+    $realtime=app(\App\Support\StaffMessagingRealtime::class);
+    foreach (['http://realtime.example.test','https://user:pass@realtime.example.test','https://realtime.example.test?query=1','https://realtime.example.test/path'] as $endpoint) {
+        config(['staff_messaging.realtime.http_url'=>$endpoint]);
+        expect($realtime->enabled())->toBeFalse();
+    }
+    config(['staff_messaging.realtime.http_url'=>'https://realtime.example.test','staff_messaging.realtime.secret'=>null]);
+    expect($realtime->enabled())->toBeFalse();
+});
