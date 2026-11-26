@@ -90,6 +90,7 @@ Route::prefix('v1')->group(function (): void {
 
         Route::prefix('hotels/{hotel}')->middleware('hotel.member')->group(function (): void {
             Route::prefix('staff-messaging')->group(function (): void {
+                Route::get('/records', [\App\Http\Controllers\Api\StaffMessageController::class, 'records'])->middleware('throttle:60,1');
                 Route::get('/directory', [\App\Http\Controllers\Api\StaffMessageController::class, 'directory']);
                 Route::get('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'index']);
                 Route::post('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'create'])->middleware('throttle:20,1');
