@@ -62,7 +62,8 @@ final class FinancialBusinessDayCloseService
             }
 
             $noShowIntegrity = null;
-            if (config('financial_accounting.enable_no_show_closing_integrity', false)) {
+            if (\App\Domain\Reservations\NoShowWorkflow::enabled($hotelId)
+                && config('financial_accounting.enable_no_show_closing_integrity', false)) {
                 $hotel = \App\Models\Hotel::query()->findOrFail($hotelId);
                 $guard = app(NoShowClosingIntegrityService::class);
                 $noShowIntegrity = $guard->report($hotel, $expectedBusinessDate, $actorId);
