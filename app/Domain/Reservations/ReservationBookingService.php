@@ -185,7 +185,7 @@ final class ReservationBookingService
                 if (now()->lessThan($cutoff)) {
                     throw new HttpException(409, 'This booking can be marked as a no-show from '.$cutoff->format('M j, Y H:i T').'.');
                 }
-                if ($priced && ($blocker = NoShowWorkflow::accountingBlocker((int) $hotel->id, (int) $folioId)) !== null) {
+                if ($priced && ($blocker = NoShowWorkflow::accountingBlocker((int) $hotel->id, (int) $folioId, markingNoShow: true)) !== null) {
                     throw new HttpException(409, $blocker.' Resolve it with Finance before releasing the booking.');
                 }
             }
