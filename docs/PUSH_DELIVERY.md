@@ -20,3 +20,7 @@ Queue work is scoped to the pilot hotel. Claims are fenced by attempt number and
 ## PN-8.5 performance
 
 Discovery loads eligible user IDs and preferences in batches of 100, reads only device IDs/user IDs, skips fully opted-out batches, discovers personal alerts once per recipient, and inserts up to 100 delivery rows per SQL statement. Delivery still rechecks live preferences and eligibility immediately before transport. The scheduled daily prune removes at most 1,000 terminal immutable short-window event records older than 30 days per run for the pilot property only. Persistent operational blockers and mutable-state events retain their deduplication records so old unresolved issues do not notify again after pruning. No guest/financial/audit source records are removed. Indexes support scoped queue lookup and terminal history retention. Actual query plans, load and Railway costs must be measured during pilot acceptance.
+
+## PN-8.8 preflight and release gate
+
+Run `php artisan pms:push-check --scan` with delivery disabled. This is read-only and will report missing transport, configuration or schema without printing secrets. Client Demo is the default allowed scope; `PMS_PUSH_ALLOW_NON_DEMO` must remain false until explicit rollout approval. See [release readiness and rollback runbook](PUSH_RELEASE_READINESS.md). Passing preflight is necessary, not sufficient for live activation.

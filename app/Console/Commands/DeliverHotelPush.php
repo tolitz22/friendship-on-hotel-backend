@@ -14,6 +14,7 @@ use Illuminate\Console\Command;
 use App\Services\PushDeliveryQueue;
 use App\Services\PushDeliveryDiscovery;
 use App\Services\PushDeliveryOutcome;
+use App\Services\PushDeliveryReadiness;
 use Minishlink\WebPush\Subscription;
 use Minishlink\WebPush\WebPush;
 
@@ -22,18 +23,32 @@ final class DeliverHotelPush extends Command
     protected $signature = 'pms:push-deliver';
     protected $description = 'Discover and deliver hotel alerts outside web requests';
 
-    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery): int
+    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery, PushDeliveryReadiness $readiness): int
     {
         if (! config('push.enabled')) {
             return self::SUCCESS;
         }
-        if (! class_exists(WebPush::class) || ! config('push.public_key') || ! config('push.private_key') || ! config('push.subject') || ! config('push.hotel_id')) {
-            $this->error('Push delivery requires the Web Push package, VAPID configuration and an explicit pilot hotel.');
+        $issues = $readiness->configurationIssues();
+        if ($issues !== []) {
+            $this->error('Push configuration incomplete: '.implode(', ', $issues));
+
             return self::FAILURE;
         }
+        try {
+            $hotel = Hotel::find(config('push.hotel_id'));
+            if (! $hotel || ! $readiness->hotelAllowed($hotel)) {
+                $this->error('Push hotel is missing or outside the authorized pilot scope.');
 
-        $hotel = Hotel::find(config('push.hotel_id'));
-        if (! $hotel) {
+                return self::FAILURE;
+            }
+            if ($readiness->schemaIssues() !== []) {
+                $this->error('Push schema incomplete; run the approved migrations before activation.');
+
+                return self::FAILURE;
+            }
+        } catch (\Throwable) {
+            $this->error('Push preflight database check failed.');
+
             return self::FAILURE;
         }
         $sender = new WebPush(['VAPID' => [
