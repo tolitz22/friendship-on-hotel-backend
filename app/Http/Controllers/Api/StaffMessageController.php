@@ -250,7 +250,7 @@ final class StaffMessageController
         abort_if(($recordType===null)!==($recordId===null),422,'Select a complete record reference.');
         abort_if($body==='' && !$attachment && !$recordType,422,'Enter a message, attach a file or share a record.');
         $uid=$request->user()->id;
-        $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment,$recordType,$recordId,$announcement,$handover) {
+        [$message,$created]=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment,$recordType,$recordId,$announcement,$handover) {
             DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('id',$conversation)->lockForUpdate()->first();
             $this->access($request,$hotel,$conversation);
             $channel=DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('id',$conversation)->first();
@@ -263,7 +263,7 @@ final class StaffMessageController
             $reply=$data['reply_to_id']??null;
             abort_if($reply!==null && !DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$reply)->exists(),422,'Reply must reference a message in this conversation.');
             $query=DB::table('staff_messages')->where('conversation_id',$conversation)->where('sender_id',$uid)->where('client_id',$data['client_id']);
-            if ($existing=$query->first()) { $prior=DB::table('staff_message_attachments')->where('message_id',$existing->id)->first(); abort_if(($prior->sha256??null)!==($attachment['sha256']??null) || ($prior->filename??null)!==($attachment['filename']??null) || $existing->body!==$body || (bool)$existing->is_announcement!==$announcement || $existing->handover!==$handover || $existing->record_type!==$recordType || (string)$existing->record_id!==(string)$recordId || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
+            if ($existing=$query->first()) { $prior=DB::table('staff_message_attachments')->where('message_id',$existing->id)->first(); abort_if(($prior->sha256??null)!==($attachment['sha256']??null) || ($prior->filename??null)!==($attachment['filename']??null) || $existing->body!==$body || (bool)$existing->is_announcement!==$announcement || $existing->handover!==$handover || $existing->record_type!==$recordType || (string)$existing->record_id!==(string)$recordId || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return [$existing,false];}
             $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'reply_to_id'=>$reply,'record_type'=>$recordType,'record_id'=>$recordId,'is_announcement'=>$announcement,'handover'=>$handover,'created_at'=>now(),'updated_at'=>now()]);
             if ($announcement || $handover!==null) {
                 $eligible=$this->active($hotel)->where('u.id','!=',$uid);
@@ -273,9 +273,9 @@ final class StaffMessageController
             }
             if ($attachment) DB::table('staff_message_attachments')->insert(['message_id'=>$id,...$attachment]);
             DB::table('staff_conversations')->where('id',$conversation)->update(['updated_at'=>now()]);
-            return DB::table('staff_messages')->where('id',$id)->first();
+            return [DB::table('staff_messages')->where('id',$id)->first(),true];
         },3);
-        $this->notifyConversation($hotel,$conversation);
+        if ($created) $this->notifyConversation($hotel,$conversation);
         $this->presentReference($request,$hotel,$message);
         $this->announcementMeta($request,$hotel,$message);
         return response()->json(['data'=>$message]);
