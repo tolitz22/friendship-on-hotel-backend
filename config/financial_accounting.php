@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Cash deposit posting requires independent cashier reconciliation and separate acceptance.
+    'enable_cash_guest_deposit_posting' => (bool) env('FINANCE_ENABLE_CASH_GUEST_DEPOSIT_POSTING', false),
     // Historical clearing reclassification requires a reconciled opening import and separate acceptance.
     'enable_historical_guest_deposit_posting' => (bool) env('FINANCE_ENABLE_HISTORICAL_GUEST_DEPOSIT_POSTING', false),
     // Staged no-show bank deposit journals; keep off until reconciliation and acceptance.
