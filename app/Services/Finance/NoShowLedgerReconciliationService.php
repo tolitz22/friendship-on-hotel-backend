@@ -39,10 +39,15 @@ final class NoShowLedgerReconciliationService
                     'journalIds' => $clearance->journal_id === null ? [] : [(string) $clearance->journal_id], 'status' => 'matched'];
             }
             foreach ($statement['payments'] as $payment) {
-                if ($payment['status'] !== 'staff_confirmed' || $payment['verificationStatus'] !== 'verified') {
+                if ($payment['status'] === 'voided') {
                     continue;
                 }
                 $reference = 'folio-payment-'.$payment['id'];
+                if ($payment['status'] !== 'staff_confirmed' || $payment['verificationStatus'] !== 'verified') {
+                    $issues[] = ['kind' => 'payment_evidence', 'reference' => $reference,
+                        'reason' => 'payment_evidence_unresolved'];
+                    continue;
+                }
                 $rows = DB::table('financial_posting_journals')->where('hotel_id', $hotelId)
                     ->where('source_reference', $reference)
                     ->whereIn('source_type', ['guest_deposit_receipt', 'guest_deposit_opening_reclassification'])->get();

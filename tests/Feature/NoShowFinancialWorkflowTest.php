@@ -955,6 +955,32 @@ it('reports no-show matched ledger balances and transaction discrepancies withou
 })->with(['unallocated', 'partial', 'settled', 'missing deposit', 'duplicate deposit',
     'reversed deposit', 'mismatched deposit', 'missing allocation', 'unauthorized', 'cross hotel']);
 
+it('identifies unresolved payment evidence when the no-show balances match', function (): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this, 'none', 0);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 250000);
+    $payments = DB::table('folio_payment_records')->where('hotel_id', $hotel->id)->where('id', $payment);
+    $payments->update(['status' => 'rejected']);
+
+    $report = app(\App\Services\Finance\NoShowLedgerReconciliationService::class);
+    $blocked = $report->report($hotel, $booking, $reviewer->id);
+    expect($blocked['expectedMinor'])->toBe($blocked['matchedJournalMinor'])
+        ->and($blocked['reconciled'])->toBeFalse()
+        ->and($blocked['settled'])->toBeFalse()
+        ->and($blocked['issues'])->toBe([[
+            'kind' => 'payment_evidence', 'reference' => 'folio-payment-'.$payment,
+            'reason' => 'payment_evidence_unresolved',
+        ]]);
+
+    $payments->update(['status' => 'voided']);
+    $cleared = $report->report($hotel, $booking, $reviewer->id);
+    expect($cleared['issues'])->toBe([])->and($cleared['settled'])->toBeTrue();
+});
+
 it('exposes no-show ledger reconciliation only to authorized hotel administrators', function (): void {
     [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
     $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
