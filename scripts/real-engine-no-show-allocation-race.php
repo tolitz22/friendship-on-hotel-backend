@@ -37,7 +37,7 @@ function configureRace(int $hotelId): void
 }
 
 if (($argv[1] ?? '') === 'worker') {
-    [, , $barrier, $index, $hotelId, $bookingId, $paymentId, $actorId, $mode, $evidenceId] = $argv;
+    [, , $barrier, $index, $hotelId, $bookingId, $paymentId, $actorId, $mode, $evidenceId, $originalDate] = $argv;
     configureRace((int) $hotelId);
     $hotel = Hotel::findOrFail($hotelId);
     touch($barrier.'.ready.'.$index);
@@ -45,7 +45,11 @@ if (($argv[1] ?? '') === 'worker') {
     while (!file_exists($barrier) && microtime(true) < $deadline) usleep(10000);
     if (!file_exists($barrier)) exit(3);
     try {
-        if (in_array($mode, ['deposit-bank', 'deposit-cash'], true)) {
+        if (str_starts_with($mode, 'close-') && $index === '1') {
+            app(\App\Services\Finance\FinancialBusinessDayCloseService::class)->close((int) $hotelId, $originalDate, (int) $actorId);
+            exit(0);
+        }
+        if (in_array($mode, ['deposit-bank', 'deposit-cash', 'close-deposit'], true)) {
             $journal = app(\App\Services\Finance\GuestDepositJournalService::class)
                 ->recognize($hotel, (int) $bookingId, (int) $paymentId, (int) $actorId);
             file_put_contents($barrier.'.journal.'.$index, (string) $journal);
@@ -58,7 +62,7 @@ if (($argv[1] ?? '') === 'worker') {
             ]);
             exit(0);
         }
-        if ($mode === 'refund-verify' || ($mode === 'refund-allocation' && $index === '1')) {
+        if (in_array($mode, ['refund-verify', 'close-refund'], true) || ($mode === 'refund-allocation' && $index === '1')) {
             app(\App\Domain\Reservations\FolioRefundDisbursementService::class)->review(
                 $hotel, (int) $bookingId, (int) $evidenceId, (int) $actorId,
                 'verify', 'Independent synthetic bank evidence review.'
@@ -76,6 +80,8 @@ if (($argv[1] ?? '') === 'worker') {
         if ($mode === 'refund-verify' && isset($exception->errors()['evidence'])) exit(9);
         throw $exception;
     } catch (HttpException $exception) {
+        if ($mode === 'close-deposit' && $index === '2' && $exception->getStatusCode() === 409
+            && str_contains($exception->getMessage(), 'Historical deposit requires')) exit(9);
         if ($mode === 'refund-competing' && $exception->getStatusCode() === 409
             && str_contains($exception->getMessage(), 'No-show refund exceeds verified excess funds')) exit(9);
         throw $exception;
@@ -83,9 +89,10 @@ if (($argv[1] ?? '') === 'worker') {
 }
 
 $mode = $argv[1] ?? 'competing';
-if (!in_array($mode, ['competing', 'duplicate', 'deposit-bank', 'deposit-cash', 'refund-competing', 'refund-verify', 'refund-allocation'], true)) throw new RuntimeException('Invalid race mode.');
+if (!in_array($mode, ['competing', 'duplicate', 'deposit-bank', 'deposit-cash', 'refund-competing', 'refund-verify', 'refund-allocation', 'close-deposit', 'close-allocation', 'close-refund'], true)) throw new RuntimeException('Invalid race mode.');
 $isDeposit = in_array($mode, ['deposit-bank', 'deposit-cash'], true);
-$isRefund = str_starts_with($mode, 'refund-');
+$isRefund = str_starts_with($mode, 'refund-') || $mode === 'close-refund';
+$isClose = str_starts_with($mode, 'close-');
 $hotel = Hotel::create(['name' => 'No-show allocation race fixture', 'timezone' => 'Asia/Manila', 'currency' => 'PHP']);
 $actor = User::create([
     'name' => 'No-show race staff', 'email' => 'ns-race-'.bin2hex(random_bytes(5)).'@example.test',
@@ -124,7 +131,7 @@ foreach ([$actor, $reviewer] as $staff) {
 }
 DB::table('financial_accounting_periods')->insert([
     'hotel_id' => $hotel->id, 'starts_on' => now('Asia/Manila')->startOfMonth()->toDateString(),
-    'ends_on' => now('Asia/Manila')->endOfMonth()->toDateString(), 'status' => 'open',
+    'ends_on' => now('Asia/Manila')->addDay()->endOfMonth()->toDateString(), 'status' => 'open',
 ]);
 $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)->where('reservation_record_id', $bookingId)->value('id');
 $paymentId = DB::table('folio_payment_records')->insertGetId([
@@ -161,11 +168,11 @@ if ($mode === 'deposit-cash') {
     $beforeShift = DB::table('cashier_shifts')->find($shift);
     $beforeReceipts = DB::table('cashier_shift_receipts')->where('shift_id', $shift)->get()->all();
 }
-if (!$isDeposit) {
+if (!$isDeposit && $mode !== 'close-deposit') {
     app(\App\Services\Finance\GuestDepositJournalService::class)->recognize($hotel, $bookingId, $paymentId, $reviewer->id);
 }
 $evidenceId = 0;
-if (in_array($mode, ['refund-verify', 'refund-allocation'], true)) {
+if (in_array($mode, ['refund-verify', 'refund-allocation', 'close-refund'], true)) {
     $requests = app(\App\Domain\Reservations\RefundRequestService::class);
     $refund = $requests->create($hotel, $bookingId, $actor->id, [
         'requestKey' => 'race-approved-refund', 'paymentRecordId' => $paymentId,
@@ -185,7 +192,7 @@ try {
     foreach ([1, 2] as $index) {
         $worker = proc_open([PHP_BINARY, __FILE__, 'worker', $barrier, (string) $index, (string) $hotel->id,
             (string) $bookingId, (string) $paymentId,
-            (string) ($isRefund ? $actor->id : $reviewer->id), $mode, (string) $evidenceId], [STDIN, STDOUT, STDERR], $pipes);
+            (string) ($isRefund ? $actor->id : $reviewer->id), $mode, (string) $evidenceId, $today], [STDIN, STDOUT, STDERR], $pipes);
         if (!is_resource($worker)) throw new RuntimeException('Cannot start worker.');
         $workers[] = $worker;
     }
@@ -198,7 +205,43 @@ try {
     sort($statuses);
     $report = app(\App\Services\Finance\NoShowLedgerReconciliationService::class)->report($hotel, $bookingId, $reviewer->id);
     $allocations = DB::table('folio_settlement_allocations')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
-    if ($isDeposit) {
+    if ($isClose) {
+        $nextDate = \Carbon\CarbonImmutable::parse($today)->addDay()->toDateString();
+        $closes = DB::table('financial_day_closes')->where('hotel_id', $hotel->id)->where('business_date', $today);
+        $close = $closes->first();
+        if ($closes->count() !== 1 || $close->status !== 'completed'
+            || DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->value('business_date') !== $nextDate) {
+            throw new RuntimeException('Business date did not advance exactly once.');
+        }
+        $snapshot = json_decode($close->reconciliation_snapshot, true, 512, JSON_THROW_ON_ERROR);
+        $dayJournals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('business_date', $today);
+        $dayLines = DB::table('financial_posting_lines')->whereIn('journal_id', (clone $dayJournals)->select('id'));
+        if ($snapshot['journal_count'] !== $dayJournals->count() || $snapshot['line_count'] !== $dayLines->count()
+            || $snapshot['debits_minor'] !== (int) (clone $dayLines)->sum('debit_minor')
+            || $snapshot['credits_minor'] !== (int) (clone $dayLines)->sum('credit_minor')
+            || $snapshot['debits_minor'] !== $snapshot['credits_minor']) {
+            throw new RuntimeException('Closed ledger snapshot changed after concurrent transaction.');
+        }
+        $source = match ($mode) {
+            'close-deposit' => 'guest_deposit_receipt',
+            'close-allocation' => 'no_show_deposit_allocation',
+            default => 'no_show_deposit_refund',
+        };
+        $posted = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('source_type', $source)->get();
+        $blocked = $mode === 'close-deposit' && $statuses === [0, 9];
+        if ((!$blocked && $statuses !== [0, 0]) || $posted->count() !== ($blocked ? 0 : 1)
+            || (!$blocked && !in_array($posted->first()->business_date, $mode === 'close-deposit' ? [$today] : [$today, $nextDate], true))
+            || (!$blocked && !$report['reconciled']) || ($blocked && $report['reconciled'])) {
+            throw new RuntimeException('Unexpected close race outcome: '.json_encode([$statuses, $report]));
+        }
+        if ($mode === 'close-allocation' && ((clone $allocations)->count() !== 1 || (int) (clone $allocations)->sum('amount_minor') !== 120000)) {
+            throw new RuntimeException('Allocation did not commit exactly once.');
+        }
+        if ($mode === 'close-refund' && DB::table('folio_refund_disbursement_evidence')->where('id', $evidenceId)->value('status') !== 'verified') {
+            throw new RuntimeException('Refund verification and journal did not commit together.');
+        }
+        echo "$driver passed $mode race.\n";
+    } elseif ($isDeposit) {
         $receipts = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
             ->where('source_type', 'guest_deposit_receipt')->where('source_reference', 'folio-payment-'.$paymentId)->get();
         $firstId = @file_get_contents($barrier.'.journal.1');
@@ -246,7 +289,7 @@ try {
         || !$report['reconciled'] || $report['expectedBalances'] !== ['depositLiabilityMinor' => 80000, 'receivableMinor' => 80000]) {
         throw new RuntimeException('Allocation race failed: '.json_encode([$statuses, $report]));
     }
-    if (!$isDeposit && !$isRefund) echo "$driver passed $mode allocation race.\n";
+    if (!$isDeposit && !$isRefund && !$isClose) echo "$driver passed $mode allocation race.\n";
 } finally {
     foreach ($workers as $worker) {
         if (is_resource($worker)) { proc_terminate($worker); proc_close($worker); }
