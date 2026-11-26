@@ -15,7 +15,7 @@ final class PushAlertPayload
         if (isset($alert['paymentId'])) $params['payment'] = $alert['paymentId'];
         if (isset($alert['expenseId'])) $params['expense'] = $alert['expenseId'];
         if (isset($alert['shiftId'])) $params['shift'] = $alert['shiftId'];
-        foreach (['taskId' => 'task', 'orderId' => 'order', 'room' => 'room', 'calendarDate' => 'date', 'approvalId' => 'approval', 'conversationId' => 'conversation'] as $field => $parameter) {
+        foreach (['taskId' => 'task', 'orderId' => 'order', 'room' => 'room', 'calendarDate' => 'date', 'approvalId' => 'approval', 'conversationId' => 'conversation', 'closingDate' => 'date'] as $field => $parameter) {
             if (isset($alert[$field])) {
                 $params[$parameter] = $alert[$field];
             }
@@ -64,6 +64,13 @@ final class PushAlertPayload
                 'staff_announcement' => 'A staff announcement needs your acknowledgment.',
                 'staff_handover' => 'A shift handover needs your acknowledgment.',
                 'staff_acknowledged' => 'A staff member acknowledged your update.',
+                'daily_close_completed' => 'Financial daily closing completed and the business date advanced.',
+                'daily_close_blocked' => 'Financial daily closing has an unresolved blocker.',
+                'closing_cashier_unreconciled' => 'Cashier shifts require reconciliation.',
+                'closing_payment_pending' => 'Payment evidence requires review.',
+                'closing_journal_integrity' => 'A financial journal requires integrity review.',
+                'closing_no_show_unresolved' => 'A no-show financial review requires attention.',
+                'closing_room_night_issue' => 'Nightly room accounting requires attention.',
                 default => 'A hotel update requires attention.',
             },
             'url' => '/'.$target.'?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986),

@@ -93,6 +93,7 @@ final class HotelNotificationService
         yield from app(BookingActivityNotifications::class)->all($hotel, $limit);
         yield from app(FinancialActivityNotifications::class)->all($hotel, $limit);
         yield from app(OperationalActivityNotifications::class)->all($hotel, $limit);
+        yield from app(DailyClosingNotifications::class)->all($hotel, $limit);
     }
 
     public function current(Hotel $hotel, string $id): ?array
@@ -104,7 +105,8 @@ final class HotelNotificationService
         if (! $query) {
             return app(BookingActivityNotifications::class)->current($hotel, $id)
                 ?? app(FinancialActivityNotifications::class)->current($hotel, $id)
-                ?? app(OperationalActivityNotifications::class)->current($hotel, $id);
+                ?? app(OperationalActivityNotifications::class)->current($hotel, $id)
+                ?? app(DailyClosingNotifications::class)->current($hotel, $id);
         }
         $booking = $query?->where('id', $parts[2])->first(['id', 'reference', 'check_in', 'check_out']);
         if (! $booking) {
