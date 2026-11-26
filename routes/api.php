@@ -89,6 +89,14 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/hotels', [HotelController::class, 'index']);
 
         Route::prefix('hotels/{hotel}')->middleware('hotel.member')->group(function (): void {
+            Route::prefix('staff-messaging')->group(function (): void {
+                Route::get('/directory', [\App\Http\Controllers\Api\StaffMessageController::class, 'directory']);
+                Route::get('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'index']);
+                Route::post('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'create'])->middleware('throttle:20,1');
+                Route::get('/conversations/{conversation}', [\App\Http\Controllers\Api\StaffMessageController::class, 'show'])->whereNumber('conversation');
+                Route::post('/conversations/{conversation}/messages', [\App\Http\Controllers\Api\StaffMessageController::class, 'send'])->whereNumber('conversation')->middleware('throttle:60,1');
+                Route::post('/conversations/{conversation}/read', [\App\Http\Controllers\Api\StaffMessageController::class, 'read'])->whereNumber('conversation')->middleware('throttle:120,1');
+            });
             Route::get('/', [HotelController::class, 'show']);
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
