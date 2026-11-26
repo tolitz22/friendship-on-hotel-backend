@@ -208,6 +208,12 @@ final class CashierShiftService
         ];
     }
 
+    /** Internal diagnostic only: never expose the blind cash count to staff. */
+    public function integrityExpectation(Hotel $hotel, int $id): int
+    {
+        return $this->expected($hotel, $this->shift($hotel, $id))['expectedCashMinor'];
+    }
+
     private function present(Hotel $hotel, object $shift, bool $includeReceipts = false): array
     {
         $calc = $this->expected($hotel, $shift);

@@ -60,12 +60,17 @@ final class FinancialIntegrityDiagnostics
                 $issues[] = ['reason' => 'no_show_carry_forward_not_checked'];
             }
 
+            $extended = app(ExtendedFinancialIntegrityDiagnostics::class)->report(
+                $hotel, $date === null ? null : (string) $date, $actor === null ? null : (int) $actor);
+            $issues = array_merge($issues, $extended['issues']);
+            $checks = array_merge($checks, $extended['checks']);
+
             return ['hotelId' => (string) $id, 'businessDate' => $date,
                 'readOnly' => true, 'closingCertified' => false, 'releaseCertified' => false,
                 'checks' => $checks, 'scannedJournalCount' => $count,
                 'issues' => $issues, 'integrityValid' => $issues === [],
-                'notChecked' => ['general_folio_reconciliation', 'cashier_reconciliation',
-                    'supplier_and_reimbursement_liabilities', 'full_daily_closing_readiness']];
+                'notChecked' => $extended['notChecked'], 'metrics' => $extended['metrics'],
+                'dailyClosing' => $extended['closing']];
         }, 3);
     }
 
