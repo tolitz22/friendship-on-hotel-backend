@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // No-show deposit allocation journals require staged end-to-end acceptance.
+    'enable_no_show_allocation_posting' => (bool) env('FINANCE_ENABLE_NO_SHOW_ALLOCATION_POSTING', false),
     // Cash deposit posting requires independent cashier reconciliation and separate acceptance.
     'enable_cash_guest_deposit_posting' => (bool) env('FINANCE_ENABLE_CASH_GUEST_DEPOSIT_POSTING', false),
     // Historical clearing reclassification requires a reconciled opening import and separate acceptance.
