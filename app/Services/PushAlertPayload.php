@@ -15,7 +15,7 @@ final class PushAlertPayload
         if (isset($alert['paymentId'])) $params['payment'] = $alert['paymentId'];
         if (isset($alert['expenseId'])) $params['expense'] = $alert['expenseId'];
         if (isset($alert['shiftId'])) $params['shift'] = $alert['shiftId'];
-        foreach (['taskId' => 'task', 'orderId' => 'order', 'room' => 'room', 'calendarDate' => 'date', 'approvalId' => 'approval'] as $field => $parameter) {
+        foreach (['taskId' => 'task', 'orderId' => 'order', 'room' => 'room', 'calendarDate' => 'date', 'approvalId' => 'approval', 'conversationId' => 'conversation'] as $field => $parameter) {
             if (isset($alert[$field])) {
                 $params[$parameter] = $alert[$field];
             }
@@ -60,6 +60,10 @@ final class PushAlertPayload
                 'approval_requested' => 'A manager approval is awaiting review.',
                 'approval_approved' => 'A manager approval was granted.',
                 'approval_rejected' => 'A manager approval was rejected.',
+                'staff_message' => 'You have a new staff message.',
+                'staff_announcement' => 'A staff announcement needs your acknowledgment.',
+                'staff_handover' => 'A shift handover needs your acknowledgment.',
+                'staff_acknowledged' => 'A staff member acknowledged your update.',
                 default => 'A hotel update requires attention.',
             },
             'url' => '/'.$target.'?'.http_build_query($params, '', '&', PHP_QUERY_RFC3986),

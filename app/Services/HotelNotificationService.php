@@ -36,7 +36,7 @@ final class HotelNotificationService
         return $queues;
     }
 
-    public function feed(Hotel $hotel, bool $expanded = false): array
+    public function feed(Hotel $hotel, bool $expanded = false, ?int $userId = null): array
     {
         $queues = $this->queues($hotel);
         $notifications = [];
@@ -51,7 +51,7 @@ final class HotelNotificationService
 
         if ($expanded) {
             $counts = [];
-            foreach ($this->activity($hotel, 9) as $item) {
+            foreach ($this->adminActivity($hotel, $userId, 9) as $item) {
                 $kind = $item['kind'];
                 $counts[$kind] = ($counts[$kind] ?? 0) + 1;
                 if ($counts[$kind] <= 8) {
@@ -78,6 +78,14 @@ final class HotelNotificationService
             }
         }
         yield from $this->activity($hotel);
+    }
+
+    private function adminActivity(Hotel $hotel, ?int $userId, int $limit): iterable
+    {
+        yield from $this->activity($hotel, $limit);
+        if ($userId !== null) {
+            yield from app(StaffMessageNotifications::class)->all($hotel, $userId, $limit);
+        }
     }
 
     private function activity(Hotel $hotel, ?int $limit = null): iterable

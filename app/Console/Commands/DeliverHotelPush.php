@@ -9,6 +9,7 @@ use App\Services\HotelNotificationService;
 use App\Services\PushPreferences;
 use App\Services\PushDeviceEligibility;
 use App\Services\PushAlertPayload;
+use App\Services\StaffMessageNotifications;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Minishlink\WebPush\Subscription;
@@ -19,7 +20,7 @@ final class DeliverHotelPush extends Command
     protected $signature = 'pms:push-deliver';
     protected $description = 'Discover and deliver hotel alerts outside web requests';
 
-    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility): int
+    public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages): int
     {
         if (! config('push.enabled')) {
             return self::SUCCESS;
@@ -56,6 +57,23 @@ final class DeliverHotelPush extends Command
             }
         }
 
+        // Personal messages are discovered per recipient, never broadcast hotel-wide.
+        foreach ($eligible()->lazyById(100) as $device) {
+            foreach ($messages->all($hotel, $device->user_id) as $alert) {
+                if (! $preferences->allows($hotel->id, $device->user_id, $alert['kind'])) {
+                    continue;
+                }
+                DB::table('push_deliveries')->insertOrIgnore([
+                    'push_subscription_id' => $device->id,
+                    'notification_id' => $alert['id'],
+                    'kind' => $alert['kind'],
+                    'available_at' => now(),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
         // A crashed worker may leave a claimed delivery. Reclaim after a generous lease.
         DB::table('push_deliveries')->where('status', 'processing')->where('available_at', '<=', now())
             ->update(['status' => 'pending', 'updated_at' => now()]);
@@ -76,7 +94,9 @@ final class DeliverHotelPush extends Command
                 $this->finish($row, 'cancelled');
                 continue;
             }
-            $alert = $notifications->current($hotel, $row->notification_id);
+            $alert = in_array($row->kind, StaffMessageNotifications::KINDS, true)
+                ? $messages->current($hotel, $device->user_id, $row->notification_id)
+                : $notifications->current($hotel, $row->notification_id);
             if (! $alert || $alert['kind'] !== $row->kind) {
                 $this->finish($row, 'cancelled');
                 continue;

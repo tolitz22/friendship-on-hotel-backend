@@ -16,6 +16,6 @@ final class FrontDeskNotificationController
         $expanded = $request->boolean('expanded') && $request->user()->memberships()
             ->where('hotel_id', $hotel->id)->where('role', 'admin')->where('is_active', true)->exists();
 
-        return response()->json(['data' => $notifications->feed($hotel, $expanded)]);
+        return response()->json(['data' => $notifications->feed($hotel, $expanded, (int) $request->user()->id)]);
     }
 }
