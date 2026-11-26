@@ -60,7 +60,10 @@ final class NoShowFinancialClearanceService
             }
             abort_unless($accounting->summaryFor($folio)['netRecordedChargesMinor'] === $gross, 409, 'Folio total changed.');
             abort_if(DB::table('financial_folio_night_assessments')->where('hotel_id', $hotel->id)
-                ->where('folio_id', $folio->id)->exists(), 409, 'Existing room accounting requires a separate correction.');
+                ->where('folio_id', $folio->id)->exists()
+                && !(config('financial_accounting.enable_no_show_room_correction_posting', false)
+                    && app(NoShowRoomCorrectionCompletion::class)->valid((int) $hotel->id, (int) $folio->id)),
+                409, 'Existing room accounting requires a completed and verified correction.');
 
             $tax = app(PhilippineTaxCalculator::class)->calculate(
                 $gross, $taxClassification, 'inclusive', $taxClassification === 'vat_standard' ? 1200 : 0
