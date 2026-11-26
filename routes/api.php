@@ -95,6 +95,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'create'])->middleware('throttle:20,1');
                 Route::get('/conversations/{conversation}', [\App\Http\Controllers\Api\StaffMessageController::class, 'show'])->whereNumber('conversation');
                 Route::post('/conversations/{conversation}/messages', [\App\Http\Controllers\Api\StaffMessageController::class, 'send'])->whereNumber('conversation')->middleware('throttle:60,1');
+                Route::get('/conversations/{conversation}/attachments/{attachment}', [\App\Http\Controllers\Api\StaffMessageController::class, 'download'])->whereNumber('conversation')->whereNumber('attachment')->middleware('throttle:60,1');
                 Route::post('/conversations/{conversation}/read', [\App\Http\Controllers\Api\StaffMessageController::class, 'read'])->whereNumber('conversation')->middleware('throttle:120,1');
             });
             Route::get('/', [HotelController::class, 'show']);
