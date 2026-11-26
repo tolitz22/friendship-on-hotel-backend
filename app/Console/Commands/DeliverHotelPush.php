@@ -7,6 +7,7 @@ namespace App\Console\Commands;
 use App\Models\Hotel;
 use App\Models\PushSubscription;
 use App\Services\HotelNotificationService;
+use App\Services\PushPreferences;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Minishlink\WebPush\Subscription;
@@ -17,7 +18,7 @@ final class DeliverHotelPush extends Command
     protected $signature = 'pms:push-deliver';
     protected $description = 'Discover and deliver hotel alerts outside web requests';
 
-    public function handle(HotelNotificationService $notifications): int
+    public function handle(HotelNotificationService $notifications, PushPreferences $preferences): int
     {
         if (! config('push.enabled')) {
             return self::SUCCESS;
@@ -49,6 +50,9 @@ final class DeliverHotelPush extends Command
 
         foreach ($notifications->all($hotel) as $alert) {
             foreach ($eligible()->lazyById(100) as $device) {
+                if (! $preferences->allows($hotel->id, $device->user_id, $alert['kind'])) {
+                    continue;
+                }
                 DB::table('push_deliveries')->insertOrIgnore([
                     'push_subscription_id' => $device->id,
                     'notification_id' => $alert['id'],
@@ -76,7 +80,7 @@ final class DeliverHotelPush extends Command
                 continue;
             }
             $device = $eligible()->find($row->push_subscription_id);
-            if (! $device) {
+            if (! $device || ! $preferences->allows($hotel->id, $device->user_id, $row->kind)) {
                 $this->finish($row, 'cancelled');
                 continue;
             }

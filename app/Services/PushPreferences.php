@@ -1,0 +1,39 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use Illuminate\Support\Facades\DB;
+
+final class PushPreferences
+{
+    public const KINDS = ['new_booking', 'checkout_due', 'checkout_overdue', 'room_assignment'];
+
+    public function get(int $hotelId, int $userId): array
+    {
+        $row = DB::table('push_preferences')->where('hotel_id', $hotelId)->where('user_id', $userId)->first();
+        $result = ['enabled' => $row ? (bool) $row->enabled : true];
+        foreach (self::KINDS as $kind) {
+            $result[$kind] = $row ? (bool) $row->{$kind} : true;
+        }
+
+        return $result;
+    }
+
+    public function put(int $hotelId, int $userId, array $values): array
+    {
+        DB::table('push_preferences')->upsert([array_merge($values, [
+            'hotel_id' => $hotelId, 'user_id' => $userId, 'created_at' => now(), 'updated_at' => now(),
+        ])], ['hotel_id', 'user_id'], array_merge(array_keys($values), ['updated_at']));
+
+        return $this->get($hotelId, $userId);
+    }
+
+    public function allows(int $hotelId, int $userId, string $kind): bool
+    {
+        $preferences = $this->get($hotelId, $userId);
+
+        return $preferences['enabled'] && ($preferences[$kind] ?? false) && in_array($kind, self::KINDS, true);
+    }
+}

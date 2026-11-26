@@ -89,6 +89,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/hotels', [HotelController::class, 'index']);
 
         Route::prefix('hotels/{hotel}')->middleware('hotel.member')->group(function (): void {
+            Route::get('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'show'])->middleware(['hotel.admin', 'throttle:30,1']);
+            Route::put('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'update'])->middleware(['hotel.admin', 'throttle:30,1']);
             Route::prefix('push-subscriptions')->middleware(['hotel.admin', 'throttle:30,1'])->group(function (): void {
                 Route::get('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'index']);
                 Route::post('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'store']);
