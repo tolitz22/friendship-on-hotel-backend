@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Domain\Reservations;
 
+use App\Services\Finance\NoShowEffectiveFeeClearance;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -53,6 +54,43 @@ final class NoShowClosingGuard
                     ->where('c.business_date', '<=', $businessDate);
                 self::requireValidClearance($sub);
             });
+        }
+        // Corrected fees have their own immutable validation path. Evaluate all
+        // applied corrections, even if an unrelated original clearance is valid.
+        if (Schema::hasTable('no_show_fee_correction_proposals')
+            && Schema::hasTable('financial_posting_journals')) {
+            $corrections = app(NoShowEffectiveFeeClearance::class);
+            $candidates = DB::table('reservation_records as r')
+                ->join('reservation_folios as f', function ($join): void {
+                    $join->on('f.reservation_record_id', '=', 'r.id')->on('f.hotel_id', '=', 'r.hotel_id');
+                })
+                ->join('no_show_fee_correction_proposals as p', function ($join): void {
+                    $join->on('p.booking_id', '=', 'r.id')->on('p.hotel_id', '=', 'r.hotel_id');
+                })
+                ->where('r.hotel_id', $hotelId)->where('r.lifecycle_state', 'no_show')
+                ->where('r.check_in', '<=', $businessDate)
+                ->distinct()->get(['r.id as booking_id', 'f.id as folio_id']);
+            $valid = [];
+            $invalid = [];
+            foreach ($candidates as $candidate) {
+                $proposal = $corrections->appliedProposal($hotelId, (int) $candidate->booking_id);
+                if ($proposal === null) continue;
+                $clearance = $corrections->resolve($hotelId, (int) $candidate->booking_id, (int) $candidate->folio_id, $proposal);
+                if ($clearance !== null && (string) $clearance->business_date <= $businessDate) {
+                    $valid[] = (int) $candidate->booking_id;
+                } else {
+                    $invalid[] = (int) $candidate->booking_id;
+                }
+            }
+            $query->whereNotIn('r.id', $valid);
+            if ($invalid !== []) {
+                // Group the original predicate before OR-ing invalid corrections;
+                // IDs originate only from the same scoped hotel/date query.
+                $query->orWhere(function (Builder $failed) use ($hotelId, $businessDate, $invalid): void {
+                    $failed->where('r.hotel_id', $hotelId)->where('r.lifecycle_state', 'no_show')
+                        ->where('r.check_in', '<=', $businessDate)->whereIn('r.id', $invalid);
+                });
+            }
         }
         return $query;
     }
