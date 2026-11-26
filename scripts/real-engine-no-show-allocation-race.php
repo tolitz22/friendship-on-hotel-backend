@@ -32,11 +32,12 @@ function configureRace(int $hotelId): void
         'financial_accounting.enable_guest_deposit_posting' => true,
         'financial_accounting.enable_no_show_allocation_posting' => true,
         'financial_accounting.enable_cash_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_refund_posting' => true,
     ]);
 }
 
 if (($argv[1] ?? '') === 'worker') {
-    [, , $barrier, $index, $hotelId, $bookingId, $paymentId, $actorId, $mode] = $argv;
+    [, , $barrier, $index, $hotelId, $bookingId, $paymentId, $actorId, $mode, $evidenceId] = $argv;
     configureRace((int) $hotelId);
     $hotel = Hotel::findOrFail($hotelId);
     touch($barrier.'.ready.'.$index);
@@ -50,21 +51,41 @@ if (($argv[1] ?? '') === 'worker') {
             file_put_contents($barrier.'.journal.'.$index, (string) $journal);
             exit(0);
         }
+        if ($mode === 'refund-competing') {
+            app(\App\Domain\Reservations\RefundRequestService::class)->create($hotel, (int) $bookingId, (int) $actorId, [
+                'requestKey' => 'race-refund-'.$index, 'paymentRecordId' => (int) $paymentId,
+                'amountMinor' => 70000, 'reason' => 'Return synthetic excess deposit.',
+            ]);
+            exit(0);
+        }
+        if ($mode === 'refund-verify' || ($mode === 'refund-allocation' && $index === '1')) {
+            app(\App\Domain\Reservations\FolioRefundDisbursementService::class)->review(
+                $hotel, (int) $bookingId, (int) $evidenceId, (int) $actorId,
+                'verify', 'Independent synthetic bank evidence review.'
+            );
+            exit(0);
+        }
         $result = app(\App\Domain\Reservations\FolioSettlementService::class)->allocate(
             $hotel, (int) $bookingId, (int) $paymentId, (int) $actorId,
             $mode === 'duplicate' ? 'race-shared-allocation' : 'race-allocation-'.$index,
-            'guest', 'Synthetic guest', 120000, null
+            'guest', 'Synthetic guest', $mode === 'refund-allocation' ? 200000 : 120000, null
         );
         exit($result['replayed'] ? 8 : 0);
     } catch (\Illuminate\Validation\ValidationException $exception) {
         if ($mode === 'competing' && isset($exception->errors()['amountMinor'])) exit(9);
+        if ($mode === 'refund-verify' && isset($exception->errors()['evidence'])) exit(9);
+        throw $exception;
+    } catch (HttpException $exception) {
+        if ($mode === 'refund-competing' && $exception->getStatusCode() === 409
+            && str_contains($exception->getMessage(), 'No-show refund exceeds verified excess funds')) exit(9);
         throw $exception;
     }
 }
 
 $mode = $argv[1] ?? 'competing';
-if (!in_array($mode, ['competing', 'duplicate', 'deposit-bank', 'deposit-cash'], true)) throw new RuntimeException('Invalid race mode.');
+if (!in_array($mode, ['competing', 'duplicate', 'deposit-bank', 'deposit-cash', 'refund-competing', 'refund-verify', 'refund-allocation'], true)) throw new RuntimeException('Invalid race mode.');
 $isDeposit = in_array($mode, ['deposit-bank', 'deposit-cash'], true);
+$isRefund = str_starts_with($mode, 'refund-');
 $hotel = Hotel::create(['name' => 'No-show allocation race fixture', 'timezone' => 'Asia/Manila', 'currency' => 'PHP']);
 $actor = User::create([
     'name' => 'No-show race staff', 'email' => 'ns-race-'.bin2hex(random_bytes(5)).'@example.test',
@@ -109,7 +130,7 @@ $folio = DB::table('reservation_folios')->where('hotel_id', $hotel->id)->where('
 $paymentId = DB::table('folio_payment_records')->insertGetId([
     'hotel_id' => $hotel->id, 'folio_id' => $folio, 'request_key' => 'race-bank-deposit',
     'payload_sha256' => str_repeat('b', 64), 'method' => 'bank_transfer', 'reference' => 'RACE-BANK',
-    'amount_minor' => 200000, 'status' => 'staff_confirmed', 'recorded_by' => $actor->id,
+    'amount_minor' => $isRefund ? 300000 : 200000, 'status' => 'staff_confirmed', 'recorded_by' => $actor->id,
     'reviewed_by' => $reviewer->id, 'created_at' => now(), 'updated_at' => now(),
 ]);
 DB::table('folio_settlement_verifications')->insert([
@@ -143,12 +164,28 @@ if ($mode === 'deposit-cash') {
 if (!$isDeposit) {
     app(\App\Services\Finance\GuestDepositJournalService::class)->recognize($hotel, $bookingId, $paymentId, $reviewer->id);
 }
+$evidenceId = 0;
+if (in_array($mode, ['refund-verify', 'refund-allocation'], true)) {
+    $requests = app(\App\Domain\Reservations\RefundRequestService::class);
+    $refund = $requests->create($hotel, $bookingId, $actor->id, [
+        'requestKey' => 'race-approved-refund', 'paymentRecordId' => $paymentId,
+        'amountMinor' => 100000, 'reason' => 'Return the synthetic excess deposit.',
+    ]);
+    $requests->review($hotel, $bookingId, (int) $refund['id'], $reviewer->id, [
+        'decision' => 'approve', 'note' => 'Independent synthetic refund approval.',
+    ]);
+    $evidence = app(\App\Domain\Reservations\FolioRefundDisbursementService::class)->record(
+        $hotel, $bookingId, (int) $refund['id'], $reviewer->id, 'SYNTHETIC-RACE-BANK-REFUND'
+    );
+    $evidenceId = (int) $evidence['id'];
+}
 $barrier = sys_get_temp_dir().'/pms-allocation-race-'.bin2hex(random_bytes(8));
 $workers = [];
 try {
     foreach ([1, 2] as $index) {
         $worker = proc_open([PHP_BINARY, __FILE__, 'worker', $barrier, (string) $index, (string) $hotel->id,
-            (string) $bookingId, (string) $paymentId, (string) $reviewer->id, $mode], [STDIN, STDOUT, STDERR], $pipes);
+            (string) $bookingId, (string) $paymentId,
+            (string) ($isRefund ? $actor->id : $reviewer->id), $mode, (string) $evidenceId], [STDIN, STDOUT, STDERR], $pipes);
         if (!is_resource($worker)) throw new RuntimeException('Cannot start worker.');
         $workers[] = $worker;
     }
@@ -177,13 +214,39 @@ try {
             throw new RuntimeException('Cash deposit recognition changed drawer records.');
         }
         echo "$driver passed $mode recognition race.\n";
+    } elseif ($isRefund) {
+        $requests = DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
+        $verified = DB::table('folio_refund_disbursement_evidence')->where('hotel_id', $hotel->id)
+            ->where('folio_id', $folio)->where('status', 'verified');
+        $refundJournals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+            ->where('source_type', 'no_show_deposit_refund');
+        $allocationJournals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+            ->where('source_type', 'no_show_deposit_allocation');
+        $mixed = $mode === 'refund-allocation';
+        $competing = $mode === 'refund-competing';
+        $expectedBalances = [
+            'depositLiabilityMinor' => $competing ? 300000 : ($mixed ? 0 : 200000),
+            'receivableMinor' => $mixed ? 0 : 200000,
+        ];
+        if ($statuses !== ($mixed ? [0, 0] : [0, 9]) || (clone $requests)->count() !== 1
+            || (int) (clone $requests)->sum('amount_minor') !== ($competing ? 70000 : 100000)
+            || (clone $verified)->count() !== ($competing ? 0 : 1)
+            || (int) (clone $verified)->sum('amount_minor') !== ($competing ? 0 : 100000)
+            || $refundJournals->count() !== ($competing ? 0 : 1)
+            || (clone $allocations)->count() !== ($mixed ? 1 : 0)
+            || $allocationJournals->count() !== ($mixed ? 1 : 0)
+            || !$report['reconciled'] || $report['matchedJournalBalances'] !== $expectedBalances
+            || $report['settled'] !== $mixed) {
+            throw new RuntimeException('Refund race failed: '.json_encode([$statuses, $report]));
+        }
+        echo "$driver passed $mode race.\n";
     } elseif ($statuses !== ($mode === 'duplicate' ? [0, 8] : [0, 9])
         || (clone $allocations)->count() !== 1 || (int) (clone $allocations)->sum('amount_minor') !== 120000
         || DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('source_type', 'no_show_deposit_allocation')->count() !== 1
         || !$report['reconciled'] || $report['expectedBalances'] !== ['depositLiabilityMinor' => 80000, 'receivableMinor' => 80000]) {
         throw new RuntimeException('Allocation race failed: '.json_encode([$statuses, $report]));
     }
-    if (!$isDeposit) echo "$driver passed $mode allocation race.\n";
+    if (!$isDeposit && !$isRefund) echo "$driver passed $mode allocation race.\n";
 } finally {
     foreach ($workers as $worker) {
         if (is_resource($worker)) { proc_terminate($worker); proc_close($worker); }
