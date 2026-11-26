@@ -132,3 +132,50 @@ it('blocks attachment downloads outside the authorized conversation and hotel', 
     $this->reception->memberships()->where('hotel_id',$this->hotel->id)->update(['is_active'=>false]);
     $this->getJson($url.'/attachments/'.$aid)->assertNotFound();
 });
+
+it('searches and shares only rooms in the active hotel and redacts deleted references', function () {
+    $type=$this->hotel->roomTypes()->create(['name'=>'QA Standard','max_occupancy'=>2]);
+    $room=$this->hotel->rooms()->create(['room_type_id'=>$type->id,'number'=>'QA203','floor_number'=>2]);
+    $foreignType=$this->otherHotel->roomTypes()->create(['name'=>'QA Standard','max_occupancy'=>2]);
+    $foreign=$this->otherHotel->rooms()->create(['room_type_id'=>$foreignType->id,'number'=>'QA999','floor_number'=>2]);
+    $this->getJson($this->base.'/records?type=room&q=QA203')->assertOk()
+        ->assertJsonCount(1,'data')->assertJsonPath('data.0.id',(string)$room->id);
+    $this->getJson($this->base.'/records?type=room&q=QA999')->assertOk()->assertJsonCount(0,'data');
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id;
+    $payload=['client_id'=>(string)Str::uuid(),'record_type'=>'room','record_id'=>$room->id];
+    $this->postJson($url.'/messages',array_replace($payload,['record_id'=>$foreign->id]))->assertStatus(422);
+    $this->postJson($url.'/messages',array_replace($payload,['record_type'=>'guest']))->assertStatus(422);
+    $this->postJson($url.'/messages',array_diff_key($payload,['record_id'=>true]))->assertStatus(422);
+    $mid=$this->postJson($url.'/messages',$payload)->assertOk()->assertJsonPath('data.record.label','Room QA203')->json('data.id');
+    $this->postJson($url.'/messages',$payload)->assertOk()->assertJsonPath('data.id',$mid);
+    $this->postJson($url.'/messages',array_replace($payload,['body'=>'Changed']))->assertStatus(409);
+    expect(DB::table('staff_messages')->where('conversation_id',$id)->count())->toBe(1);
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($url)->assertOk()->assertJsonPath('data.0.record.id',(string)$room->id);
+    $this->reception->memberships()->where('hotel_id',$this->hotel->id)->update(['permission_overrides'=>json_encode([])]);
+    $this->getJson($this->base.'/records?type=room')->assertForbidden();
+    $result=$this->getJson($url)->assertOk()->assertJsonPath('data.0.record',null)->assertJsonPath('data.0.record_unavailable',true)->json('data.0');
+    expect(array_key_exists('record_id',$result))->toBeFalse();
+    expect(array_key_exists('record_type',$result))->toBeFalse();
+    $inbox=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'))->firstWhere('id',$id);
+    expect($inbox['latest']['record'])->toBeNull();
+    expect(array_key_exists('record_id',$inbox['latest']))->toBeFalse();
+    Sanctum::actingAs($this->manager,['hotel:read','hotel:write']);
+    $room->delete();
+    $this->getJson($url)->assertOk()->assertJsonPath('data.0.record_unavailable',true)->assertJsonPath('data.0.record',null);
+});
+
+it('enforces the record picker role matrix and rejects unauthorized record types', function () {
+    Sanctum::actingAs($this->cleaner,['hotel:read']);
+    $this->getJson($this->base.'/records?type=booking')->assertForbidden();
+    $this->getJson($this->base.'/records?type=housekeeping')->assertOk();
+    $this->getJson($this->base.'/records?type=maintenance')->assertOk();
+    $this->getJson($this->base.'/records?type=guest')->assertStatus(422);
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->manager->id]])->assertOk()->json('data.id');
+    $this->postJson($this->base.'/conversations/'.$id.'/messages',['client_id'=>(string)Str::uuid(),'record_type'=>'booking','record_id'=>1])->assertStatus(422);
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($this->base.'/records?type=booking')->assertOk();
+    $this->getJson($this->base.'/records?type=housekeeping')->assertForbidden();
+    $this->getJson($this->base.'/records?type=maintenance')->assertForbidden();
+});
