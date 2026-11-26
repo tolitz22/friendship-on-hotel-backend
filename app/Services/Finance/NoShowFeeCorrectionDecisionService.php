@@ -13,7 +13,7 @@ final class NoShowFeeCorrectionDecisionService
 {
     public function propose(Hotel $hotel, int $bookingId, int $actorId, int $replacementMinor, string $reason): int
     {
-        $this->enabled();
+        $this->enabled($hotel);
         $reason = $this->document($reason);
         return DB::transaction(function () use ($hotel, $bookingId, $actorId, $replacementMinor, $reason): int {
             app(ReadinessWriteGuard::class)->lockHotel($hotel);
@@ -34,7 +34,7 @@ final class NoShowFeeCorrectionDecisionService
 
     public function approve(Hotel $hotel, int $proposalId, int $actorId, string $taxClassification, string $taxBasis, string $reason): int
     {
-        $this->enabled();
+        $this->enabled($hotel);
         $reason = $this->document($reason);
         $taxBasis = $this->document($taxBasis);
         abort_unless(in_array($taxClassification, ['vat_standard', 'vat_zero', 'vat_exempt', 'non_vat'], true),
@@ -77,7 +77,7 @@ final class NoShowFeeCorrectionDecisionService
      */
     private function reverseApprovedFee(Hotel $hotel, int $proposalId, int $actorId): int
     {
-        $this->enabled();
+        $this->enabled($hotel);
         abort_unless(config('financial_accounting.enable_no_show_fee_correction_posting', false),
             409, 'Fee correction posting is disabled.');
         abort_unless(DB::transactionLevel() > 0, 409, 'An atomic fee correction transaction is required.');
@@ -143,7 +143,7 @@ final class NoShowFeeCorrectionDecisionService
     public function applyApprovedCorrection(Hotel $hotel, int $proposalId, int $actorId): array
     {
         return DB::transaction(function () use ($hotel, $proposalId, $actorId): array {
-            $this->enabled();
+            $this->enabled($hotel);
             abort_unless(config('financial_accounting.enable_no_show_fee_correction_posting', false)
                 && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id),
                 409, 'Fee correction posting is disabled.');
@@ -265,9 +265,10 @@ final class NoShowFeeCorrectionDecisionService
         return $snapshot;
     }
 
-    private function enabled(): void
+    private function enabled(Hotel $hotel): void
     {
-        abort_unless(config('financial_accounting.enable_no_show_fee_correction_review', false),
+        abort_unless(config('financial_accounting.enable_no_show_fee_correction_review', false)
+            && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id),
             409, 'Fee correction review is disabled.');
     }
 
