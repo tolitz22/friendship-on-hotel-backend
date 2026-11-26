@@ -51,6 +51,88 @@ final class NoShowRoomNightCorrectionDecisionService
         }, 3);
     }
 
+
+    /**
+     * Reverse the complete approved journal set atomically. Revenue recognition
+     * must be reversed before VAT and the original deferred source; never
+     * leave an independently posted partial correction.
+     */
+    public function post(Hotel $hotel, int $proposalId, int $actorId): array
+    {
+        abort_unless(config('financial_accounting.enable_no_show_room_correction_posting', false),
+            409, 'Room-night correction posting is disabled.');
+
+        return DB::transaction(function () use ($hotel, $proposalId, $actorId): array {
+            $this->authorize($hotel, $actorId);
+            $proposal = DB::table('no_show_room_correction_proposals')->where('hotel_id', $hotel->id)
+                ->where('id', $proposalId)->lockForUpdate()->first();
+            abort_unless($proposal !== null, 404);
+            $approval = DB::table('no_show_room_correction_reviews')->where('proposal_id', $proposalId)->first();
+            abort_unless($approval !== null && (int) $approval->reviewed_by === $actorId
+                && (int) $proposal->proposed_by !== $actorId, 403, 'Independent approving administrator required.');
+            abort_unless(hash_equals($proposal->snapshot_sha256, hash('sha256', $proposal->snapshot)),
+                409, 'Invalid approved snapshot.');
+            $approved = json_decode($proposal->snapshot, true, 512, JSON_THROW_ON_ERROR);
+            $clock = DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->lockForUpdate()->first();
+            abort_unless($clock !== null && $clock->status === 'open', 409, 'Open business date required.');
+            $originals = $approved['journalRecords'];
+            abort_unless($originals !== [], 409, 'Approved journal set is empty.');
+            $order = ['nightly_revenue' => 0, 'vat_liability' => 1, 'folio_benefit' => 2, 'folio_deferred' => 3];
+            foreach ($originals as $original) {
+                abort_unless(isset($order[$original['source_type']]), 409, 'Unsupported original journal.');
+            }
+            usort($originals, fn (array $a, array $b): int =>
+                [$order[$a['source_type']], (int) $a['id']] <=> [$order[$b['source_type']], (int) $b['id']]);
+
+            $existing = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+                ->where('source_type', 'no_show_room_correction')->where('source_reference', 'proposal-'.$proposalId)
+                ->get()->keyBy('reverses_journal_id');
+            $replayed = $existing->isNotEmpty();
+            if ($replayed) {
+                abort_unless($existing->count() === count($originals), 409, 'Incomplete reversal set; manual review required.');
+            } else {
+                $snapshot = $this->snapshot($hotel, (int) $proposal->booking_id);
+                abort_unless((string) $proposal->business_date === $snapshot['businessDate']
+                    && hash_equals($proposal->snapshot_sha256, hash('sha256', json_encode($snapshot, JSON_THROW_ON_ERROR))),
+                    409, 'Approved accounting evidence changed; posting blocked.');
+            }
+
+            $ids = [];
+            foreach ($originals as $original) {
+                $originalId = (int) $original['id'];
+                $source = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->where('id', $originalId)->first();
+                abort_unless($source !== null && $source->currency === 'PHP' && $source->source_type === $original['source_type']
+                    && $source->source_reference === $original['source_reference'] && $source->reverses_journal_id === null,
+                    409, 'Original journal changed.');
+                $lines = [];
+                foreach ($approved['journalLines'] as $line) {
+                    if ((int) $line['journal_id'] === $originalId) {
+                        $lines[] = ['account_code' => $line['account_code'], 'debit_minor' => (int) $line['credit_minor'],
+                            'credit_minor' => (int) $line['debit_minor']];
+                    }
+                }
+                $current = DB::table('financial_posting_lines')->where('journal_id', $originalId)->orderBy('line_number')->get()
+                    ->map(fn ($line): array => ['account_code' => $line->account_code,
+                        'debit_minor' => (int) $line->credit_minor, 'credit_minor' => (int) $line->debit_minor])->all();
+                abort_unless(count($lines) >= 2 && $lines === $current, 409, 'Original journal lines changed.');
+                $key = 'no-show-room-reversal-'.$proposalId.'-'.$originalId;
+                if ($replayed) {
+                    $prior = $existing->get($originalId);
+                    abort_unless($prior !== null && $prior->idempotency_key === $key && $prior->currency === 'PHP'
+                        && (int) $prior->posted_by === $actorId
+                        && !DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+                            ->where('reverses_journal_id', $prior->id)->exists(), 409, 'Invalid prior correction journal.');
+                }
+                $ids[] = app(FinancialJournalPostingService::class)->post(
+                    (int) $hotel->id, $key, 'no_show_room_correction', 'proposal-'.$proposalId,
+                    'Approved no-show room accounting reversal #'.$originalId, $lines, $actorId, $originalId
+                );
+            }
+            return ['proposalId' => (string) $proposalId, 'journalIds' => array_map('strval', $ids),
+                'replayed' => $replayed, 'folioAdjusted' => false, 'refundIssued' => false];
+        }, 3);
+    }
+
     private function authorize(Hotel $hotel, int $actorId): void
     {
         abort_unless(config('financial_accounting.enable_no_show_room_correction_review', false)
