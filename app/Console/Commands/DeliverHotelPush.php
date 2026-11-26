@@ -29,7 +29,7 @@ final class DeliverHotelPush extends Command
         if (! config('push.enabled')) {
             return self::SUCCESS;
         }
-        $issues = $readiness->configurationIssues();
+        $issues = array_merge($readiness->configurationIssues(), $transport->runtimeIssues());
         if ($issues !== []) {
             $this->error('Push configuration incomplete: '.implode(', ', $issues));
 
@@ -53,8 +53,9 @@ final class DeliverHotelPush extends Command
         }
         try {
             $sender = $transport->make();
-        } catch (\Throwable) {
+        } catch (\Throwable $failure) {
             $this->error('Push transport initialization failed. Check the installed dependency and VAPID configuration.');
+            $this->error($transport->diagnostic($failure));
 
             return self::FAILURE;
         }

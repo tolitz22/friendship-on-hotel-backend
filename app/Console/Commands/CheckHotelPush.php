@@ -19,12 +19,14 @@ final class CheckHotelPush extends Command
     public function handle(PushDeliveryReadiness $readiness, HotelNotificationService $notifications, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushTransport $transport): int
     {
         $issues = $readiness->configurationIssues();
+        $issues = array_merge($issues, $transport->runtimeIssues());
         if ($issues === []) {
             try {
                 // Initialize the actual locked transport without making any request.
                 $transport->make();
-            } catch (\Throwable) {
+            } catch (\Throwable $failure) {
                 $issues[] = 'transport_initialization_failed';
+                $issues[] = $transport->diagnostic($failure);
             }
         }
         $this->line('Delivery switch: '.(config('push.enabled') ? 'enabled' : 'disabled'));

@@ -32,3 +32,7 @@ The worker now supports `PMS_PUSH_SCOPE=all`. In this mode omit `PMS_PUSH_HOTEL_
 ## Web Push v11 transport initialization
 
 The locked v11 constructor takes a PSR-18 client as its third argument. `PushTransport` supplies Guzzle with explicit connect and request timeouts, TLS verification, redirects disabled, and PSR-17 factories. Both delivery and read-only preflight initialize the same transport. The transport tests use synthetic VAPID keys and a mock HTTP handler; no live notification is sent by CI.
+
+### PHP runtime startup checks
+
+The v11 library emits a user notice if neither optional GMP nor BCMath is loaded. Laravel can promote this notice to an exception. Pass a PSR logger to prevent optional notices interrupting startup; explicitly check required curl, mbstring, openssl, P-256, AES-128-GCM and HMAC SHA-256 before constructing the sender. On unexpected startup failure, preflight and delivery print only the exception class, never the message, stack or secrets. GMP/BCMath may be installed for performance, but are not mandatory for startup.

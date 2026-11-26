@@ -48,3 +48,26 @@ it('sends an encrypted synthetic payload through a PSR-18 mock and preserves pro
     expect($history[0]['request']->getHeaderLine('Content-Encoding'))->toBe('aes128gcm');
     expect((string) $history[0]['request']->getBody())->not->toContain('Synthetic QA alert');
 });
+
+it('does not turn an optional runtime performance notice into a transport failure', function (): void {
+    $transport = app(PushTransport::class);
+    expect($transport->runtimeIssues())->toBe([]);
+    set_error_handler(static function (int $severity, string $message): bool {
+        if ($severity === E_USER_NOTICE || $severity === E_USER_WARNING) {
+            throw new ErrorException('Unexpected PHP runtime notice', 0, $severity);
+        }
+
+        return false;
+    });
+    try {
+        expect($transport->make())->toBeInstanceOf(WebPush::class);
+    } finally {
+        restore_error_handler();
+    }
+});
+
+it('reports only a safe exception type rather than private exception contents', function (): void {
+    $transport = app(PushTransport::class);
+    expect($transport->diagnostic(new RuntimeException('SECRET-TEST-VAPID-KEY')))
+        ->toBe('transport_exception_type:RuntimeException');
+});
