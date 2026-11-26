@@ -733,3 +733,95 @@ it('posts no-show allocations atomically and rejects unsafe ledger states', func
     }
     expect(app(NoShowRefundEligibility::class)->review($hotel, $booking)['settled'])->toBeTrue();
 })->with(['success', 'missing receipt', 'reversed receipt', 'legacy replay', 'closed date']);
+
+it('reconciles external no-show refunds atomically without sending funds', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_allocation_posting' => true,
+        'financial_accounting.enable_no_show_refund_posting' => $scenario !== 'disabled',
+    ]);
+    if ($scenario !== 'missing deposit') {
+        $receipt = app(\App\Services\Finance\GuestDepositJournalService::class)
+            ->recognize($hotel, $booking, $payment, $reviewer->id);
+        if ($scenario === 'reversed deposit') {
+            app(FinancialJournalPostingService::class)->post($hotel->id, 'qa-refund-reverse-'.$payment,
+                'reversal', 'qa-refund-reverse-'.$payment, 'Reverse synthetic refund deposit', [
+                    ['account_code' => 'hotel_bank', 'debit_minor' => 0, 'credit_minor' => 300000],
+                    ['account_code' => 'guest_deposit_liability', 'debit_minor' => 300000, 'credit_minor' => 0],
+                ], $reviewer->id, $receipt);
+        }
+    }
+    noShowSignIn($author);
+    $refunds = $path.'/refund-requests';
+    $input = ['requestKey' => 'qa-ledger-refund-first', 'paymentRecordId' => $payment,
+        'amountMinor' => 40000, 'reason' => 'Return part of the verified excess deposit.'];
+    $this->postJson($refunds, array_replace($input, ['amountMinor' => 100001]))->assertConflict();
+    $refund = $this->postJson($refunds, $input)->assertCreated()->json('data.id');
+    noShowSignIn($reviewer);
+    $this->postJson($refunds.'/'.$refund.'/review', [
+        'decision' => 'approve', 'note' => 'Reviewed the original excess deposit independently.',
+    ])->assertOk();
+    $id = $this->postJson($refunds.'/'.$refund.'/disbursement-evidence', [
+        'externalReference' => 'QA-LEDGER-REFUND-001',
+    ])->assertCreated()->assertJsonPath('data.fundsSentByPms', false)->json('data.id');
+    $verify = ['decision' => 'verify', 'note' => 'Independently reviewed external bank evidence.'];
+    $endpoint = $path.'/refund-disbursements/'.$id.'/review';
+    $this->postJson($endpoint, $verify)->assertUnprocessable();
+    noShowSignIn($author);
+    if ($scenario === 'closed date') {
+        DB::table('financial_day_closes')->insert([
+            'hotel_id' => $hotel->id, 'business_date' => '2026-11-22', 'status' => 'completed',
+            'closed_by' => $author->id, 'closed_at' => now(), 'reconciliation_snapshot' => '{}',
+        ]);
+    }
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+        ->where('source_type', 'no_show_deposit_refund');
+    if (in_array($scenario, ['missing deposit', 'reversed deposit', 'closed date'], true)) {
+        $this->postJson($endpoint, $verify)->assertStatus($scenario === 'closed date' ? 422 : 409);
+        expect(DB::table('folio_refund_disbursement_evidence')->where('id', $id)->value('status'))->toBe('pending')
+            ->and($journals->count())->toBe(0);
+        return;
+    }
+    $this->postJson($endpoint, $verify)->assertOk()->assertJsonPath('data.fundsSentByPms', false);
+    $this->postJson($endpoint, $verify)->assertUnprocessable();
+    if ($scenario === 'disabled') {
+        expect($journals->count())->toBe(0);
+        return;
+    }
+    $first = $journals->first();
+    expect($journals->count())->toBe(1);
+    $second = $this->postJson($refunds, array_replace($input, [
+        'requestKey' => 'qa-ledger-refund-second', 'amountMinor' => 60000,
+    ]))->assertCreated()->json('data.id');
+    noShowSignIn($reviewer);
+    $this->postJson($refunds.'/'.$second.'/review', [
+        'decision' => 'approve', 'note' => 'Reviewed the remaining excess deposit independently.',
+    ])->assertOk();
+    $secondId = $this->postJson($refunds.'/'.$second.'/disbursement-evidence', [
+        'externalReference' => 'QA-LEDGER-REFUND-002',
+    ])->assertCreated()->json('data.id');
+    noShowSignIn($author);
+    $this->postJson($path.'/refund-disbursements/'.$secondId.'/review', $verify)->assertOk();
+    expect($journals->count())->toBe(2);
+    foreach ($journals->orderBy('id')->get() as $journal) {
+        $amount = (int) $journal->id === (int) $first->id ? 40000 : 60000;
+        $lines = DB::table('financial_posting_lines')->where('journal_id', $journal->id)->orderBy('line_number')->get();
+        expect($lines->count())->toBe(2)
+            ->and($lines[0]->account_code)->toBe('guest_deposit_liability')
+            ->and((int) $lines[0]->debit_minor)->toBe($amount)
+            ->and((int) $lines[0]->credit_minor)->toBe(0)
+            ->and($lines[1]->account_code)->toBe('hotel_bank')
+            ->and((int) $lines[1]->credit_minor)->toBe($amount)
+            ->and((int) $lines[1]->debit_minor)->toBe(0);
+    }
+    $remaining = app(NoShowRefundEligibility::class)->review($hotel, $booking);
+    expect($remaining['verifiedRefundsMinor'])->toBe(100000)
+        ->and($remaining['maximumRefundRequestMinor'])->toBe(0);
+})->with(['success', 'disabled', 'missing deposit', 'reversed deposit', 'closed date']);
