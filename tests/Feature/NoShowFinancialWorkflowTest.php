@@ -1132,3 +1132,58 @@ it('corrects cleared no-show fees atomically and preserves financial evidence', 
     'atomic rollback' => ['rollback', 100000, 0],
     'damaged reversal' => ['damaged journal', 100000, 150000],
 ]);
+
+
+it('enforces staged closing integrity and preserves the clock on failure', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, $base, $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 200000);
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    noShowApprove($this, $path, $review)->assertCreated();
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_closing_integrity' => true,
+    ]);
+    $posting = app(FinancialJournalPostingService::class);
+    $lines = [
+        ['account_code' => 'hotel_bank', 'debit_minor' => 200000, 'credit_minor' => 0],
+        ['account_code' => 'guest_deposit_liability', 'debit_minor' => 0, 'credit_minor' => 200000],
+    ];
+    if ($scenario !== 'missing deposit') {
+        app(\App\Services\Finance\GuestDepositJournalService::class)
+            ->recognize($hotel, $booking, $payment, $reviewer->id);
+    }
+    if ($scenario === 'duplicate' || $scenario === 'orphan') {
+        $posting->post($hotel->id, 'qa-integrity-'.$scenario, 'guest_deposit_receipt',
+            'folio-payment-'.($scenario === 'duplicate' ? $payment : '9223372036854775807'),
+            'Synthetic integrity test', $lines, $reviewer->id);
+    }
+    $guard = app(\App\Services\Finance\NoShowClosingIntegrityService::class);
+    $before = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->orderBy('id')->get()->all();
+    $report = $guard->report($hotel, '2026-11-22', $reviewer->id);
+    expect($report['integrityValid'])->toBe($scenario === 'clean');
+    expect(DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)->orderBy('id')->get()->all())->toEqual($before);
+    $service = app(\App\Services\Finance\FinancialBusinessDayCloseService::class);
+    if ($scenario === 'clean') {
+        $result = $service->close($hotel->id, '2026-11-22', $reviewer->id);
+        expect($result['snapshot']['no_show_integrity']['issue_count'])->toBe(0)
+            ->and($result['next_business_date'])->toBe('2026-11-23');
+        return;
+    }
+    $reason = match ($scenario) {
+        'duplicate' => 'duplicate_journal',
+        'orphan' => 'orphaned_journal',
+        default => 'ledger_not_reconciled',
+    };
+    expect(array_column($report['issues'], 'reason'))->toContain($reason);
+    try {
+        $service->close($hotel->id, '2026-11-22', $reviewer->id);
+        $this->fail('Financial integrity must prevent closing.');
+    } catch (\Illuminate\Validation\ValidationException $exception) {
+        expect($exception->errors())->toHaveKey('no_show_journal_integrity');
+    }
+    expect(DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->value('business_date'))->toBe('2026-11-22')
+        ->and(DB::table('financial_day_closes')->where('hotel_id', $hotel->id)->where('business_date', '2026-11-22')->exists())->toBeFalse();
+})->with(['clean', 'missing deposit', 'duplicate', 'orphan']);
