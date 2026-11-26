@@ -52,16 +52,29 @@ final class NoShowRefundEligibility
             $payments[] = ['paymentId' => $payment['id'], 'maximumRequestMinor' => min($excess, max(0, $payment['amountMinor'] - $used))];
         }
         $maximumRefund = min($excess, array_sum(array_column($payments, 'maximumRequestMinor')));
+        // Keep collection exposure separate from allocation and refund obligations.
+        $verifiedRefunds = $statement['verifiedRefundsMinor'];
+        $netVerifiedFunds = $verified - $verifiedRefunds;
+        $unallocatedFunds = $netVerifiedFunds - $allocated;
+        $pendingRefunds = max(0, $reserved - $verifiedRefunds);
+        $reconciled = $valid && $statement['paymentEvidenceIndependentlyReviewed']
+            && $allocated >= 0 && $allocated <= $net && $unallocatedFunds >= 0
+            && $pendingRefunds <= $unallocatedFunds;
 
         return [
             'financialClearanceValid' => $valid,
             'canRequestRefund' => $maximumRefund > 0,
             'verifiedPaymentsMinor' => $verified, 'reservedRefundsMinor' => $reserved,
+            'verifiedRefundsMinor' => $verifiedRefunds,
+            'pendingRefundsMinor' => $pendingRefunds,
+            'netVerifiedFundsMinor' => $netVerifiedFunds,
+            'unallocatedVerifiedFundsMinor' => $reconciled ? $unallocatedFunds : null,
+            'unallocatedFeeMinor' => $reconciled ? $net - $allocated : null,
+            'reconciliationValid' => $reconciled,
             'remainingCollectionMinor' => $valid ? max(0, $net - $verified + $statement['verifiedRefundsMinor']) : null,
             'maximumRefundRequestMinor' => $maximumRefund,
-            'settled' => $valid && $statement['paymentEvidenceIndependentlyReviewed']
-                && $allocated === $net && $verified - $statement['verifiedRefundsMinor'] === $net
-                && $reserved === $statement['verifiedRefundsMinor'], 'payments' => $payments,
+            'settled' => $reconciled && $allocated === $net && $unallocatedFunds === 0
+                && $pendingRefunds === 0, 'payments' => $payments,
             'refundIssued' => false,
         ];
     }
