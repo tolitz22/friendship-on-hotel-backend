@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // Staged no-show bank deposit journals; keep off until reconciliation and acceptance.
+    'enable_guest_deposit_posting' => (bool) env('FINANCE_ENABLE_GUEST_DEPOSIT_POSTING', false),
     // Enable only after reimbursement acceptance and finance sign-off.
     'enable_employee_reimbursements' => (bool) env('FINANCE_ENABLE_EMPLOYEE_REIMBURSEMENTS', false),
     // Supplier financial posting requires separate acceptance and finance sign-off.
