@@ -1250,3 +1250,76 @@ it('completes the administrator no-show settlement workflow through the new API 
     $this->getJson($allocations)->assertForbidden();
     $this->getJson($path.'/no-show-refunds')->assertForbidden();
 });
+
+
+it('exposes the fee correction approval and posting lifecycle with immutable audit history', function (int $replacement, string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, $base, $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $review = noShowApply($this, $path);
+    noShowSignIn($reviewer);
+    $original = noShowApprove($this, $path, $review, 'vat_standard')->assertCreated()->json('data.journalId');
+    config()->set([
+        'financial_accounting.enable_no_show_fee_correction_review' => true,
+        'financial_accounting.enable_no_show_fee_correction_posting' => true,
+        'financial_accounting.enable_no_show_closing_integrity' => true,
+    ]);
+    $endpoint = $path.'/no-show-corrections';
+    $reason = 'Documented fee correction for synthetic integration acceptance.';
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id);
+    $before = (clone $journals)->count();
+    $originalLines = DB::table('financial_posting_lines')->where('journal_id', $original)->orderBy('line_number')->get()->all();
+    noShowSignIn($author);
+    $this->getJson($endpoint.'?replacementMinor='.$replacement)->assertOk()
+        ->assertJsonPath('data.fee.eligibleForReview', true)
+        ->assertJsonPath('data.fee.proposedFolioCreditMinor', 200000 - $replacement);
+    $this->postJson($endpoint.'/fee', ['reason' => $reason, 'replacementMinor' => 200001])->assertConflict();
+    $id = $this->postJson($endpoint.'/fee', ['reason' => $reason, 'replacementMinor' => $replacement])
+        ->assertCreated()->json('data.proposalId');
+    $this->getJson($endpoint)->assertOk()->assertJsonPath('data.corrections.0.status', 'awaiting_review');
+    $this->getJson($base.'/finance/business-day')->assertOk()->assertJsonPath('data.noShowIntegrity.integrityValid', false);
+    $approve = ['reason' => $reason, 'taxBasis' => $reason, 'taxClassification' => 'vat_standard'];
+    $proposal = $endpoint.'/fee/'.$id;
+    $this->postJson($proposal.'/approve', $approve)->assertForbidden();
+    noShowSignIn($reviewer);
+    if ($scenario === 'stale') {
+        noShowPayment($hotel, $folio, $author, $reviewer, 10000);
+        $this->postJson($proposal.'/approve', $approve)->assertConflict();
+        expect((clone $journals)->count())->toBe($before);
+        return;
+    }
+    $this->postJson($proposal.'/approve', $approve)->assertOk();
+    $vat = $replacement - intdiv($replacement * 10000 + 5600, 11200);
+    $this->getJson($endpoint)->assertOk()
+        ->assertJsonPath('data.corrections.0.status', 'approved_unposted')
+        ->assertJsonPath('data.corrections.0.replacementVatMinor', $vat)
+        ->assertJsonPath('data.corrections.0.replacementRevenueMinor', $replacement - $vat);
+    expect((clone $journals)->count())->toBe($before);
+    noShowSignIn($author);
+    $this->postJson($proposal.'/post', ['acknowledged' => true])->assertForbidden();
+    noShowSignIn($reviewer);
+    $this->postJson($proposal.'/post', ['acknowledged' => false])->assertUnprocessable();
+    $receipt = $this->postJson($proposal.'/post', ['acknowledged' => true])->assertOk()
+        ->assertJsonPath('data.refundIssued', false)->assertJsonPath('data.replacementFeeMinor', $replacement)->json('data');
+    $this->postJson($proposal.'/post', ['acknowledged' => true])->assertOk()->assertJsonPath('data.replayed', true);
+    $history = $this->getJson($endpoint)->assertOk()
+        ->assertJsonPath('data.corrections.0.status', 'posted_verified')
+        ->assertJsonPath('data.corrections.0.independentReview', true)
+        ->assertJsonPath('data.corrections.0.postingActorMatchesReviewer', true)
+        ->assertJsonPath('data.corrections.0.originalJournalIds.0', (string) $original)
+        ->json('data.corrections.0');
+    expect($history['replacementJournalIds'])->toBe($replacement === 0 ? [] : [$receipt['replacementJournalId']])
+        ->and($history['integrityIssues'])->toBe([])
+        ->and((clone $journals)->count())->toBe($before + ($replacement === 0 ? 1 : 2))
+        ->and(DB::table('financial_posting_lines')->where('journal_id', $original)->orderBy('line_number')->get()->all())->toEqual($originalLines);
+    $movements = array_column($history['accountMovements'], 'combinedNetMinor', 'accountCode');
+    expect($movements['AR'])->toBe($replacement);
+    $this->getJson($base.'/finance/business-day')->assertOk()->assertJsonPath('data.noShowIntegrity.integrityValid', true);
+    noShowSignIn(noShowActor($hotel, 'front_desk'));
+    $this->getJson($endpoint)->assertForbidden();
+    $this->postJson($proposal.'/post', ['acknowledged' => true])->assertForbidden();
+})->with([
+    'fee reduction' => [100000, 'success'],
+    'full waiver' => [0, 'success'],
+    'stale evidence' => [100000, 'stale'],
+]);
