@@ -1,0 +1,80 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services;
+
+use App\Http\Controllers\Api\FrontDeskReservationController;
+
+use App\Models\Hotel;
+use Illuminate\Support\Facades\DB;
+
+final class HotelNotificationService
+{
+    private function queues(Hotel $hotel): array
+    {
+        $clock = now($hotel->timezone ?: 'Asia/Manila');
+        $today = $clock->toDateString();
+        $bookings = DB::table('reservation_records')->where('hotel_id', $hotel->id);
+        $departures = (clone $bookings)->where('lifecycle_state', 'checked_in');
+        $arrivals = (clone $bookings)->where('lifecycle_state', 'confirmed');
+        $overdueToday = $clock->format('H:i') >= FrontDeskReservationController::CHECKOUT_CUTOFF;
+
+        $queues = [
+            'checkout_overdue' => (clone $departures)->where('check_out', $overdueToday ? '<=' : '<', $today)
+                ->orderBy('check_out')->orderBy('id'),
+            'checkout_due' => (clone $departures)->where('check_out', $today)->orderBy('id'),
+            'room_assignment' => (clone $arrivals)->where('check_in', $today)
+                ->whereNull('assigned_room_id')->orderBy('id'),
+            'new_booking' => (clone $bookings)->whereIn('lifecycle_state', ['confirmed', 'checked_in'])
+                ->where('created_at', '>=', now()->subDay())->latest('created_at')->orderByDesc('id'),
+        ];
+        if ($overdueToday) {
+            unset($queues['checkout_due']);
+        }
+
+        return $queues;
+    }
+
+    public function feed(Hotel $hotel): array
+    {
+        $queues = $this->queues($hotel);
+        $notifications = [];
+        $hasMore = false;
+        foreach ($queues as $kind => $query) {
+            $rows = $query->limit(9)->get(['id', 'reference', 'check_in', 'check_out']);
+            $hasMore = $hasMore || $rows->count() > 8;
+            foreach ($rows->take(8) as $booking) {
+                $notifications[] = $this->notification($kind, $booking);
+            }
+        }
+
+        return [
+            'hotelId' => (string) $hotel->id,
+            'notifications' => $notifications,
+            'hasMore' => $hasMore,
+        ];
+    }
+
+    /** Iterate the full current alert set without the navbar display limit. */
+    public function all(Hotel $hotel): iterable
+    {
+        foreach ($this->queues($hotel) as $kind => $query) {
+            foreach ($query->select(['id', 'reference', 'check_in', 'check_out'])->lazy(200) as $booking) {
+                yield $this->notification($kind, $booking);
+            }
+        }
+    }
+
+    private function notification(string $kind, object $booking): array
+    {
+        $date = str_starts_with($kind, 'checkout_') ? $booking->check_out : $booking->check_in;
+        return [
+            'id' => $kind.':'.$booking->id.($kind === 'new_booking' ? '' : ':'.$date),
+            'kind' => $kind,
+            'bookingId' => (string) $booking->id,
+            'reference' => $booking->reference,
+            'date' => $date,
+        ];
+    }
+}
