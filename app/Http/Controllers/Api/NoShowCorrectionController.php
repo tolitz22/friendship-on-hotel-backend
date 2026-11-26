@@ -48,9 +48,9 @@ final class NoShowCorrectionController
             return response()->json(['data' => ['bookingId' => $booking, 'currency' => 'PHP',
                 'businessDate' => $clock?->business_date, 'open' => $open,
                 'roomReviewEnabled' => config('financial_accounting.enable_no_show_room_correction_review', false) && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id),
-                'roomPostingEnabled' => (bool) config('financial_accounting.enable_no_show_room_correction_posting', false),
-                'feeReviewEnabled' => (bool) config('financial_accounting.enable_no_show_fee_correction_review', false),
-                'feePostingEnabled' => (bool) config('financial_accounting.enable_no_show_fee_correction_posting', false),
+                'roomPostingEnabled' => config('financial_accounting.enable_no_show_room_correction_posting', false) && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id),
+                'feeReviewEnabled' => config('financial_accounting.enable_no_show_fee_correction_review', false) && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id),
+                'feePostingEnabled' => config('financial_accounting.enable_no_show_fee_correction_posting', false) && \App\Domain\Reservations\NoShowWorkflow::enabled((int) $hotel->id),
                 'room' => $room, 'fee' => $fee, 'corrections' => $groups]])->header('Cache-Control', 'private, no-store');
         }, 3);
     }
