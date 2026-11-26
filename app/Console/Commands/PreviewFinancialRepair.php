@@ -6,6 +6,9 @@ namespace App\Console\Commands;
 
 use App\Models\Hotel;
 use App\Services\Finance\FinancialIntegrityDiagnostics;
+use App\Services\Finance\FinancialRecoveryProposalEngine;
+use App\Domain\Reservations\ReadinessWriteGuard;
+use Illuminate\Support\Facades\DB;
 use App\Services\Finance\NoShowJournalIntegrityService;
 use Illuminate\Console\Command;
 
@@ -15,7 +18,7 @@ final class PreviewFinancialRepair extends Command
 
     protected $description = 'Generate read-only financial investigation proposals; never post corrections';
 
-    public function handle(FinancialIntegrityDiagnostics $service): int
+    public function handle(FinancialIntegrityDiagnostics $service, FinancialRecoveryProposalEngine $engine): int
     {
         $id = NoShowJournalIntegrityService::sourceId('', (string) $this->option('hotel'));
         if ($id === null || !$this->option('dry-run')) {
@@ -29,13 +32,13 @@ final class PreviewFinancialRepair extends Command
 
             return self::FAILURE;
         }
-        $report = $service->report($hotel);
-        $report['proposals'] = array_map(static fn (array $issue): array => [
-            'finding' => $issue,
-            'action' => 'Investigate source evidence and reconcile against original records before proposing an authorized correction.',
-            'approvalRequired' => true,
-            'executable' => false,
-        ], $report['issues']);
+        $report = DB::transaction(function () use ($hotel, $service, $engine): array {
+            app(ReadinessWriteGuard::class)->lockHotel($hotel);
+            $report = $service->report($hotel);
+            $report['proposals'] = $engine->proposals($hotel, $report);
+
+            return $report;
+        }, 3);
         $report['recordsModified'] = false;
         $this->line(json_encode($report, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
 
