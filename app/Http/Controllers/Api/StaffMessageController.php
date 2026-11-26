@@ -88,11 +88,12 @@ final class StaffMessageController
     private function announcementMeta(Request $request, Hotel $hotel, object $row): void
     {
         $row->is_announcement=(bool)$row->is_announcement;
-        if (!$row->is_announcement) return;
+        $row->handover=$row->handover===null?null:json_decode($row->handover,true,512,JSON_THROW_ON_ERROR);
+        if (!$row->is_announcement && !$row->handover) return;
         $recipients=DB::table('staff_announcement_recipients')->where('message_id',$row->id);
         $mine=(clone $recipients)->where('user_id',$request->user()->id)->first();
         $row->acknowledgement=['required'=>$mine!==null,'acknowledged_at'=>$mine?->acknowledged_at];
-        if ($this->active($hotel)->where('u.id',$request->user()->id)->where('hm.role','admin')->exists() && $request->user()->tokenCan('hotel:write')) {
+        if (($row->handover && (string)$row->sender_id===(string)$request->user()->id) || ($this->active($hotel)->where('u.id',$request->user()->id)->where('hm.role','admin')->exists() && $request->user()->tokenCan('hotel:write'))) {
             $row->acknowledgement['total']=$recipients->count();
             $row->acknowledgement['acknowledged']=(clone $recipients)->whereNotNull('acknowledged_at')->count();
         }
@@ -101,7 +102,7 @@ final class StaffMessageController
     public function acknowledge(Request $request, Hotel $hotel, int $conversation, int $message): JsonResponse
     {
         $this->access($request,$hotel,$conversation);
-        abort_unless(DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$message)->where('is_announcement',true)->exists(),404);
+        abort_unless(DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$message)->where(fn ($q)=>$q->where('is_announcement',true)->orWhereNotNull('handover'))->exists(),404);
         $recipient=DB::table('staff_announcement_recipients')->where('message_id',$message)->where('user_id',$request->user()->id);
         abort_unless($recipient->exists(),404);
         $recipient->whereNull('acknowledged_at')->update(['acknowledged_at'=>now()]);
@@ -183,7 +184,7 @@ final class StaffMessageController
     public function send(Request $request, Hotel $hotel, int $conversation): JsonResponse
     {
         $this->access($request,$hotel,$conversation);
-        $data=$request->validate(['body'=>['nullable','string','max:4000'],'attachment'=>['nullable','array'],'attachment.filename'=>['required_with:attachment','string','max:200'],'attachment.content'=>['required_with:attachment','string','max:2796204'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1'],'record_type'=>['nullable','required_with:record_id','in:room,booking,housekeeping,maintenance'],'record_id'=>['nullable','required_with:record_type','integer','min:1'],'is_announcement'=>['sometimes','boolean']]);
+        $data=$request->validate(['body'=>['nullable','string','max:4000'],'attachment'=>['nullable','array'],'attachment.filename'=>['required_with:attachment','string','max:200'],'attachment.content'=>['required_with:attachment','string','max:2796204'],'client_id'=>['required','uuid'],'reply_to_id'=>['nullable','integer','min:1'],'record_type'=>['nullable','required_with:record_id','in:room,booking,housekeeping,maintenance'],'record_id'=>['nullable','required_with:record_type','integer','min:1'],'is_announcement'=>['sometimes','boolean'],'handover'=>['nullable','array:incoming_shift,outstanding,reminders'],'handover.incoming_shift'=>['required_with:handover','string','max:80'],'handover.outstanding'=>['required_with:handover','string','max:2000'],'handover.reminders'=>['nullable','string','max:1000']]);
         $body=trim($data['body']??'');
         $attachment=null;
         if (!empty($data['attachment'])) {
@@ -197,13 +198,25 @@ final class StaffMessageController
             $attachment=['filename'=>substr($name?:'attachment',0,180).'.'.$extensions[$mime],'mime'=>$mime,'size'=>strlen($bytes),'sha256'=>hash('sha256',$bytes),'encoded_content'=>base64_encode($bytes)];
         }
         $announcement=(bool)($data['is_announcement']??false);
+        $handover=null;
+        if (!empty($data['handover'])) {
+            $shift=trim($data['handover']['incoming_shift']);
+            $outstanding=trim($data['handover']['outstanding']);
+            $reminders=trim($data['handover']['reminders']??'');
+            abort_if($shift==='' || $outstanding==='',422,'Enter incoming shift and outstanding work (or None).');
+            abort_if($announcement,422,'Choose either announcement or shift handover.');
+            $handover=json_encode(['incoming_shift'=>$shift,'outstanding'=>$outstanding,'reminders'=>$reminders],JSON_THROW_ON_ERROR);
+            // Keep a searchable, human-readable summary for existing clients.
+            $body='Shift handover: '.$shift."\nOutstanding work: ".$outstanding.($reminders!==''?"\nReminders: ".$reminders:'').($body!==''?"\nNotes: ".$body:'');
+            abort_if(mb_strlen($body)>4000,422,'Handover and notes must fit within 4000 characters.');
+        }
         abort_if($announcement && $body==='',422,'Enter announcement text.');
         $recordType=$data['record_type']??null;
         $recordId=$data['record_id']??null;
         abort_if(($recordType===null)!==($recordId===null),422,'Select a complete record reference.');
         abort_if($body==='' && !$attachment && !$recordType,422,'Enter a message, attach a file or share a record.');
         $uid=$request->user()->id;
-        $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment,$recordType,$recordId,$announcement) {
+        $message=DB::transaction(function () use ($request,$hotel,$conversation,$data,$body,$uid,$attachment,$recordType,$recordId,$announcement,$handover) {
             DB::table('staff_conversations')->where('id',$conversation)->lockForUpdate()->first();
             $this->access($request,$hotel,$conversation);
             $channel=DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('id',$conversation)->first();
@@ -211,13 +224,14 @@ final class StaffMessageController
                 abort_unless($request->user()->tokenCan('hotel:write') && $this->active($hotel)->where('u.id',$uid)->where('hm.role','admin')->exists(),403);
                 abort_unless($channel->kind==='channel',422,'Announcements must be published in a hotel channel.');
             }
+            if ($handover!==null) abort_unless($channel->kind==='channel',422,'Publish shift handovers in a hotel channel.');
             if ($recordType!==null) abort_unless(app(StaffMessageRecordAccess::class)->resolve($request,$hotel,$recordType,(string)$recordId),422,'Record unavailable for sharing.');
             $reply=$data['reply_to_id']??null;
             abort_if($reply!==null && !DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$reply)->exists(),422,'Reply must reference a message in this conversation.');
             $query=DB::table('staff_messages')->where('conversation_id',$conversation)->where('sender_id',$uid)->where('client_id',$data['client_id']);
-            if ($existing=$query->first()) { $prior=DB::table('staff_message_attachments')->where('message_id',$existing->id)->first(); abort_if(($prior->sha256??null)!==($attachment['sha256']??null) || ($prior->filename??null)!==($attachment['filename']??null) || $existing->body!==$body || (bool)$existing->is_announcement!==$announcement || $existing->record_type!==$recordType || (string)$existing->record_id!==(string)$recordId || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
-            $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'reply_to_id'=>$reply,'record_type'=>$recordType,'record_id'=>$recordId,'is_announcement'=>$announcement,'created_at'=>now(),'updated_at'=>now()]);
-            if ($announcement) {
+            if ($existing=$query->first()) { $prior=DB::table('staff_message_attachments')->where('message_id',$existing->id)->first(); abort_if(($prior->sha256??null)!==($attachment['sha256']??null) || ($prior->filename??null)!==($attachment['filename']??null) || $existing->body!==$body || (bool)$existing->is_announcement!==$announcement || $existing->handover!==$handover || $existing->record_type!==$recordType || (string)$existing->record_id!==(string)$recordId || (string)$existing->reply_to_id!==(string)$reply,409,'Message identifier already used.'); return $existing;}
+            $id=DB::table('staff_messages')->insertGetId(['conversation_id'=>$conversation,'sender_id'=>$uid,'client_id'=>$data['client_id'],'body'=>$body,'reply_to_id'=>$reply,'record_type'=>$recordType,'record_id'=>$recordId,'is_announcement'=>$announcement,'handover'=>$handover,'created_at'=>now(),'updated_at'=>now()]);
+            if ($announcement || $handover!==null) {
                 $eligible=$this->active($hotel)->where('u.id','!=',$uid);
                 $role=substr($channel->direct_key,8);
                 if ($role!=='all') $eligible->whereIn('hm.role',array_unique([$role,'admin']));
