@@ -8,7 +8,7 @@ Status: NOT EXECUTED. This runbook is not activation approval.
 - Confirm the target hotel's numeric ID and exact Client Demo identity. Never infer an ID or use another property. Use synthetic bookings, payments and evidence only; never transfer real funds.
 - Prefer an isolated deployment and disposable database. On shared production, do not enable global flags until property scoping and existing enrolled hotels have been reviewed. Do not overwrite an existing allowlist or enable verified settlement globally merely for this test.
 - Record existing configuration, backup/recovery readiness, financial business date, open accounting period, open shifts and two independent active administrators. Do not expose credentials.
-- Run `php artisan finance:inspect-no-show-pilot HOTEL_ID` from the deployed backend runtime. Record JSON and exit code; a clean result is not activation certification. Run `php artisan finance:inspect-no-show-journals HOTEL_ID` before and after the exercise. Stop on discrepancies.
+- Run `php artisan finance:inspect-no-show-pilot HOTEL_ID` from the deployed backend runtime. Record JSON and exit code. The preflight checks the required feature flags for verified settlement, bank deposit posting, allocations, refunds, fee corrections and closing integrity. Activation still requires the release evidence below. Run `php artisan finance:inspect-no-show-journals HOTEL_ID` before and after the exercise. Stop on discrepancies.
 - Use a synthetic reservation whose arrival cutoff has elapsed without manipulating a shared financial clock. If this cannot be arranged safely, use isolated staging. Do not close a shared hotel date for a test.
 
 ## Acceptance matrix

@@ -39,6 +39,17 @@ final class InspectNoShowPilot extends Command
         if ($allowlist !== [(string) $hotel->id]) $issues[] = 'Allowlist is not restricted to the selected hotel.';
         if (!NoShowWorkflow::enabled((int) $hotel->id)) $issues[] = 'No-show workflow is not enabled for the selected hotel.';
         foreach ([
+            'enable_verified_settlement',
+            'enable_guest_deposit_posting',
+            'enable_no_show_allocation_posting',
+            'enable_no_show_refund_posting',
+            'enable_no_show_fee_correction_review',
+            'enable_no_show_fee_correction_posting',
+            'enable_no_show_closing_integrity',
+        ] as $requiredFlag) {
+            if (!$flags[$requiredFlag]) $issues[] = $requiredFlag.' is required for pilot acceptance.';
+        }
+        foreach ([
             'enable_guest_deposit_posting' => ['enable_verified_settlement'],
             'enable_no_show_allocation_posting' => ['enable_guest_deposit_posting', 'enable_verified_settlement'],
             'enable_no_show_refund_posting' => ['enable_no_show_allocation_posting', 'enable_guest_deposit_posting', 'enable_verified_settlement'],

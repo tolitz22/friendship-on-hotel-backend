@@ -115,6 +115,45 @@ function noShowApprove($test, string $path, string $review, string $tax = 'non_v
     ]);
 }
 
+it('fails pilot preflight when required features are disabled even with a valid hotel, clock and journals', function (): void {
+    [$hotel] = noShowFixture($this);
+    $requiredFlags = [
+        'enable_verified_settlement',
+        'enable_guest_deposit_posting',
+        'enable_no_show_allocation_posting',
+        'enable_no_show_refund_posting',
+        'enable_no_show_fee_correction_review',
+        'enable_no_show_fee_correction_posting',
+        'enable_no_show_closing_integrity',
+    ];
+    foreach ($requiredFlags as $flag) {
+        config()->set('financial_accounting.'.$flag, false);
+    }
+
+    $inspect = function () use ($hotel): array {
+        $exit = \Illuminate\Support\Facades\Artisan::call('finance:inspect-no-show-pilot', ['hotelId' => (string) $hotel->id]);
+        $report = json_decode(\Illuminate\Support\Facades\Artisan::output(), true, 512, JSON_THROW_ON_ERROR);
+
+        return [$exit, $report];
+    };
+
+    [$exit, $report] = $inspect();
+    expect($exit)->toBe(1)
+        ->and($report['configurationChecksPassed'])->toBeFalse()
+        ->and($report['issues'])->toBe(array_map(
+            static fn (string $flag): string => $flag.' is required for pilot acceptance.',
+            $requiredFlags,
+        ));
+
+    foreach ($requiredFlags as $flag) {
+        config()->set('financial_accounting.'.$flag, true);
+    }
+    [$exit, $report] = $inspect();
+    expect($exit)->toBe(0)
+        ->and($report['configurationChecksPassed'])->toBeTrue()
+        ->and($report['activationCertified'])->toBeFalse();
+});
+
 it('enforces the local arrival cutoff, permits reception and releases a room once', function (): void {
     [$hotel, , , $booking, , $base, $path, $payload] = noShowFixture($this, priced: false);
     $desk = noShowActor($hotel, 'front_desk');
