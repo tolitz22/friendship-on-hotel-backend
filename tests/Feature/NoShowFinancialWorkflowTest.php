@@ -519,3 +519,69 @@ it('rejects unsafe historical deposit decisions without posting money', function
     'changed amount' => ['changed amount', 409],
     'closed date' => ['closed date', 409],
 ]);
+
+it('reclassifies approved historical deposits without recognizing cash twice', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_historical_guest_deposit_posting' => true,
+    ]);
+    // Synthetic imported opening trial balance; not a new cash receipt.
+    $amount = $scenario === 'mismatched amount' ? 200000 : 300000;
+    $source = app(FinancialJournalPostingService::class)->post(
+        $hotel->id, 'qa-opening-'.$payment, 'guest_deposit_opening_import',
+        'opening-payment-'.$payment, 'Synthetic opening balance', [
+            ['account_code' => 'opening_balance_equity', 'debit_minor' => $amount, 'credit_minor' => 0],
+            ['account_code' => 'guest_deposit_opening_clearing', 'debit_minor' => 0, 'credit_minor' => $amount],
+        ], $author->id
+    );
+    $service = app(\App\Services\Finance\HistoricalGuestDepositDecisionService::class);
+    $reference = 'opening-journal-'.($scenario === 'wrong reference' ? $source + 1 : $source);
+    $id = $service->propose($hotel, $booking, $payment, $author->id, $reference, 'Reconciled synthetic opening balance evidence.');
+    if ($scenario !== 'unapproved') {
+        $service->approve($hotel, $id, $reviewer->id, 'Independently checked synthetic opening balance.');
+    }
+    if ($scenario === 'disabled') {
+        config()->set('financial_accounting.enable_historical_guest_deposit_posting', false);
+    }
+    if ($scenario === 'stale evidence') {
+        DB::table('folio_settlement_verifications')->where('payment_record_id', $payment)
+            ->update(['evidence_reference' => 'BANK-QA-STALE']);
+    }
+    if ($scenario === 'reversed source') {
+        app(FinancialJournalPostingService::class)->post(
+            $hotel->id, 'qa-opening-reversal-'.$payment, 'reversal', 'qa-reversal-'.$payment,
+            'Reverse synthetic opening balance', [
+                ['account_code' => 'opening_balance_equity', 'debit_minor' => 0, 'credit_minor' => $amount],
+                ['account_code' => 'guest_deposit_opening_clearing', 'debit_minor' => $amount, 'credit_minor' => 0],
+            ], $reviewer->id, $source
+        );
+    }
+    $actor = $scenario === 'wrong actor' ? $author->id : $reviewer->id;
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+        ->where('source_type', 'guest_deposit_opening_reclassification');
+    if ($scenario !== 'success') {
+        try {
+            $service->postOpeningBalance($hotel, $id, $source, $actor);
+            $this->fail('Unsafe historical opening posting accepted.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+            expect($exception->getStatusCode())->toBe(in_array($scenario, ['unapproved', 'wrong actor'], true) ? 403 : 409);
+        }
+        expect($journals->count())->toBe(0);
+        return;
+    }
+    $journal = $service->postOpeningBalance($hotel, $id, $source, $actor);
+    expect($service->postOpeningBalance($hotel, $id, $source, $actor))->toBe($journal)
+        ->and($journals->count())->toBe(1);
+    $lines = DB::table('financial_posting_lines')->where('journal_id', $journal)->orderBy('line_number')->get();
+    expect($lines->count())->toBe(2)
+        ->and($lines[0]->account_code)->toBe('guest_deposit_opening_clearing')
+        ->and((int) $lines[0]->debit_minor)->toBe(300000)
+        ->and((int) $lines[0]->credit_minor)->toBe(0)
+        ->and($lines[1]->account_code)->toBe('guest_deposit_liability')
+        ->and((int) $lines[1]->credit_minor)->toBe(300000)
+        ->and((int) $lines[1]->debit_minor)->toBe(0);
+})->with(['success', 'disabled', 'unapproved', 'wrong actor', 'wrong reference', 'mismatched amount', 'stale evidence', 'reversed source']);
