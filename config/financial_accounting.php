@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 return [
+    // External no-show refund journals require separate financial acceptance.
+    'enable_no_show_refund_posting' => (bool) env('FINANCE_ENABLE_NO_SHOW_REFUND_POSTING', false),
     // No-show deposit allocation journals require staged end-to-end acceptance.
     'enable_no_show_allocation_posting' => (bool) env('FINANCE_ENABLE_NO_SHOW_ALLOCATION_POSTING', false),
     // Cash deposit posting requires independent cashier reconciliation and separate acceptance.
