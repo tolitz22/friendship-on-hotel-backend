@@ -585,3 +585,77 @@ it('reclassifies approved historical deposits without recognizing cash twice', f
         ->and((int) $lines[1]->credit_minor)->toBe(300000)
         ->and((int) $lines[1]->debit_minor)->toBe(0);
 })->with(['success', 'disabled', 'unapproved', 'wrong actor', 'wrong reference', 'mismatched amount', 'stale evidence', 'reversed source']);
+
+it('recognizes only independently reconciled cash deposits without changing drawer records', function (string $scenario): void {
+    [$hotel, $author, $reviewer, $booking, $folio, , $path] = noShowFixture($this);
+    $this->travelTo(new DateTimeImmutable('2026-11-22 07:00 Asia/Manila'));
+    $this->postJson($path.'/no-show')->assertOk();
+    $payment = noShowPayment($hotel, $folio, $author, $reviewer, 300000);
+    DB::table('folio_payment_records')->where('id', $payment)->update(['method' => 'cash']);
+    $shift = DB::table('cashier_shifts')->insertGetId([
+        'hotel_id' => $hotel->id, 'cashier_id' => $author->id, 'currency' => 'PHP',
+        'status' => $scenario === 'unreconciled' ? 'submitted' : 'reconciled',
+        'opening_float_minor' => 50000, 'expected_cash_minor' => 350000,
+        'counted_cash_minor' => $scenario === 'variance' ? 349000 : 350000,
+        'variance_minor' => $scenario === 'variance' ? -1000 : 0,
+        'reviewed_by' => $scenario === 'self reconciled' ? $author->id : $reviewer->id,
+        'opened_at' => now(), 'submitted_at' => now(), 'reconciled_at' => now(),
+        'created_at' => now(), 'updated_at' => now(),
+    ]);
+    if ($scenario !== 'missing receipt') {
+        DB::table('cashier_shift_receipts')->insert([
+            'hotel_id' => $hotel->id, 'shift_id' => $shift, 'payment_id' => $payment,
+            'reservation_record_id' => $booking,
+            'amount_minor' => $scenario === 'wrong amount' ? 200000 : 300000,
+            'cash_tendered_minor' => 350000, 'change_given_minor' => 50000,
+            'net_receipt_minor' => 300000, 'created_at' => now(),
+        ]);
+    }
+    DB::table('folio_settlement_verifications')->where('payment_record_id', $payment)->update([
+        'evidence_kind' => 'cash_shift',
+        'evidence_reference' => 'shift-'.($scenario === 'wrong reference' ? $shift + 1 : $shift),
+    ]);
+    config()->set([
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_cash_guest_deposit_posting' => $scenario !== 'disabled',
+    ]);
+    if ($scenario === 'existing journal') {
+        app(FinancialJournalPostingService::class)->post($hotel->id, 'qa-existing-cash-'.$payment,
+            'legacy_receipt', 'folio-payment-'.$payment, 'Synthetic existing cash receipt', [
+                ['account_code' => 'cashier_cash', 'debit_minor' => 300000, 'credit_minor' => 0],
+                ['account_code' => 'guest_deposit_liability', 'debit_minor' => 0, 'credit_minor' => 300000],
+            ], $reviewer->id);
+    }
+    $beforeShift = DB::table('cashier_shifts')->find($shift);
+    $beforeReceipts = DB::table('cashier_shift_receipts')->where('shift_id', $shift)->get()->all();
+    $beforeEvents = DB::table('cashier_shift_events')->where('shift_id', $shift)->count();
+    $service = app(\App\Services\Finance\GuestDepositJournalService::class);
+    $actor = $scenario === 'unauthorized' ? noShowActor($hotel, 'front_desk')->id : $reviewer->id;
+    $journals = DB::table('financial_posting_journals')->where('hotel_id', $hotel->id)
+        ->where('source_type', 'guest_deposit_receipt');
+    if ($scenario === 'success') {
+        $journal = $service->recognize($hotel, $booking, $payment, $actor);
+        expect($service->recognize($hotel, $booking, $payment, $actor))->toBe($journal)
+            ->and($journals->count())->toBe(1);
+        $lines = DB::table('financial_posting_lines')->where('journal_id', $journal)->orderBy('line_number')->get();
+        expect($lines->count())->toBe(2)
+            ->and($lines[0]->account_code)->toBe('cashier_cash')
+            ->and((int) $lines[0]->debit_minor)->toBe(300000)
+            ->and((int) $lines[0]->credit_minor)->toBe(0)
+            ->and($lines[1]->account_code)->toBe('guest_deposit_liability')
+            ->and((int) $lines[1]->credit_minor)->toBe(300000)
+            ->and((int) $lines[1]->debit_minor)->toBe(0);
+    } else {
+        try {
+            $service->recognize($hotel, $booking, $payment, $actor);
+            $this->fail('Unsafe cash deposit posting accepted.');
+        } catch (\Symfony\Component\HttpKernel\Exception\HttpExceptionInterface $exception) {
+            expect($exception->getStatusCode())->toBe($scenario === 'unauthorized' ? 403 : 409);
+        }
+        expect($journals->count())->toBe(0);
+    }
+    expect(DB::table('cashier_shifts')->find($shift))->toEqual($beforeShift)
+        ->and(DB::table('cashier_shift_receipts')->where('shift_id', $shift)->get()->all())->toEqual($beforeReceipts)
+        ->and(DB::table('cashier_shift_events')->where('shift_id', $shift)->count())->toBe($beforeEvents);
+})->with(['success', 'disabled', 'unreconciled', 'variance', 'self reconciled', 'missing receipt',
+    'wrong amount', 'wrong reference', 'existing journal', 'unauthorized']);
