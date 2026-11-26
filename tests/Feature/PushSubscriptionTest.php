@@ -26,3 +26,16 @@ it('registers admin devices idempotently and isolates subscriptions', function (
     $this->deleteJson($url.'/'.$id)->assertOk();
     $this->getJson($url)->assertOk()->assertJsonCount(0, 'data');
 });
+
+it('keeps push preference polling separate from subscription rate limits', function (): void {
+    $hotel = Hotel::create(['name' => 'Push throttle QA']);
+    $admin = User::create(['name' => 'Admin', 'email' => 'push-throttle@example.test', 'password' => 'long-passphrase', 'is_active' => true, 'must_change_password' => false]);
+    HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $admin->id, 'role' => 'admin', 'is_active' => true]);
+    Sanctum::actingAs($admin, ['hotel:read', 'hotel:write']);
+    $url = '/api/v1/hotels/'.$hotel->id;
+    for ($i = 0; $i < 30; $i++) {
+        $this->getJson($url.'/push-preferences')->assertOk();
+    }
+    $this->getJson($url.'/push-preferences')->assertStatus(429);
+    $this->getJson($url.'/push-subscriptions')->assertOk();
+});

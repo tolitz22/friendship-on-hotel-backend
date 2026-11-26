@@ -89,24 +89,24 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/hotels', [HotelController::class, 'index']);
 
         Route::prefix('hotels/{hotel}')->middleware('hotel.member')->group(function (): void {
-            Route::get('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'show'])->middleware(['hotel.admin', 'throttle:30,1']);
-            Route::put('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'update'])->middleware(['hotel.admin', 'throttle:30,1']);
-            Route::prefix('push-subscriptions')->middleware(['hotel.admin', 'throttle:30,1'])->group(function (): void {
+            Route::get('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'show'])->middleware(['hotel.admin', 'throttle:30,1,pms-get-push-preferences']);
+            Route::put('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'update'])->middleware(['hotel.admin', 'throttle:30,1,pms-put-push-preferences']);
+            Route::prefix('push-subscriptions')->middleware(['hotel.admin', 'throttle:30,1,pms-push-subscriptions'])->group(function (): void {
                 Route::get('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'index']);
                 Route::post('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'store']);
                 Route::delete('/{subscription}', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'destroy'])->whereNumber('subscription');
             });
             Route::prefix('staff-messaging')->group(function (): void {
-                Route::post('/realtime/auth', [\App\Http\Controllers\Api\StaffMessageController::class, 'realtimeAuth'])->middleware('throttle:30,1');
-                Route::post('/conversations/{conversation}/announcements/{message}/acknowledge', [\App\Http\Controllers\Api\StaffMessageController::class, 'acknowledge'])->whereNumber('conversation')->whereNumber('message')->middleware('throttle:60,1');
-                Route::get('/records', [\App\Http\Controllers\Api\StaffMessageController::class, 'records'])->middleware('throttle:60,1');
-                Route::get('/directory', [\App\Http\Controllers\Api\StaffMessageController::class, 'directory'])->middleware('throttle:120,1');
-                Route::get('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'index'])->middleware('throttle:120,1');
-                Route::post('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'create'])->middleware('throttle:20,1');
-                Route::get('/conversations/{conversation}', [\App\Http\Controllers\Api\StaffMessageController::class, 'show'])->whereNumber('conversation')->middleware('throttle:120,1');
-                Route::post('/conversations/{conversation}/messages', [\App\Http\Controllers\Api\StaffMessageController::class, 'send'])->whereNumber('conversation')->middleware('throttle:60,1');
-                Route::get('/conversations/{conversation}/attachments/{attachment}', [\App\Http\Controllers\Api\StaffMessageController::class, 'download'])->whereNumber('conversation')->whereNumber('attachment')->middleware('throttle:60,1');
-                Route::post('/conversations/{conversation}/read', [\App\Http\Controllers\Api\StaffMessageController::class, 'read'])->whereNumber('conversation')->middleware('throttle:120,1');
+                Route::post('/realtime/auth', [\App\Http\Controllers\Api\StaffMessageController::class, 'realtimeAuth'])->middleware('throttle:30,1,pms-post-realtime-auth');
+                Route::post('/conversations/{conversation}/announcements/{message}/acknowledge', [\App\Http\Controllers\Api\StaffMessageController::class, 'acknowledge'])->whereNumber('conversation')->whereNumber('message')->middleware('throttle:60,1,pms-post-conversations-id-announcements-id-acknowledge');
+                Route::get('/records', [\App\Http\Controllers\Api\StaffMessageController::class, 'records'])->middleware('throttle:60,1,pms-get-records');
+                Route::get('/directory', [\App\Http\Controllers\Api\StaffMessageController::class, 'directory'])->middleware('throttle:120,1,pms-get-directory');
+                Route::get('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'index'])->middleware('throttle:120,1,pms-get-conversations');
+                Route::post('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'create'])->middleware('throttle:20,1,pms-post-conversations');
+                Route::get('/conversations/{conversation}', [\App\Http\Controllers\Api\StaffMessageController::class, 'show'])->whereNumber('conversation')->middleware('throttle:120,1,pms-get-conversations-id');
+                Route::post('/conversations/{conversation}/messages', [\App\Http\Controllers\Api\StaffMessageController::class, 'send'])->whereNumber('conversation')->middleware('throttle:60,1,pms-post-conversations-id-messages');
+                Route::get('/conversations/{conversation}/attachments/{attachment}', [\App\Http\Controllers\Api\StaffMessageController::class, 'download'])->whereNumber('conversation')->whereNumber('attachment')->middleware('throttle:60,1,pms-get-conversations-id-attachments-id');
+                Route::post('/conversations/{conversation}/read', [\App\Http\Controllers\Api\StaffMessageController::class, 'read'])->whereNumber('conversation')->middleware('throttle:120,1,pms-post-conversations-id-read');
             });
             Route::get('/', [HotelController::class, 'show']);
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
@@ -308,9 +308,9 @@ Route::prefix('v1')->group(function (): void {
                 Route::get('/bookings/{booking}/refund-disbursements', [FolioRefundDisbursementController::class, 'index'])
                     ->whereNumber('booking');
                 Route::post('/bookings/{booking}/refund-requests/{refund}/disbursement-evidence', [FolioRefundDisbursementController::class, 'record'])
-                    ->whereNumber('booking')->whereNumber('refund')->middleware('throttle:10,1');
+                    ->whereNumber('booking')->whereNumber('refund')->middleware('throttle:10,1,pms-post-bookings-id-refund-requests-id-disbursement-evidence');
                 Route::post('/bookings/{booking}/refund-disbursements/{evidence}/review', [FolioRefundDisbursementController::class, 'review'])
-                    ->whereNumber('booking')->whereNumber('evidence')->middleware('throttle:10,1');
+                    ->whereNumber('booking')->whereNumber('evidence')->middleware('throttle:10,1,pms-post-bookings-id-refund-disbursements-id-review');
                 Route::post('/bookings/{booking}/settlement-signoff', [FolioSettlementController::class, 'signoff'])
                     ->whereNumber('booking')->middleware('throttle:5,1');
                 Route::get('/finance/tax-policies', [FinancialTaxPolicyController::class, 'index']);
@@ -323,7 +323,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/finance/business-day/initialize', [FinancialBusinessDayController::class, 'initialize'])
                     ->middleware('throttle:5,1,business-date-setup');
                 Route::post('/finance/business-day/close', [FinancialBusinessDayController::class, 'close'])
-                    ->middleware('throttle:5,1');
+                    ->middleware('throttle:5,1,pms-post-finance-business-day-close');
                 Route::get('/night-audit/preview', NightAuditPreviewController::class);
                 Route::get('/night-audit/review', [NightAuditReviewController::class,'show']);
                 Route::post('/night-audit/review', [NightAuditReviewController::class,'store'])->middleware('throttle:10,1');
@@ -384,20 +384,20 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('booking')->whereNumber('payment')->middleware('throttle:10,1');
                 Route::post('/bookings/{booking}/dates/preview', [FrontDeskReservationController::class, 'previewAmendment'])->whereNumber('booking')->middleware('throttle:30,1');
                 Route::patch('/bookings/{booking}/dates', [FrontDeskReservationController::class, 'amend'])->whereNumber('booking');
-                Route::get('/bookings/{booking}/no-show-corrections', [\App\Http\Controllers\Api\NoShowCorrectionController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
-                Route::post('/bookings/{booking}/no-show-corrections/{kind}', [\App\Http\Controllers\Api\NoShowCorrectionController::class, 'propose'])->whereNumber('booking')->whereIn('kind', ['room', 'fee'])->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
-                Route::post('/bookings/{booking}/no-show-corrections/{kind}/{proposal}/{action}', [\App\Http\Controllers\Api\NoShowCorrectionController::class, 'decide'])->whereNumber('booking')->whereNumber('proposal')->whereIn('kind', ['room', 'fee'])->whereIn('action', ['approve', 'post'])->middleware('hotel.permission:finance.read')->middleware('throttle:5,1');
-                Route::get('/bookings/{booking}/no-show-refunds', \App\Http\Controllers\Api\NoShowRefundOverviewController::class)->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
-                Route::get('/bookings/{booking}/no-show-allocations', [\App\Http\Controllers\Api\NoShowAllocationController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
-                Route::post('/bookings/{booking}/no-show-allocations/{payment}', [\App\Http\Controllers\Api\NoShowAllocationController::class, 'allocate'])->whereNumber('booking')->whereNumber('payment')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
-                Route::get('/bookings/{booking}/no-show-deposits', [\App\Http\Controllers\Api\NoShowDepositController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
-                Route::post('/bookings/{booking}/no-show-deposits/{payment}/recognize', [\App\Http\Controllers\Api\NoShowDepositController::class, 'recognize'])->whereNumber('booking')->whereNumber('payment')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
-                Route::get('/bookings/{booking}/no-show-ledger-reconciliation', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'ledgerReconciliation'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1');
+                Route::get('/bookings/{booking}/no-show-corrections', [\App\Http\Controllers\Api\NoShowCorrectionController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1,pms-get-bookings-id-no-show-corrections');
+                Route::post('/bookings/{booking}/no-show-corrections/{kind}', [\App\Http\Controllers\Api\NoShowCorrectionController::class, 'propose'])->whereNumber('booking')->whereIn('kind', ['room', 'fee'])->middleware('hotel.permission:finance.read')->middleware('throttle:10,1,pms-post-bookings-id-no-show-corrections-id');
+                Route::post('/bookings/{booking}/no-show-corrections/{kind}/{proposal}/{action}', [\App\Http\Controllers\Api\NoShowCorrectionController::class, 'decide'])->whereNumber('booking')->whereNumber('proposal')->whereIn('kind', ['room', 'fee'])->whereIn('action', ['approve', 'post'])->middleware('hotel.permission:finance.read')->middleware('throttle:5,1,pms-post-bookings-id-no-show-corrections-id-id-id');
+                Route::get('/bookings/{booking}/no-show-refunds', \App\Http\Controllers\Api\NoShowRefundOverviewController::class)->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1,pms-get-bookings-id-no-show-refunds');
+                Route::get('/bookings/{booking}/no-show-allocations', [\App\Http\Controllers\Api\NoShowAllocationController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1,pms-get-bookings-id-no-show-allocations');
+                Route::post('/bookings/{booking}/no-show-allocations/{payment}', [\App\Http\Controllers\Api\NoShowAllocationController::class, 'allocate'])->whereNumber('booking')->whereNumber('payment')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1,pms-post-bookings-id-no-show-allocations-id');
+                Route::get('/bookings/{booking}/no-show-deposits', [\App\Http\Controllers\Api\NoShowDepositController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1,pms-get-bookings-id-no-show-deposits');
+                Route::post('/bookings/{booking}/no-show-deposits/{payment}/recognize', [\App\Http\Controllers\Api\NoShowDepositController::class, 'recognize'])->whereNumber('booking')->whereNumber('payment')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1,pms-post-bookings-id-no-show-deposits-id-recognize');
+                Route::get('/bookings/{booking}/no-show-ledger-reconciliation', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'ledgerReconciliation'])->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:30,1,pms-get-bookings-id-no-show-ledger-reconciliation');
                 Route::get('/bookings/{booking}/no-show-financial-review', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:finance.read');
                 Route::post('/bookings/{booking}/no-show-financial-review', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'apply'])
-                    ->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
+                    ->whereNumber('booking')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1,pms-post-bookings-id-no-show-financial-review');
                 Route::post('/bookings/{booking}/no-show-financial-review/{review}/approve', [\App\Http\Controllers\Api\NoShowFinancialReviewController::class, 'approve'])
-                    ->whereNumber('booking')->whereNumber('review')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1');
+                    ->whereNumber('booking')->whereNumber('review')->middleware('hotel.permission:finance.read')->middleware('throttle:10,1,pms-post-bookings-id-no-show-financial-review-id-approve');
                 Route::post('/bookings/{booking}/cancel', [ReservationBookingController::class, 'cancel'])->whereNumber('booking');
                 Route::patch('/reservation-policy-draft', [ReservationPolicyDraftController::class, 'update']);
                 Route::get('/reservation-policy-draft/history', [ReservationPolicyDraftController::class, 'history']);
