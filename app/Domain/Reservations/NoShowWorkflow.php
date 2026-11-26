@@ -48,6 +48,11 @@ final class NoShowWorkflow
             'folio_adjustments' => 'This folio has existing financial adjustments.',
         ] as $table => $message) {
             if (DB::table($table)->where('hotel_id', $hotelId)->where('folio_id', $folioId)->exists()) {
+                if ($table === 'financial_folio_night_assessments'
+                    && config('financial_accounting.enable_no_show_room_correction_posting', false)
+                    && app(\App\Services\Finance\NoShowRoomCorrectionCompletion::class)->valid($hotelId, $folioId)) {
+                    continue;
+                }
                 return $message;
             }
         }
