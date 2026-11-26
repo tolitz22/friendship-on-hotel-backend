@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Support;
 
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 final class StaffMessagingRealtime
 {
@@ -13,7 +14,17 @@ final class StaffMessagingRealtime
         return (bool) config('staff_messaging.realtime.enabled')
             && config('staff_messaging.realtime.app_id')
             && config('staff_messaging.realtime.key')
-            && config('staff_messaging.realtime.secret');
+            && config('staff_messaging.realtime.secret')
+            && $this->validEndpoint();
+    }
+
+    private function validEndpoint(): bool
+    {
+        $url=parse_url((string)config('staff_messaging.realtime.http_url'));
+        return is_array($url) && ($url['scheme']??'')==='https'
+            && !empty($url['host']) && !isset($url['user'],$url['pass'])
+            && !isset($url['user']) && !isset($url['pass']) && !isset($url['query']) && !isset($url['fragment'])
+            && in_array($url['path']??'', ['', '/'], true);
     }
 
     public function channel(int $hotel, int $user): string
@@ -39,11 +50,11 @@ final class StaffMessagingRealtime
                 ksort($params);
                 $query=http_build_query($params,'','&',PHP_QUERY_RFC3986);
                 $signature=hash_hmac('sha256',"POST\n".$path."\n".$query,config('staff_messaging.realtime.secret'));
-                Http::connectTimeout(1)->timeout(2)->withBody($body,'application/json')->post(rtrim(config('staff_messaging.realtime.http_url'),'/').$path.'?'.$query.'&auth_signature='.$signature)->throw();
+                Http::withoutRedirecting()->connectTimeout(1)->timeout(2)->withBody($body,'application/json')->post(rtrim(config('staff_messaging.realtime.http_url'),'/').$path.'?'.$query.'&auth_signature='.$signature)->throw();
             }
         } catch (\Throwable $e) {
             // A committed message must never fail because the realtime service is down.
-            report($e);
+            Log::warning('Staff messaging realtime delivery unavailable.', ['exception_type'=>get_class($e)]);
         }
     }
 }
