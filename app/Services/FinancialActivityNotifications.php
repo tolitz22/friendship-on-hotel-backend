@@ -42,7 +42,12 @@ final class FinancialActivityNotifications
             'payment_verified' => $query->where('e.status', 'staff_confirmed')->whereNotNull('e.reviewed_by'),
             'payment_rejected' => $query->where('e.status', 'rejected')->whereNotNull('e.reviewed_by'),
             'refund_verified' => $query->where('e.status', 'verified'),
-            'cashier_discrepancy' => $query->where('e.variance_minor', '!=', 0),
+            'refund_requested' => $query->where('e.status', 'requested'),
+            'expense_correction_requested' => $query->whereNotExists(function ($decision): void {
+                $decision->selectRaw('1')->from('hotel_expense_correction_decisions as d')
+                    ->whereColumn('d.hotel_id', 'e.hotel_id')->whereColumn('d.correction_id', 'e.id');
+            }),
+            'cashier_discrepancy' => $query->where('e.variance_minor', '!=', 0)->whereIn('e.status', ['submitted', 'flagged']),
             default => null,
         };
         if (str_starts_with($kind, 'payment_') || str_starts_with($kind, 'refund_')) {

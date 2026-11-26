@@ -15,10 +15,13 @@ final class OperationalActivityNotifications
 
     private function query(Hotel $hotel, string $kind): ?Builder
     {
+        if ($kind === 'maintenance_urgent') {
+            return $this->urgentMaintenance($hotel);
+        }
         $table = match ($kind) {
             'housekeeping_completed' => 'housekeeping_tasks',
             'room_inspection_approved', 'room_inspection_rejected' => 'room_readiness_events',
-            'maintenance_created', 'maintenance_urgent', 'maintenance_resolved' => 'maintenance_work_orders',
+            'maintenance_created', 'maintenance_resolved' => 'maintenance_work_orders',
             'room_blocked', 'room_unblocked' => 'room_inventory_blocks',
             'approval_requested', 'approval_approved', 'approval_rejected' => 'manager_approval_events',
             default => null,
@@ -40,7 +43,6 @@ final class OperationalActivityNotifications
             'room_inspection_approved' => $query->where('e.action', 'approved'),
             'room_inspection_rejected' => $query->where('e.action', 'rejected'),
             'maintenance_created' => $query->where('e.priority', '!=', 'urgent'),
-            'maintenance_urgent' => $query->where('e.priority', 'urgent')->whereIn('e.status', ['open', 'in_progress']),
             'maintenance_resolved' => $query->whereIn('e.status', ['resolved', 'closed']),
             'room_unblocked' => $query->where('e.is_active', false)->whereNotNull('e.released_by'),
             'approval_requested' => $query->where('e.event', 'requested'),
@@ -67,6 +69,29 @@ final class OperationalActivityNotifications
         return $query->orderByDesc('e.'.$timestamp)->orderByDesc('e.id');
     }
 
+    private function urgentMaintenance(Hotel $hotel): Builder
+    {
+        // Use the audit transition, not the mutable order creation/update timestamp.
+        // A repeated edit while already urgent is not a new escalation.
+        return DB::table('maintenance_work_order_events as e')
+            ->join('maintenance_work_orders as w', function ($join): void {
+                $join->on('w.id', '=', 'e.work_order_id')->on('w.hotel_id', '=', 'e.hotel_id');
+            })->join('rooms as r', function ($join): void {
+                $join->on('r.id', '=', 'w.room_id')->on('r.hotel_id', '=', 'w.hotel_id');
+            })->where('e.hotel_id', $hotel->id)
+            ->where('e.created_at', '>=', now()->subDay())
+            ->where('e.after_state->priority', 'urgent')
+            ->where(function ($before): void {
+                $before->whereNull('e.before_state')->orWhere('e.before_state->priority', '!=', 'urgent');
+            })->where('w.priority', 'urgent')->whereIn('w.status', ['open', 'in_progress'])
+            ->whereNotExists(function ($later): void {
+                $later->selectRaw('1')->from('maintenance_work_order_events as x')
+                    ->whereColumn('x.hotel_id', 'e.hotel_id')->whereColumn('x.work_order_id', 'e.work_order_id')
+                    ->whereColumn('x.id', '>', 'e.id')->where('x.after_state->priority', '!=', 'urgent');
+            })->select(['e.id', 'e.work_order_id', 'e.created_at as occurred_at', 'r.number as room_number'])
+            ->orderByDesc('e.created_at')->orderByDesc('e.id');
+    }
+
     private function item(Hotel $hotel, string $kind, object $row): array
     {
         $item = [
@@ -82,7 +107,7 @@ final class OperationalActivityNotifications
             return $item + ['target' => 'housekeeping', 'taskId' => (string) $row->id];
         }
         if (str_starts_with($kind, 'maintenance_')) {
-            return $item + ['target' => 'maintenance', 'orderId' => (string) $row->id];
+            return $item + ['target' => 'maintenance', 'orderId' => (string) ($row->work_order_id ?? $row->id)];
         }
         if (isset($row->block_date)) {
             return $item + ['target' => 'room-calendar', 'room' => (string) $row->room_number, 'calendarDate' => (string) $row->block_date];
