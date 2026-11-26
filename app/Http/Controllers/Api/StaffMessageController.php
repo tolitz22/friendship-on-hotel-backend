@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
 use App\Support\StaffMessageRecordAccess;
+use App\Support\StaffMessagingRealtime;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
@@ -53,6 +54,36 @@ final class StaffMessageController
             ->join('staff_conversation_members as m','m.conversation_id','=','c.id')
             ->where('c.hotel_id',$hotel->id)->where('c.id',$conversation)
             ->where('m.user_id',$request->user()->id)->where(fn ($q)=>$q->where('c.kind','!=','channel')->orWhereIn('c.direct_key',$keys))->exists(),404);
+    }
+
+    public function realtimeAuth(Request $request, Hotel $hotel): JsonResponse
+    {
+        $realtime=app(StaffMessagingRealtime::class);
+        abort_unless($realtime->enabled(),503,'Realtime unavailable; polling remains enabled.');
+        $data=$request->validate(['socket_id'=>['required','string','regex:/^[0-9]+\.[0-9]+$/','max:100'],'channel_name'=>['required','string','max:150']]);
+        $uid=(int)$request->user()->id;
+        abort_unless($this->active($hotel)->where('u.id',$uid)->exists(),403);
+        $channel=$realtime->channel((int)$hotel->id,$uid);
+        abort_unless(hash_equals($channel,$data['channel_name']),403);
+        return response()->json(['auth'=>$realtime->authorize($data['socket_id'],$channel)]);
+    }
+
+    private function notifyConversation(Hotel $hotel, int $conversation): void
+    {
+        $realtime=app(StaffMessagingRealtime::class);
+        if (!$realtime->enabled()) return;
+        try {
+            $row=DB::table('staff_conversations')->where('hotel_id',$hotel->id)->where('id',$conversation)->first();
+            if (!$row) return;
+            $eligible=$this->active($hotel);
+            if ($row->kind==='channel') {
+                $role=substr($row->direct_key,8);
+                if ($role!=='all') $eligible->whereIn('hm.role',array_unique([$role,'admin']));
+            } else {
+                $eligible->whereIn('u.id',DB::table('staff_conversation_members')->where('conversation_id',$conversation)->select('user_id'));
+            }
+            $realtime->notify((int)$hotel->id,$eligible->distinct()->pluck('u.id')->all());
+        } catch (\Throwable $e) { report($e); }
     }
 
     public function records(Request $request, Hotel $hotel): JsonResponse
@@ -105,7 +136,7 @@ final class StaffMessageController
         abort_unless(DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$message)->where(fn ($q)=>$q->where('is_announcement',true)->orWhereNotNull('handover'))->exists(),404);
         $recipient=DB::table('staff_announcement_recipients')->where('message_id',$message)->where('user_id',$request->user()->id);
         abort_unless($recipient->exists(),404);
-        $recipient->whereNull('acknowledged_at')->update(['acknowledged_at'=>now()]);
+        if ($recipient->whereNull('acknowledged_at')->update(['acknowledged_at'=>now()])) $this->notifyConversation($hotel,$conversation);
         return response()->json(['data'=>true]);
     }
 
@@ -161,6 +192,7 @@ final class StaffMessageController
             foreach ($members as $member) DB::table('staff_conversation_members')->insert(['conversation_id'=>$id,'user_id'=>$member,'created_at'=>now(),'updated_at'=>now()]);
             return $id;
         },3);
+        $this->notifyConversation($hotel,(int)$id);
         return response()->json(['data'=>['id'=>$id]]);
     }
 
@@ -241,6 +273,7 @@ final class StaffMessageController
             DB::table('staff_conversations')->where('id',$conversation)->update(['updated_at'=>now()]);
             return DB::table('staff_messages')->where('id',$id)->first();
         },3);
+        $this->notifyConversation($hotel,$conversation);
         $this->presentReference($request,$hotel,$message);
         $this->announcementMeta($request,$hotel,$message);
         return response()->json(['data'=>$message]);
@@ -263,8 +296,9 @@ final class StaffMessageController
         $this->access($request,$hotel,$conversation);
         $data=$request->validate(['message_id'=>['required','integer','min:1']]);
         abort_unless(DB::table('staff_messages')->where('conversation_id',$conversation)->where('id',$data['message_id'])->exists(),422);
-        DB::table('staff_conversation_members')->where('conversation_id',$conversation)->where('user_id',$request->user()->id)
+        $changed=DB::table('staff_conversation_members')->where('conversation_id',$conversation)->where('user_id',$request->user()->id)
             ->where('last_read_message_id','<',$data['message_id'])->update(['last_read_message_id'=>$data['message_id'],'updated_at'=>now()]);
+        if ($changed) $this->notifyConversation($hotel,$conversation);
         return response()->json(['data'=>true]);
     }
 }
