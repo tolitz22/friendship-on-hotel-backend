@@ -139,6 +139,8 @@ jobs:
           php scripts/real-engine-no-show-allocation-race.php deposit-bank
           php scripts/real-engine-no-show-allocation-race.php deposit-cash
           php scripts/real-engine-no-show-allocation-race.php refund-competing
+          php scripts/real-engine-no-show-allocation-race.php refund-duplicate
+          php scripts/real-engine-no-show-allocation-race.php refund-key-conflict
           php scripts/real-engine-no-show-allocation-race.php refund-verify
           php scripts/real-engine-no-show-allocation-race.php refund-allocation
           php scripts/real-engine-no-show-allocation-race.php close-deposit
@@ -225,6 +227,8 @@ jobs:
           php scripts/real-engine-no-show-allocation-race.php deposit-bank
           php scripts/real-engine-no-show-allocation-race.php deposit-cash
           php scripts/real-engine-no-show-allocation-race.php refund-competing
+          php scripts/real-engine-no-show-allocation-race.php refund-duplicate
+          php scripts/real-engine-no-show-allocation-race.php refund-key-conflict
           php scripts/real-engine-no-show-allocation-race.php refund-verify
           php scripts/real-engine-no-show-allocation-race.php refund-allocation
           php scripts/real-engine-no-show-allocation-race.php close-deposit
