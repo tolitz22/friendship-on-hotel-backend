@@ -271,3 +271,42 @@ it('validates structured handovers and preserves recipient acknowledgement count
     Sanctum::actingAs($this->reception,['hotel:read']);
     $this->getJson($url)->assertOk()->assertJsonPath('data.0.acknowledgement.acknowledged',1);
 });
+
+it('rejects malformed structured message payloads even with valid text', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id.'/messages';
+    foreach ([['attachment'=>[]],['handover'=>[]],['attachment'=>['filename'=>'test.pdf','content'=>base64_encode('%PDF-1.4'),'unexpected'=>true]]] as $invalid) {
+        $this->postJson($url,array_merge(['body'=>'QA text','client_id'=>(string)Str::uuid()],$invalid))->assertStatus(422);
+    }
+    expect(DB::table('staff_messages')->where('conversation_id',$id)->count())->toBe(0);
+});
+
+it('rejects corrupted attachments rather than returning damaged bytes', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id;
+    $mid=$this->postJson($url.'/messages',['client_id'=>(string)Str::uuid(),'attachment'=>['filename'=>'test.pdf','content'=>base64_encode("%PDF-1.4\n%%EOF\n")]])->assertOk()->json('data.id');
+    $attachment=DB::table('staff_message_attachments')->where('message_id',$mid);
+    $aid=$attachment->value('id');
+    $attachment->update(['sha256'=>str_repeat('0',64)]);
+    $this->getJson($url.'/attachments/'.$aid)->assertStatus(409);
+});
+
+it('treats search wildcards as literal text and matches case independently', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $url=$this->base.'/conversations/'.$id;
+    foreach (['QA 100% complete','QA other message'] as $body) {
+        $this->postJson($url.'/messages',['body'=>$body,'client_id'=>(string)Str::uuid()])->assertOk();
+    }
+    $this->getJson($url.'?q='.rawurlencode('100%'))->assertOk()->assertJsonCount(1,'data')->assertJsonPath('data.0.body','QA 100% complete');
+    $this->getJson($url.'?q=qa')->assertOk()->assertJsonCount(2,'data');
+    $this->getJson($url.'?q=%25')->assertOk()->assertJsonCount(1,'data');
+});
+
+it('excludes inactive staff from the participant list and denies their conversation access', function () {
+    $id=$this->postJson($this->base.'/conversations',['member_ids'=>[$this->reception->id]])->assertOk()->json('data.id');
+    $this->reception->memberships()->where('hotel_id',$this->hotel->id)->update(['is_active'=>false]);
+    $row=collect($this->getJson($this->base.'/conversations')->assertOk()->json('data'))->firstWhere('id',$id);
+    expect(collect($row['members'])->pluck('id')->map(fn ($id)=>(int)$id)->contains((int)$this->reception->id))->toBeFalse();
+    Sanctum::actingAs($this->reception,['hotel:read']);
+    $this->getJson($this->base.'/conversations/'.$id)->assertNotFound();
+});
