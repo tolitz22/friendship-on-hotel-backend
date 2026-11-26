@@ -93,10 +93,10 @@ Route::prefix('v1')->group(function (): void {
                 Route::post('/realtime/auth', [\App\Http\Controllers\Api\StaffMessageController::class, 'realtimeAuth'])->middleware('throttle:30,1');
                 Route::post('/conversations/{conversation}/announcements/{message}/acknowledge', [\App\Http\Controllers\Api\StaffMessageController::class, 'acknowledge'])->whereNumber('conversation')->whereNumber('message')->middleware('throttle:60,1');
                 Route::get('/records', [\App\Http\Controllers\Api\StaffMessageController::class, 'records'])->middleware('throttle:60,1');
-                Route::get('/directory', [\App\Http\Controllers\Api\StaffMessageController::class, 'directory']);
-                Route::get('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'index']);
+                Route::get('/directory', [\App\Http\Controllers\Api\StaffMessageController::class, 'directory'])->middleware('throttle:120,1');
+                Route::get('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'index'])->middleware('throttle:120,1');
                 Route::post('/conversations', [\App\Http\Controllers\Api\StaffMessageController::class, 'create'])->middleware('throttle:20,1');
-                Route::get('/conversations/{conversation}', [\App\Http\Controllers\Api\StaffMessageController::class, 'show'])->whereNumber('conversation');
+                Route::get('/conversations/{conversation}', [\App\Http\Controllers\Api\StaffMessageController::class, 'show'])->whereNumber('conversation')->middleware('throttle:120,1');
                 Route::post('/conversations/{conversation}/messages', [\App\Http\Controllers\Api\StaffMessageController::class, 'send'])->whereNumber('conversation')->middleware('throttle:60,1');
                 Route::get('/conversations/{conversation}/attachments/{attachment}', [\App\Http\Controllers\Api\StaffMessageController::class, 'download'])->whereNumber('conversation')->whereNumber('attachment')->middleware('throttle:60,1');
                 Route::post('/conversations/{conversation}/read', [\App\Http\Controllers\Api\StaffMessageController::class, 'read'])->whereNumber('conversation')->middleware('throttle:120,1');
