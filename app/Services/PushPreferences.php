@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\DB;
 
 final class PushPreferences
 {
-    public const KINDS = ['new_booking', 'checkout_due', 'checkout_overdue', 'room_assignment'];
+    public const KINDS = ['new_booking', 'checkout_due', 'checkout_overdue', 'room_assignment', 'guest_check_in', 'guest_check_out', 'booking_cancelled', 'booking_no_show', 'stay_extended'];
 
     public function get(int $hotelId, int $userId): array
     {

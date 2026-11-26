@@ -19,6 +19,9 @@ final class PushPreferenceController
     public function update(Request $request, Hotel $hotel, PushPreferences $preferences): JsonResponse
     {
         $rules = array_fill_keys(array_merge(['enabled'], PushPreferences::KINDS), ['required', 'boolean']);
+        foreach (array_slice(PushPreferences::KINDS, 4) as $kind) {
+            $rules[$kind] = ['sometimes', 'boolean'];
+        }
         $values = $request->validate($rules);
 
         return response()->json(['data' => $preferences->put($hotel->id, $request->user()->id, $values)]);

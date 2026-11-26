@@ -36,7 +36,7 @@ final class HotelNotificationService
         return $queues;
     }
 
-    public function feed(Hotel $hotel): array
+    public function feed(Hotel $hotel, bool $expanded = false): array
     {
         $queues = $this->queues($hotel);
         $notifications = [];
@@ -46,6 +46,19 @@ final class HotelNotificationService
             $hasMore = $hasMore || $rows->count() > 8;
             foreach ($rows->take(8) as $booking) {
                 $notifications[] = $this->notification($kind, $booking);
+            }
+        }
+
+        if ($expanded) {
+            $counts = [];
+            foreach (app(BookingActivityNotifications::class)->all($hotel, 9) as $item) {
+                $kind = $item['kind'];
+                $counts[$kind] = ($counts[$kind] ?? 0) + 1;
+                if ($counts[$kind] <= 8) {
+                    $notifications[] = $item;
+                } else {
+                    $hasMore = true;
+                }
             }
         }
 
@@ -64,6 +77,7 @@ final class HotelNotificationService
                 yield $this->notification($kind, $booking);
             }
         }
+        yield from app(BookingActivityNotifications::class)->all($hotel);
     }
 
     public function current(Hotel $hotel, string $id): ?array
@@ -72,6 +86,9 @@ final class HotelNotificationService
             return null;
         }
         $query = $this->queues($hotel)[$parts[1]] ?? null;
+        if (! $query) {
+            return app(BookingActivityNotifications::class)->current($hotel, $id);
+        }
         $booking = $query?->where('id', $parts[2])->first(['id', 'reference', 'check_in', 'check_out']);
         if (! $booking) {
             return null;
