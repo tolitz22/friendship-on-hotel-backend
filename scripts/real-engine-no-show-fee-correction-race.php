@@ -36,13 +36,15 @@ function configureFeeRace(int $hotelId): void
         'booking.no_show_adjustments_hotel_ids' => (string) $hotelId,
         'financial_accounting.enable_live_folio_tax' => false,
         'financial_accounting.enable_verified_settlement' => true,
+        'financial_accounting.enable_guest_deposit_posting' => true,
+        'financial_accounting.enable_no_show_allocation_posting' => true,
         'financial_accounting.enable_no_show_fee_correction_review' => true,
         'financial_accounting.enable_no_show_fee_correction_posting' => true,
     ]);
 }
 
 if (($argv[1] ?? '') === 'worker') {
-    [, , $barrier, $index, $hotelId, $bookingId, $actorId, $proposalId, $mode, $date] = $argv;
+    [, , $barrier, $index, $hotelId, $bookingId, $actorId, $proposalId, $mode, $date, $paymentId] = $argv;
     $hotel = Hotel::findOrFail($hotelId);
     configureFeeRace((int) $hotelId);
     touch($barrier.'.ready.'.$index);
@@ -59,6 +61,16 @@ if (($argv[1] ?? '') === 'worker') {
         } elseif ($mode === 'closing' && $index === '1') {
             app(FinancialBusinessDayCloseService::class)->close((int) $hotelId, $date, (int) $actorId);
             exit(0);
+        } elseif ($mode === 'allocation' && $index === '1') {
+            app(\App\Domain\Reservations\FolioSettlementService::class)->allocate(
+                $hotel, (int) $bookingId, (int) $paymentId, (int) $actorId,
+                'fee-race-allocation', 'guest', 'Synthetic guest', 150000, null
+            );
+        } elseif ($mode === 'refund' && $index === '1') {
+            app(\App\Domain\Reservations\RefundRequestService::class)->create($hotel, (int) $bookingId, (int) $actorId, [
+                'requestKey' => 'fee-race-refund', 'paymentRecordId' => (int) $paymentId,
+                'amountMinor' => 50000, 'reason' => 'Synthetic excess deposit refund request.',
+            ]);
         } else {
             $posted = $service->applyApprovedCorrection($hotel, (int) $proposalId, (int) $actorId);
             file_put_contents($barrier.'.result.'.$index, json_encode($posted, JSON_THROW_ON_ERROR));
@@ -69,15 +81,17 @@ if (($argv[1] ?? '') === 'worker') {
         if ($e->getStatusCode() === 409 &&
             (($mode === 'proposal' && $e->getMessage() === 'A fee correction proposal already exists.')
             || ($mode === 'approval' && $e->getMessage() === 'Fee correction already approved.')
-            || ($mode === 'closing' && $index === '2' && $e->getMessage() === 'Fee correction evidence changed; reversal blocked.'))) exit(9);
+            || ($mode === 'closing' && $index === '2' && $e->getMessage() === 'Fee correction evidence changed; reversal blocked.')
+            || (in_array($mode, ['allocation', 'refund'], true) && $index === '2' && $e->getMessage() === 'Fee correction requires eligible, reconciled original accounting.'))) exit(9);
         throw $e;
     } catch (ValidationException $e) {
+        if ($mode === 'allocation' && $index === '1' && isset($e->errors()['amountMinor'])) exit(9);
         throw $e;
     }
 }
 
 $mode = $argv[1] ?? 'posting';
-if (!in_array($mode, ['proposal', 'approval', 'posting', 'waiver', 'closing'], true)) throw new RuntimeException('Invalid fee race mode.');
+if (!in_array($mode, ['proposal', 'approval', 'posting', 'waiver', 'closing', 'allocation', 'refund'], true)) throw new RuntimeException('Invalid fee race mode.');
 $hotel = Hotel::create(['name' => 'No-show concurrency fixture', 'timezone' => 'Asia/Manila', 'currency' => 'PHP']);
 $actor = User::create([
     'name' => 'No-show race staff', 'email' => 'ns-race-'.bin2hex(random_bytes(5)).'@example.test',
@@ -120,14 +134,32 @@ $folio = (int) DB::table('reservation_folios')->where('hotel_id', $hotel->id)->w
 DB::table('financial_business_clocks')->where('hotel_id', $hotel->id)->update(['business_date' => $today]);
 app(ReservationBookingService::class)->cancel($hotel, $actor->id, $bookingId, true);
 $reviewService = app(NoShowFinancialReviewService::class);
+$paymentId = 0;
+$deposit = in_array($mode, ['allocation', 'refund'], true) ? 300000 : 0;
+if ($deposit > 0) {
+    $paymentId = DB::table('folio_payment_records')->insertGetId([
+        'hotel_id' => $hotel->id, 'folio_id' => $folio, 'request_key' => 'fee-race-deposit',
+        'payload_sha256' => str_repeat('b', 64), 'method' => 'bank_transfer', 'reference' => 'FEE-RACE-BANK',
+        'amount_minor' => $deposit, 'status' => 'staff_confirmed', 'recorded_by' => $actor->id,
+        'reviewed_by' => $reviewer->id, 'created_at' => now(), 'updated_at' => now(),
+    ]);
+    DB::table('folio_settlement_verifications')->insert([
+        'hotel_id' => $hotel->id, 'folio_id' => $folio, 'payment_record_id' => $paymentId,
+        'evidence_kind' => 'bank_statement', 'evidence_reference' => 'FEE-RACE-BANK',
+        'status' => 'verified', 'prepared_by' => $actor->id, 'reviewed_by' => $reviewer->id, 'reviewed_at' => now(),
+    ]);
+}
 $fingerprint = $reviewService->preview($hotel, $bookingId)['reviewFingerprint'];
 $review = $reviewService->apply($hotel, $bookingId, $actor->id, $fingerprint, 'Synthetic race booking policy review.');
 app(NoShowFinancialClearanceService::class)->approve($hotel, $bookingId, (int) $review['reviewId'], $reviewer->id,
     'vat_standard', 'Synthetic independently reviewed tax classification.');
+if ($deposit > 0) {
+    app(\App\Services\Finance\GuestDepositJournalService::class)->recognize($hotel, $bookingId, $paymentId, $reviewer->id);
+}
 $service = app(NoShowFeeCorrectionDecisionService::class);
 $reason = 'Independently reviewed synthetic fee correction.';
 $proposal = $mode === 'proposal' ? 0 : $service->propose($hotel, $bookingId, $actor->id, $mode === 'waiver' ? 0 : 100000, $reason);
-if (in_array($mode, ['posting', 'waiver', 'closing'], true)) {
+if (in_array($mode, ['posting', 'waiver', 'closing', 'allocation', 'refund'], true)) {
     $service->approve($hotel, $proposal, $reviewer->id, 'vat_standard', $reason, $reason);
 }
 $barrier = sys_get_temp_dir().'/pms-fee-correction-race-'.bin2hex(random_bytes(8));
@@ -135,7 +167,7 @@ $workers = [];
 try {
     foreach ([1, 2] as $index) {
         $worker = proc_open([PHP_BINARY, __FILE__, 'worker', $barrier, (string) $index, (string) $hotel->id,
-            (string) $bookingId, (string) ($mode === 'proposal' ? $actor->id : $reviewer->id), (string) $proposal, $mode, $today], [STDIN, STDOUT, STDERR], $pipes);
+            (string) $bookingId, (string) ($mode === 'proposal' ? $actor->id : $reviewer->id), (string) $proposal, $mode, $today, (string) $paymentId], [STDIN, STDOUT, STDERR], $pipes);
         if (!is_resource($worker)) throw new RuntimeException('Cannot start fee correction worker.');
         $workers[] = $worker;
     }
@@ -159,9 +191,13 @@ try {
     $credits = DB::table('folio_adjustments')->where('hotel_id', $hotel->id)->where('folio_id', $folio)
         ->where('request_key', 'no-show-fee-correction-'.$proposalId);
     $posted = in_array($mode, ['posting', 'waiver'], true) || ($mode === 'closing' && $statuses === [0, 0]);
+    if (in_array($mode, ['allocation', 'refund'], true)) {
+        $posted = $reversals->count() === 1;
+    }
     $expected = $mode === 'waiver' ? 0 : ($posted ? 100000 : 200000);
     $expectedStatuses = in_array($mode, ['posting', 'waiver'], true) ? [0, 8] : [0, 9];
     if ($mode === 'closing' && $posted) $expectedStatuses = [0, 0];
+    if ($mode === 'refund' && $posted) $expectedStatuses = [0, 0];
     $effective = NoShowRefundEligibility::clearance($hotel->id, $bookingId, $folio);
     if ($statuses !== $expectedStatuses || $proposals->count() !== 1
         || $reviews->count() !== ($mode === 'proposal' ? 0 : 1)
@@ -170,7 +206,7 @@ try {
         || $credits->count() !== ($posted ? 1 : 0)
         || (int) $credits->sum('amount_minor') !== ($posted ? 200000 - $expected : 0)
         || $effective === null || (int) $effective->gross_minor !== $expected
-        || app(NoShowRefundEligibility::class)->review($hotel, $bookingId)['remainingCollectionMinor'] !== $expected) {
+        || app(NoShowRefundEligibility::class)->review($hotel, $bookingId)['remainingCollectionMinor'] !== max(0, $expected - $deposit)) {
         throw new RuntimeException('Fee correction race failed: '.json_encode([$mode, $statuses, $effective]));
     }
     if (in_array($mode, ['posting', 'waiver'], true)) {
@@ -179,6 +215,29 @@ try {
         if ($first['replayed'] === $second['replayed']
             || array_replace($first, ['replayed' => false]) !== array_replace($second, ['replayed' => false])) {
             throw new RuntimeException('Duplicate posting did not return the same correction receipt.');
+        }
+    }
+    if (in_array($mode, ['allocation', 'refund'], true)) {
+        $allocations = DB::table('folio_settlement_allocations')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
+        $refunds = DB::table('folio_refund_requests')->where('hotel_id', $hotel->id)->where('folio_id', $folio);
+        $expectedAllocated = $mode === 'allocation' && !$posted ? 150000 : 0;
+        $expectedReserved = $mode === 'refund' ? 50000 : 0;
+        $eligibility = app(NoShowRefundEligibility::class)->review($hotel, $bookingId);
+        $report = app(\App\Services\Finance\NoShowLedgerReconciliationService::class)->report($hotel, $bookingId, $reviewer->id);
+        if ((int) $allocations->sum('amount_minor') !== $expectedAllocated
+            || $allocations->count() !== ($expectedAllocated > 0 ? 1 : 0)
+            || (int) $refunds->sum('amount_minor') !== $expectedReserved
+            || $refunds->count() !== ($expectedReserved > 0 ? 1 : 0)
+            || ($expectedReserved > 0 && $refunds->value('status') !== 'requested')
+            || $eligibility['verifiedPaymentsMinor'] !== $deposit
+            || $eligibility['pendingRefundsMinor'] !== $expectedReserved
+            || $eligibility['verifiedRefundsMinor'] !== 0
+            || !$report['reconciled']
+            || $report['matchedJournalBalances'] !== [
+                'depositLiabilityMinor' => $deposit - $expectedAllocated,
+                'receivableMinor' => $expected - $expectedAllocated,
+            ]) {
+            throw new RuntimeException('Fee correction settlement race failed: '.json_encode([$mode, $eligibility, $report]));
         }
     }
     if ($mode === 'closing') {
