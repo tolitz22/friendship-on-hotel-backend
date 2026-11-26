@@ -40,6 +40,12 @@ final class InspectFinancialIntegrity extends Command
                 $this->line(json_encode($issue, JSON_THROW_ON_ERROR));
             }
             $this->line($report['integrityValid'] ? 'Implemented checks passed.' : 'Integrity issues found.');
+            if ($report['dailyClosing'] !== null) {
+                $this->line($report['dailyClosing']['canClose'] ? 'Daily Closing: ready (advisory).' : 'Daily Closing: blocked.');
+                foreach ($report['dailyClosing']['blockers'] as $blocker) {
+                    $this->line(' - '.$blocker);
+                }
+            }
             $this->line('Not checked: '.implode(', ', $report['notChecked']));
             $this->line('Read-only; not a closing or release certification.');
         }
