@@ -22,15 +22,30 @@ final class NoShowRefundEligibility
         $verified = $statement['verifiedPaymentsMinor'];
         $allocated = $statement['verifiedAllocatedMinor'];
         $reserved = 0;
+        $pendingRefunds = 0;
         foreach ($statement['refunds'] as $refund) {
-            if ((string) $reviewingRefundId !== $refund['id'] && in_array($refund['status'], ['requested', 'approved'], true)) {
-                $reserved += $refund['amountMinor'];
+            if (!in_array($refund['status'], ['requested', 'approved'], true)) {
+                continue;
+            }
+            $completed = $refund['status'] === 'approved' && $refund['evidenceStatus'] === 'verified';
+            // Only release the reservation for a pending request under review.
+            // Already disbursed funds must never become available again.
+            if (!$completed && (string) $reviewingRefundId === $refund['id']) {
+                continue;
+            }
+            $reserved += $refund['amountMinor'];
+            if (!$completed) {
+                $pendingRefunds += $refund['amountMinor'];
             }
         }
         $valid = $clearance !== null && $net === (int) $clearance->gross_minor;
-        $ready = $valid
-            && $allocated >= 0 && $allocated <= $net
-            && $statement['paymentEvidenceIndependentlyReviewed']
+        $verifiedRefunds = $statement['verifiedRefundsMinor'];
+        $netVerifiedFunds = $verified - $verifiedRefunds;
+        $unallocatedFunds = $netVerifiedFunds - $allocated;
+        $reconciled = $valid && $statement['paymentEvidenceIndependentlyReviewed']
+            && $allocated >= 0 && $allocated <= $net && $unallocatedFunds >= 0
+            && $pendingRefunds <= $unallocatedFunds;
+        $ready = $reconciled
             && config('financial_accounting.enable_verified_settlement', false)
             && NoShowWorkflow::enabled((int) $hotel->id);
         $excess = $ready ? max(0, $verified - max($net, $allocated) - $reserved) : 0;
@@ -45,21 +60,17 @@ final class NoShowRefundEligibility
                 if ($allocation['paymentId'] === $payment['id']) $used += $allocation['amountMinor'];
             }
             foreach ($statement['refunds'] as $refund) {
-                if ((string) $reviewingRefundId !== $refund['id'] && $refund['paymentId'] === $payment['id'] && in_array($refund['status'], ['requested', 'approved'], true)) {
+                if ($refund['paymentId'] !== $payment['id'] || !in_array($refund['status'], ['requested', 'approved'], true)) {
+                    continue;
+                }
+                $completed = $refund['status'] === 'approved' && $refund['evidenceStatus'] === 'verified';
+                if ($completed || (string) $reviewingRefundId !== $refund['id']) {
                     $used += $refund['amountMinor'];
                 }
             }
             $payments[] = ['paymentId' => $payment['id'], 'maximumRequestMinor' => min($excess, max(0, $payment['amountMinor'] - $used))];
         }
         $maximumRefund = min($excess, array_sum(array_column($payments, 'maximumRequestMinor')));
-        // Keep collection exposure separate from allocation and refund obligations.
-        $verifiedRefunds = $statement['verifiedRefundsMinor'];
-        $netVerifiedFunds = $verified - $verifiedRefunds;
-        $unallocatedFunds = $netVerifiedFunds - $allocated;
-        $pendingRefunds = max(0, $reserved - $verifiedRefunds);
-        $reconciled = $valid && $statement['paymentEvidenceIndependentlyReviewed']
-            && $allocated >= 0 && $allocated <= $net && $unallocatedFunds >= 0
-            && $pendingRefunds <= $unallocatedFunds;
 
         return [
             'financialClearanceValid' => $valid,
@@ -73,7 +84,7 @@ final class NoShowRefundEligibility
             'reconciliationValid' => $reconciled,
             'remainingCollectionMinor' => $valid ? max(0, $net - $verified + $statement['verifiedRefundsMinor']) : null,
             'maximumRefundRequestMinor' => $maximumRefund,
-            'settled' => $reconciled && $allocated === $net && $unallocatedFunds === 0
+            'settled' => $reviewingRefundId === null && $reconciled && $allocated === $net && $unallocatedFunds === 0
                 && $pendingRefunds === 0, 'payments' => $payments,
             'refundIssued' => false,
         ];
