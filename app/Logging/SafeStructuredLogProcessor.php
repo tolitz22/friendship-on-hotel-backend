@@ -14,6 +14,7 @@ final class SafeStructuredLogProcessor
     private const EVENTS = [
         'pms.logging.smoke',
         'pms.api.request.completed',
+        FrontendErrorLog::EVENT,
     ];
 
     private const NUMERIC_FIELDS = [
@@ -64,6 +65,11 @@ final class SafeStructuredLogProcessor
             if (in_array($mode, ['bearer', 'cookie'], true)) {
                 $context['auth_mode'] = $mode;
             }
+        }
+
+        if ($record->message === FrontendErrorLog::EVENT) {
+            unset($context['status_code']);
+            $context += FrontendErrorLog::metadata($record->context);
         }
 
         $exception = $record->context['exception'] ?? null;

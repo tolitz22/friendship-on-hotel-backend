@@ -1,0 +1,5 @@
+# LOG-5 — Frontend error telemetry
+
+Authenticated POST /api/v1/telemetry/frontend-errors uses existing Sanctum authentication, active-user middleware, 12 requests/minute throttle and a 2 KB body cap. Accepts only predefined error kinds, screen names, error types, status codes and optional UUID v4 related_request_id. Browser-supplied user/hotel identity, error messages, stacks, URLs, form data and arbitrary properties are not logged. User identity is derived server-side. The related request ID is a client-supplied diagnostic hint; the telemetry POST receives its own LOG-2 request ID. Logs go to the LOG-1 destination with event pms.frontend.error_reported and WARNING severity. No database or queue. All reports are best effort: logged-out, offline or throttled reports may be lost; no persistent browser storage or public ingestion endpoint. Ordinary validation and permission failures are not frontend errors. Technical logs are for platform operators only.
+
+Run php artisan test tests/Feature/FrontendErrorLoggingTest.php. Confirm a synthetic authenticated report in Railway; do not introduce deliberate errors into real hotel workflows.

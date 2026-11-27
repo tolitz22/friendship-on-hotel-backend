@@ -82,6 +82,7 @@ Route::prefix('v1')->group(function (): void {
     Route::post('/auth/accept-invitation', [StaffInvitationController::class, 'accept'])->middleware('throttle:5,1');
 
     Route::middleware(['auth:sanctum', 'active.user'])->group(function (): void {
+        Route::post('/telemetry/frontend-errors', \App\Http\Controllers\Api\FrontendErrorController::class)->middleware('throttle:12,1,pms-frontend-errors');
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::post('/auth/spa-logout', [SpaSessionController::class, 'logout']);
