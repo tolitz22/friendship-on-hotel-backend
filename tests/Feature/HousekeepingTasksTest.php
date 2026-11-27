@@ -207,3 +207,42 @@ it('filters the full housekeeping queue and separates completed cleaning from in
     ])->assertOk();
     $this->getJson($url.'?mine=1&queue=pending_inspection')->assertOk()->assertJsonPath('meta.total',0)->assertJsonPath('meta.pendingInspectionCount',0);
 });
+
+it('persists checklist evidence, rejects incomplete assigned cleaning and locks completed evidence', function (): void {
+    $hotel=Hotel::create(['name'=>'HK Checklist']);
+    $room=housekeepingRoom($hotel);
+    housekeepingLogin($hotel);
+    $cleaner=User::create(['name'=>'Checklist Cleaner','email'=>'hk-checklist@example.test','password'=>'test-password']);
+    HotelMembership::create(['hotel_id'=>$hotel->id,'user_id'=>$cleaner->id,'role'=>'housekeeping','is_active'=>true]);
+    $base='/api/v1/hotels/'.$hotel->id.'/housekeeping-tasks';
+    $task=$this->postJson($base,['roomId'=>$room->id,'type'=>'checkout_clean','assignedUserId'=>$cleaner->id])->assertCreated()
+        ->assertJsonCount(8,'data.checklist')->json('data');
+    $keys=array_column($task['checklist'],'key');
+    $url=$base.'/'.$task['id'];
+    Sanctum::actingAs($cleaner,['hotel:read']);
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'done'])->assertUnprocessable()->assertJsonValidationErrors(['checkedItems']);
+    $this->patchJson($url,['expectedRevision'=>1,'checkedItems'=>['invalid']])->assertUnprocessable();
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'in_progress','checkedItems'=>[$keys[0]]])->assertOk()
+        ->assertJsonPath('data.revision',2)->assertJsonPath('data.checklist.0.checkedBy',(string)$cleaner->id);
+    $first=$this->getJson($url)->assertOk()->json('data.checklist.0.checkedAt');
+    expect($first)->not->toBeNull();
+    $this->patchJson($url,['expectedRevision'=>1,'checkedItems'=>$keys])->assertStatus(409);
+    $this->patchJson($url,['expectedRevision'=>2,'status'=>'done','checkedItems'=>[$keys[0]]])->assertUnprocessable();
+    $this->patchJson($url,['expectedRevision'=>2,'status'=>'done','checkedItems'=>$keys])->assertOk()
+        ->assertJsonPath('data.completedBy',(string)$cleaner->id)->assertJsonPath('data.checklist.0.checkedAt',$first);
+    $this->patchJson($url,['expectedRevision'=>3,'checkedItems'=>[]])->assertUnprocessable();
+    $this->getJson($url.'/history')->assertOk()->assertJsonPath('data.0.after.completedBy',(string)$cleaner->id);
+    expect(DB::table('room_readiness_inspections')->where('hotel_id',$hotel->id)->count())->toBe(0);
+});
+
+it('uses a different stayover checklist and does not fabricate legacy manager evidence', function (): void {
+    $hotel=Hotel::create(['name'=>'HK Stayover Checklist']);
+    $room=housekeepingRoom($hotel);
+    housekeepingLogin($hotel);
+    $base='/api/v1/hotels/'.$hotel->id.'/housekeeping-tasks';
+    $task=$this->postJson($base,['roomId'=>$room->id,'type'=>'stayover'])->assertCreated()->assertJsonCount(6,'data.checklist')->json('data');
+    $url=$base.'/'.$task['id'];
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'done','checkedItems'=>[]])->assertUnprocessable();
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'done'])->assertOk()->assertJsonPath('data.checklist.0.checkedAt',null);
+    $this->getJson($url.'/history')->assertOk()->assertJsonPath('data.0.after.checklistEvidence','legacy_status_only');
+});

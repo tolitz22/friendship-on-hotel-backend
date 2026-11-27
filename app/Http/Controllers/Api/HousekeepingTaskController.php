@@ -22,6 +22,38 @@ final class HousekeepingTaskController
         'done' => [],
     ];
 
+    private const CHECKLISTS = [
+        'checkout_clean' => [
+            'trash' => 'Remove trash and check for belongings',
+            'linens' => 'Replace bed linens',
+            'bathroom' => 'Clean and disinfect bathroom',
+            'towels' => 'Replace towels',
+            'amenities' => 'Replenish toiletries and supplies',
+            'floors' => 'Clean floors',
+            'surfaces' => 'Clean and disinfect surfaces',
+            'fixtures' => 'Check lights, air conditioning and visible damage',
+        ],
+        'stayover' => [
+            'trash' => 'Remove trash',
+            'bed' => 'Make bed and refresh linens as requested',
+            'bathroom' => 'Clean bathroom',
+            'towels' => 'Refresh towels as requested',
+            'amenities' => 'Replenish supplies as needed',
+            'floors' => 'Clean floors and accessible surfaces',
+        ],
+    ];
+
+    private function checklist(object $row): array
+    {
+        $template = self::CHECKLISTS[$row->type] ?? [];
+        $saved = isset($row->cleaning_checklist) ? json_decode($row->cleaning_checklist, true, 512, JSON_THROW_ON_ERROR) : [];
+        return array_map(fn (string $key, string $label): array => [
+            'key' => $key, 'label' => $label,
+            'checkedBy' => $saved[$key]['checkedBy'] ?? null,
+            'checkedAt' => $saved[$key]['checkedAt'] ?? null,
+        ], array_keys($template), array_values($template));
+    }
+
     private function scoped(Hotel $hotel)
     {
         return DB::table('housekeeping_tasks as t')
@@ -47,6 +79,8 @@ final class HousekeepingTaskController
             'completedAt' => $row->completed_at,
             'revision' => (int) $row->revision,
             'createdAt' => $row->created_at,
+            'checklist' => $this->checklist($row),
+            'completedBy' => isset($row->completed_by) ? (string) $row->completed_by : null,
         ];
     }
 
@@ -57,6 +91,7 @@ final class HousekeepingTaskController
             'assignedTo' => $row->assigned_to,
             'assignedUserId' => $row->assigned_user_id===null?null:(string)$row->assigned_user_id,
             'dueAt' => $row->due_at,
+            'checkedItems' => array_values(array_map(fn ($item) => $item['key'], array_filter($this->checklist($row), fn ($item) => $item['checkedAt'] !== null))),
         ];
     }
 
@@ -266,6 +301,8 @@ final class HousekeepingTaskController
     {
         $data=$request->validate([
             'expectedRevision'=>['required','integer','min:1'],
+            'checkedItems'=>['sometimes','array','max:12'],
+            'checkedItems.*'=>['required','string','distinct','max:40'],
             'status'=>['sometimes',Rule::in(self::STATUSES)],
             'assignedTo'=>['sometimes','nullable','string','max:120'],
             'assignedUserId'=>['sometimes','nullable','integer','min:1'],
@@ -291,6 +328,37 @@ final class HousekeepingTaskController
                 && !in_array($changes['status'],self::TRANSITIONS[$row->status]??[],true)) {
                 throw ValidationException::withMessages(['status'=>['This housekeeping transition is not supported.']]);
             }
+            $template = self::CHECKLISTS[$row->type] ?? [];
+            $saved = isset($row->cleaning_checklist) ? json_decode($row->cleaning_checklist, true, 512, JSON_THROW_ON_ERROR) : [];
+            if (array_key_exists('checkedItems', $data)) {
+                if (array_diff($data['checkedItems'], array_keys($template)) !== []) {
+                    throw ValidationException::withMessages(['checkedItems'=>['Select only items from this task checklist.']]);
+                }
+                $nextChecklist = [];
+                foreach (array_keys($template) as $key) {
+                    if (in_array($key, $data['checkedItems'], true)) {
+                        $nextChecklist[$key] = $saved[$key] ?? [
+                            'checkedBy'=>(string)$request->user()->id,
+                            'checkedAt'=>now()->toIso8601String(),
+                        ];
+                    }
+                }
+                if ($nextChecklist !== $saved) {
+                    if ($row->status === 'done') throw ValidationException::withMessages(['checkedItems'=>['Completed cleaning evidence cannot be edited.']]);
+                    $changes['cleaning_checklist'] = json_encode($nextChecklist, JSON_THROW_ON_ERROR);
+                }
+                $saved = $nextChecklist;
+            }
+            $legacyAdminCompletion = false;
+            if (($changes['status'] ?? null) === 'done' && $row->status !== 'done' && $template !== []) {
+                // Preserve the pre-HK-04 manager status-only API during rollout;
+                // never invent checklist evidence for that compatibility path.
+                $legacyAdminCompletion = TaskStaffAccess::isAdmin($request, $hotel)
+                    && !array_key_exists('checkedItems', $data) && $row->cleaning_checklist === null;
+                if (!$legacyAdminCompletion && count($saved) !== count($template)) {
+                    throw ValidationException::withMessages(['checkedItems'=>['Complete every required cleaning item before finishing.']]);
+                }
+            }
             // Compare normalized values to avoid a false edit caused by formatting nullable timestamps.
             $next=(object)array_merge((array)$row,$changes);
             $before=$this->state($row);
@@ -299,7 +367,12 @@ final class HousekeepingTaskController
             if ($before===$after && ($note===null||$note==='')) return ['conflict'=>false];
             $changes['revision']=(int)$row->revision+1;
             $changes['updated_at']=now();
-            if (($changes['status']??null)==='done' && $row->status!=='done') $changes['completed_at']=now();
+            if (($changes['status']??null)==='done' && $row->status!=='done') {
+                $changes['completed_at']=now();
+                $changes['completed_by']=$request->user()->id;
+                if ($legacyAdminCompletion) $after['checklistEvidence']='legacy_status_only';
+                $after['completedBy']=(string)$request->user()->id;
+            }
             DB::table('housekeeping_tasks')->where('id',$row->id)->update($changes);
             $this->event($hotel,(int)$row->id,(int)$request->user()->id,'updated',$before,$after,$note);
             return ['conflict'=>false];
