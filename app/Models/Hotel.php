@@ -4,10 +4,16 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Hotel extends Model
 {
     protected $fillable = ['name', 'timezone', 'currency', 'address', 'contact_email', 'contact_phone'];
+
+    public function platformSubscription(): HasOne
+    {
+        return $this->hasOne(PlatformHotelSubscription::class);
+    }
 
     public function roomTypes(): HasMany
     {

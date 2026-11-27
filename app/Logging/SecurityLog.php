@@ -15,6 +15,7 @@ final class SecurityLog
         'pms.security.platform.hotel_created',
         'pms.security.platform.plan_created',
         'pms.security.platform.plan_updated',
+        'pms.security.platform.subscription_changed',
         'pms.security.login.succeeded',
         'pms.security.login.failed',
         'pms.security.logout.succeeded',
