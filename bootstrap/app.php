@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureHotelMember;
+use App\Http\Middleware\TrackApiRequest;
 use App\Http\Middleware\EnsureActiveUser;
 use App\Http\Middleware\EnsureHotelAdmin;
 use App\Http\Middleware\EnsureHotelPermission;
@@ -17,6 +18,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         // Stateful API middleware applies only to trusted Sanctum first-party origins.
         // Existing bearer-token clients remain supported.
+        $middleware->prepend(TrackApiRequest::class);
         $middleware->statefulApi();
         $middleware->alias([
             'hotel.member' => EnsureHotelMember::class,

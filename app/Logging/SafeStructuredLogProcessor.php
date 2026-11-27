@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Logging;
 
+use Closure;
 use Monolog\LogRecord;
 use Throwable;
 
@@ -12,6 +13,7 @@ final class SafeStructuredLogProcessor
     // Only reviewed, static event names may become externally visible messages.
     private const EVENTS = [
         'pms.logging.smoke',
+        'pms.api.request.completed',
     ];
 
     private const NUMERIC_FIELDS = [
@@ -20,8 +22,10 @@ final class SafeStructuredLogProcessor
         'attempt', 'count',
     ];
 
-    public function __construct(private readonly string $environment)
-    {
+    public function __construct(
+        private readonly string $environment,
+        private readonly ?Closure $requestId = null,
+    ) {
     }
 
     public function __invoke(LogRecord $record): LogRecord
@@ -33,6 +37,24 @@ final class SafeStructuredLogProcessor
                 $context[$key] = $value;
             } elseif (is_string($value) && preg_match('/\A[0-9]{1,18}\z/D', $value) === 1) {
                 $context[$key] = (int) $value;
+            }
+        }
+
+        // Context from the current server request takes precedence.
+        $requestId = $this->requestId !== null ? ($this->requestId)() : null;
+        $requestId ??= $record->context['request_id'] ?? null;
+        if (is_string($requestId) && preg_match('/\\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\\z/D', $requestId) === 1) {
+            $context['request_id'] = $requestId;
+        }
+
+        if ($record->message === 'pms.api.request.completed') {
+            $method = $record->context['http_method'] ?? null;
+            if (in_array($method, ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'], true)) {
+                $context['http_method'] = $method;
+            }
+            $route = $record->context['route_template'] ?? null;
+            if (is_string($route) && preg_match('/\\A(?:unmatched|api(?:\\/[A-Za-z0-9_{}?\\-]+)*)\\z/D', $route) === 1 && strlen($route) <= 180) {
+                $context['route_template'] = $route;
             }
         }
 
