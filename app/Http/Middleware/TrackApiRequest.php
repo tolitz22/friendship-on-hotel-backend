@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Middleware;
 
 use App\Logging\SecurityLog;
+use App\Logging\MonitoringRoutes;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
@@ -41,7 +42,12 @@ final class TrackApiRequest
                 default => null,
             };
             if ($securityEvent !== null) {
-                SecurityLog::record($securityEvent, ['status_code' => $status], true);
+                $context = ['status_code' => $status];
+                $route = $request->route();
+                if ($status === 429 && $route instanceof Route && MonitoringRoutes::contains($route->uri())) {
+                    $context['route_template'] = $route->uri();
+                }
+                SecurityLog::record($securityEvent, $context, true);
             }
 
             return $response;

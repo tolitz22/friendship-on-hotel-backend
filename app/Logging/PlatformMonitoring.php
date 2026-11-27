@@ -98,7 +98,7 @@ final class PlatformMonitoring
             'serviceRole' => ServiceRole::normalize($extra['service_role'] ?? null),
             'requestId' => $uuid($context['request_id'] ?? null),
             'relatedRequestId' => $uuid($context['related_request_id'] ?? null),
-            'route' => $message === 'pms.api.request.completed' && is_string($route) && strlen($route) <= 180 && preg_match('/\A(?:unmatched|api(?:\/[A-Za-z0-9_{}?\-]+)*)\z/D', $route) ? $route : null,
+            'route' => ($message === 'pms.api.request.completed' || ($message === 'pms.security.access.rate_limited' && MonitoringRoutes::contains($route))) && is_string($route) && strlen($route) <= 180 && preg_match('/\A(?:unmatched|api(?:\/[A-Za-z0-9_{}?\-]+)*)\z/D', $route) ? $route : null,
             'statusCode' => $number($context['status_code'] ?? null, 599),
             'durationMs' => $number($context['duration_ms'] ?? null, 86400000),
             'screen' => in_array($context['screen'] ?? null, FrontendErrorLog::SCREENS, true) ? $context['screen'] : null,

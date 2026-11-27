@@ -50,6 +50,9 @@ final class SecurityLog
             if (in_array($context['auth_mode'] ?? null, ['bearer', 'cookie'], true)) {
                 $safe['auth_mode'] = $context['auth_mode'];
             }
+            if ($event === 'pms.security.access.rate_limited' && MonitoringRoutes::contains($context['route_template'] ?? null)) {
+                $safe['route_template'] = $context['route_template'];
+            }
             Log::log($warning ? 'warning' : 'info', $event, $safe);
         } catch (Throwable) {
             // Telemetry must never change authentication or a committed operation.

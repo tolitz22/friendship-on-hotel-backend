@@ -68,6 +68,10 @@ final class SafeStructuredLogProcessor
             }
         }
 
+        if ($record->message === 'pms.security.access.rate_limited' && MonitoringRoutes::contains($record->context['route_template'] ?? null)) {
+            $context['route_template'] = $record->context['route_template'];
+        }
+
         if ($record->message === FrontendErrorLog::EVENT) {
             unset($context['status_code']);
             $context += FrontendErrorLog::metadata($record->context);

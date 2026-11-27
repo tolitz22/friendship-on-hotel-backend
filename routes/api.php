@@ -86,8 +86,8 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/auth/me', [AuthController::class, 'me']);
         Route::get('/platform/workers', \App\Http\Controllers\Api\PlatformWorkerHealthController::class)->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:6,1,pms-platform-workers']);
         Route::get('/platform/health', \App\Http\Controllers\Api\PlatformHealthController::class)->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:6,1,pms-platform-health']);
-        Route::get('/platform/monitoring/metrics', [\App\Http\Controllers\Api\PlatformMonitoringController::class, 'metrics'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:6,1,pms-platform-metrics']);
-        Route::get('/platform/monitoring', \App\Http\Controllers\Api\PlatformMonitoringController::class)->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:12,1,pms-platform-monitoring']);
+        Route::get('/platform/monitoring/metrics', [\App\Http\Controllers\Api\PlatformMonitoringController::class, 'metrics'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:20,1,pms-platform-metrics']);
+        Route::get('/platform/monitoring', \App\Http\Controllers\Api\PlatformMonitoringController::class)->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:20,1,pms-platform-monitoring']);
         Route::post('/auth/logout', [AuthController::class, 'logout']);
         Route::post('/auth/spa-logout', [SpaSessionController::class, 'logout']);
         Route::post('/auth/change-password', [StaffPasswordController::class, 'change'])->middleware('throttle:5,1');
