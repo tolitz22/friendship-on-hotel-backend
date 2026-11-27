@@ -80,7 +80,7 @@ it('does not let non-admins manage staff memberships', function (): void {
     $this->postJson($url,['email'=>'unknown@example.test','role'=>'admin'])->assertForbidden();
 });
 
-it('allows only the linked housekeeping assignee to advance the assigned task', function (): void {
+it('allows housekeeping teammates to advance progress without changing assignment', function (): void {
     $hotel=Hotel::create(['name'=>'Assigned Cleaning']);
     $room=phase15Room($hotel);
     $admin=phase15User('Head Admin');
@@ -103,9 +103,9 @@ it('allows only the linked housekeeping assignee to advance the assigned task', 
     $this->patchJson($base.'/'.$id,['expectedRevision'=>2,'status'=>'in_progress','note'=>'Started'])
         ->assertOk()->assertJsonPath('data.revision',3);
     $this->patchJson($base.'/'.$id,['expectedRevision'=>1,'status'=>'done'])->assertStatus(409);
-    $this->patchJson($base.'/'.$id,['expectedRevision'=>2,'status'=>'done'])->assertOk()
+    $this->patchJson($base.'/'.$id,['expectedRevision'=>3,'status'=>'done'])->assertOk()
         ->assertJsonPath('data.status','done');
-    expect(DB::table('housekeeping_task_events')->where('task_id',$id)->count())->toBe(3);
+    expect(DB::table('housekeeping_task_events')->where('task_id',$id)->count())->toBe(4);
     expect(DB::table('reservation_records')->count())->toBe(0);
 });
 
