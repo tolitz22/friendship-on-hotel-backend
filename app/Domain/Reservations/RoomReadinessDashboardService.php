@@ -19,7 +19,7 @@ final class RoomReadinessDashboardService
 {
     public const MAX_ROOMS = 1000;
 
-    public function overview(Hotel $hotel, int $days, int $page, int $perPage): array
+    public function overview(Hotel $hotel, int $days, int $page, int $perPage, bool $includeArrivals = true): array
     {
         $asOf = now($hotel->timezone ?: 'Asia/Manila')->toDateString();
         $through = (new \DateTimeImmutable($asOf))->modify('+'.$days.' days')->format('Y-m-d');
@@ -147,7 +147,7 @@ final class RoomReadinessDashboardService
             ];
         }
 
-        $arrivals = DB::table('reservation_records as r')
+        $arrivals = ! $includeArrivals ? collect() : DB::table('reservation_records as r')
             ->leftJoin('guests as guest', function ($join): void {
                 $join->on('guest.id', '=', 'r.guest_id')
                     ->on('guest.hotel_id', '=', 'r.hotel_id');
@@ -210,6 +210,7 @@ final class RoomReadinessDashboardService
                 'roomPerPage' => $perPage,
                 'roomTotalPages' => (int) ceil(count($roomRows) / $perPage),
                 'arrivalTotal' => count($arrivalResults),
+                'arrivalsVisible' => $includeArrivals,
                 'snapshotOnly' => true,
                 'futureRoomReadinessGuaranteed' => false,
                 'inventoryGuaranteed' => false,

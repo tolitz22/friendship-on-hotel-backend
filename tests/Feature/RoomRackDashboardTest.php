@@ -100,3 +100,33 @@ it('returns inspection affordances from active server membership, never from a c
         'amenitiesVerified' => true,'note' => 'Reception cannot inspect a room',
     ])->assertForbidden();
 });
+
+it('shows a floor-groupable private housekeeping board without reservation identifiers or guest details', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-10T10:00:00+08:00'));
+    [$hotel, $type, $rooms] = rackFixture();
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $cleaner = User::create(['name'=>'Board Cleaner','email'=>'hk-board@example.test','password'=>'Password123456!']);
+    HotelMembership::create(['hotel_id'=>$hotel->id,'user_id'=>$cleaner->id,'role'=>'housekeeping','is_active'=>true]);
+    $guest = $hotel->guests()->create(['first_name'=>'Private','last_name'=>'BoardGuest']);
+    $booking = $this->postJson($base.'/bookings', [
+        'idempotencyKey'=>'hk-room-board-01','guestId'=>$guest->id,'roomTypeId'=>$type->id,
+        'checkIn'=>'2026-12-10','checkOut'=>'2026-12-11',
+    ])->assertCreated()->json('data.id');
+    $this->patchJson($base.'/bookings/'.$booking.'/assign-room',['roomId'=>$rooms[0]->id])->assertOk();
+    $task = $this->postJson($base.'/housekeeping-tasks', [
+        'roomId'=>$rooms[0]->id,'type'=>'checkout_clean','assignedUserId'=>$cleaner->id,
+    ])->assertCreated()->json('data.id');
+    $this->getJson($base.'/housekeeping/room-board')->assertForbidden();
+    Sanctum::actingAs($cleaner,['hotel:read']);
+    $response = $this->getJson($base.'/housekeeping/room-board')->assertOk()
+        ->assertJsonPath('meta.total',3)->assertJsonPath('data.rooms.0.floor',4)
+        ->assertJsonPath('data.rooms.0.stage','dirty')->assertJsonPath('data.rooms.0.arrivalToday',true)
+        ->assertJsonPath('data.rooms.0.task.id',$task)->assertJsonPath('data.rooms.0.task.assignment','mine')
+        ->assertJsonPath('data.rooms.1.stage','unverified');
+    expect($response->getContent())->not->toContain('BoardGuest','bookingId','reference','activeStayId','guestName');
+    $this->getJson($base.'/readiness/dashboard')->assertOk()
+        ->assertJsonPath('meta.arrivalsVisible',false)->assertJsonCount(0,'data.arrivals');
+    $this->getJson($base.'/rooms/rack')->assertForbidden();
+    $other = Hotel::create(['name'=>'Foreign room board']);
+    $this->getJson('/api/v1/hotels/'.$other->id.'/housekeeping/room-board')->assertNotFound();
+});
