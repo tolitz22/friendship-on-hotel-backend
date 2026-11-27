@@ -258,3 +258,48 @@ it('does not allow stayover completion to certify a room ready through final ins
     $this->postJson($url.'/final-inspection',['expectedRevision'=>2,'cleaningVerified'=>true,'safetyVerified'=>true,'amenitiesVerified'=>true,'note'=>'Stayover service finished'])->assertUnprocessable();
     expect(DB::table('room_readiness_inspections')->where('hotel_id',$hotel->id)->count())->toBe(0);
 });
+
+it('reports team workload and filters the complete task queue with staff and room metadata', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-10T00:30:00+08:00'));
+    $hotel = Hotel::create(['name'=>'Housekeeping Workspace', 'timezone'=>'Asia/Manila']);
+    $room = housekeepingRoom($hotel);
+    $room->update(['floor_number'=>0]);
+    housekeepingLogin($hotel);
+    $cleaner = User::create(['name'=>'Demo Assignee', 'email'=>'hk-workspace@example.test', 'password'=>'test-password']);
+    HotelMembership::create(['hotel_id'=>$hotel->id, 'user_id'=>$cleaner->id, 'role'=>'housekeeping', 'is_active'=>true]);
+    $url = '/api/v1/hotels/'.$hotel->id.'/housekeeping-tasks';
+    $checkout = $this->postJson($url, ['roomId'=>$room->id, 'type'=>'checkout_clean'])->assertCreated()->json('data.id');
+    $stayover = $this->postJson($url, [
+        'roomId'=>$room->id, 'type'=>'stayover', 'assignedUserId'=>$cleaner->id, 'dueAt'=>'2026-12-09 20:30:00',
+    ])->assertCreated()->json('data.id');
+    $this->patchJson($url.'/'.$checkout, ['expectedRevision'=>1, 'status'=>'done'])->assertOk();
+    // A checkout cleaned yesterday first reaches completion on the day of its final inspection.
+    DB::table('housekeeping_tasks')->where('id', $checkout)->update(['completed_at'=>'2026-12-09 15:00:00']);
+    $this->getJson($url.'?overview=1&per_page=1')->assertOk()
+        ->assertJsonPath('meta.summary', [
+            'active'=>1, 'urgent'=>0, 'todo'=>1, 'inProgress'=>0, 'inspectionDue'=>1, 'completedToday'=>0, 'overdue'=>1,
+        ])->assertJsonPath('meta.floors', [0])
+        ->assertJsonPath('meta.assignees', [['id'=>(string)$cleaner->id, 'name'=>'Demo Assignee']]);
+    $this->getJson($url.'?room=101&floor=0&due_date=2026-12-09&assignee='.$cleaner->id.'&type=stayover')->assertOk()
+        ->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.id', $stayover)
+        ->assertJsonPath('data.0.roomType', 'Standard')->assertJsonPath('data.0.assignedName', 'Demo Assignee');
+    $this->getJson($url.'?room=102&floor=0')->assertOk()->assertJsonPath('meta.total', 0);
+    $this->getJson($url.'?queue=completed')->assertOk()->assertJsonPath('meta.total', 0);
+    $this->getJson($url.'/'.$checkout)->assertOk()->assertJsonPath('data.pendingInspection', true);
+    $this->patchJson($url.'/'.$stayover, ['expectedRevision'=>1, 'status'=>'done'])->assertOk();
+
+    Sanctum::actingAs($cleaner, ['hotel:read']);
+    $this->getJson($url.'?mine=1')->assertOk()->assertJsonPath('meta.total', 1);
+    $this->postJson($url.'/'.$checkout.'/final-inspection', [
+        'expectedRevision'=>2, 'cleaningVerified'=>true, 'safetyVerified'=>true, 'amenitiesVerified'=>true,
+        'note'=>'Physical checks verified by a team member.',
+    ])->assertOk()->assertJsonPath('data.pendingInspection', false)->assertJsonPath('data.assignedUserId', null);
+    $this->getJson($url.'?queue=completed_today&overview=1')->assertOk()
+        ->assertJsonPath('meta.total', 2)->assertJsonPath('meta.summary.completedToday', 2);
+    $this->getJson($url.'/'.$checkout.'/history')->assertOk()
+        ->assertJsonPath('data.0.actorName', 'Demo Assignee')->assertJsonPath('data.0.after.inspectionChecks.safety', true);
+
+    $this->travelTo(new DateTimeImmutable('2026-12-11T00:30:00+08:00'));
+    $this->getJson($url.'?queue=completed_today')->assertOk()->assertJsonPath('meta.total', 0);
+    $this->getJson($url.'?queue=completed')->assertOk()->assertJsonPath('meta.total', 2);
+});

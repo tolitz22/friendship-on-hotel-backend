@@ -6,8 +6,10 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
 use App\Support\TaskStaffAccess;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -64,6 +66,14 @@ final class HousekeepingTaskController
             ->select('t.*','r.number as room_number');
     }
 
+    private function withTaskDetails(Builder $query): Builder
+    {
+        return $query->leftJoin('room_types as rt', function ($join): void {
+            $join->on('rt.id', '=', 'r.room_type_id')->on('rt.hotel_id', '=', 'r.hotel_id');
+        })->leftJoin('users as staff', 'staff.id', '=', 't.assigned_user_id')
+            ->addSelect('rt.name as room_type_name', 'r.floor_number', 'staff.name as assigned_name');
+    }
+
     private function present(object $row): array
     {
         return [
@@ -71,6 +81,9 @@ final class HousekeepingTaskController
             'hotelId' => (string) $row->hotel_id,
             'roomId' => (string) $row->room_id,
             'roomNumber' => $row->room_number,
+            'roomType' => $row->room_type_name ?? null,
+            'floor' => isset($row->floor_number) ? (int) $row->floor_number : null,
+            'assignedName' => $row->assigned_name ?? null,
             'type' => $row->type,
             'status' => $row->status,
             'assignedTo' => $row->assigned_to,
@@ -158,17 +171,44 @@ final class HousekeepingTaskController
         ]]);
     }
 
+    private function inspectionEvidence(Builder $query): Builder
+    {
+        return $query->from('room_readiness_inspections as i')
+            ->whereColumn('i.hotel_id', 't.hotel_id')->whereColumn('i.room_id', 't.room_id')
+            ->where('i.status', 'approved')
+            ->whereColumn('i.latest_housekeeping_task_id', '>=', 't.id')
+            ->whereColumn('i.created_at', '>=', 't.completed_at');
+    }
+
     /** Cleaning completion and inspection evidence are distinct from current room readiness. */
-    private function pendingInspection($query)
+    private function pendingInspection(Builder $query): Builder
     {
         return $query->where('t.type', 'checkout_clean')->where('t.status', 'done')
-            ->whereNotExists(function ($inspection): void {
-                $inspection->selectRaw('1')->from('room_readiness_inspections as i')
-                    ->whereColumn('i.hotel_id', 't.hotel_id')->whereColumn('i.room_id', 't.room_id')
-                    ->where('i.status', 'approved')
-                    ->whereColumn('i.latest_housekeeping_task_id', '>=', 't.id')
-                    ->whereColumn('i.created_at', '>=', 't.completed_at');
+            ->whereNotExists(fn (Builder $inspection) => $this->inspectionEvidence($inspection));
+    }
+
+    private function completed(Builder $query, ?string $start = null, ?string $end = null): Builder
+    {
+        return $query->where('t.status', 'done')->where(function (Builder $finished) use ($start, $end): void {
+            $finished->where(function (Builder $cleaning) use ($start, $end): void {
+                $cleaning->where('t.type', '!=', 'checkout_clean');
+                if ($start !== null) {
+                    $cleaning->where('t.completed_at', '>=', $start)->where('t.completed_at', '<', $end);
+                }
+            })->orWhere(function (Builder $checkout) use ($start, $end): void {
+                $checkout->where('t.type', 'checkout_clean')
+                    ->whereExists(function (Builder $inspection) use ($start, $end): void {
+                        $this->inspectionEvidence($inspection);
+                        if ($start !== null) {
+                            $inspection->where('i.created_at', '>=', $start)->where('i.created_at', '<', $end);
+                        }
+                    });
+                if ($start !== null) {
+                    $checkout->whereNotExists(fn (Builder $inspection) =>
+                        $this->inspectionEvidence($inspection)->where('i.created_at', '<', $start));
+                }
             });
+        });
     }
 
     public function managerReport(Request $request, Hotel $hotel): JsonResponse
@@ -307,15 +347,25 @@ final class HousekeepingTaskController
         $input=$request->validate([
             'q' => ['sometimes', 'string', 'max:120'],
             'mine' => ['sometimes', 'boolean'],
-            'queue' => ['sometimes', Rule::in(['active', 'arrival_today', 'overdue', 'unassigned', 'pending_inspection'])],
+            'queue' => ['sometimes', Rule::in(['active', 'arrival_today', 'overdue', 'unassigned', 'pending_inspection', 'completed', 'completed_today'])],
             'sort' => ['sometimes', Rule::in(['priority'])],
             'assignee' => ['sometimes', 'integer', 'min:1'],
+            'floor' => ['sometimes', 'integer', 'min:0', 'max:65535'],
+            'room' => ['sometimes', 'string', 'max:32'],
+            'due_date' => ['sometimes', 'date_format:Y-m-d'],
+            'overview' => ['sometimes', 'boolean'],
             'page'=>['sometimes','integer','min:1'],
             'per_page'=>['sometimes','integer','min:1','max:100'],
             'status'=>['sometimes',Rule::in(self::STATUSES)],
             'type'=>['sometimes',Rule::in(self::TYPES)],
         ]);
-        $query=$this->scoped($hotel);
+        $query=$this->withTaskDetails($this->scoped($hotel));
+        if (isset($input['floor'])) $query->where('r.floor_number', $input['floor']);
+        if (isset($input['room'])) $query->whereRaw('LOWER(r.number) = ?', [mb_strtolower(trim($input['room']))]);
+        if (isset($input['due_date'])) {
+            $nextDate = Carbon::parse($input['due_date'])->addDay()->toDateString();
+            $query->where('t.due_at', '>=', $input['due_date'].' 00:00:00')->where('t.due_at', '<', $nextDate.' 00:00:00');
+        }
         if (isset($input['status'])) $query->where('t.status',$input['status']);
         if (isset($input['type'])) $query->where('t.type',$input['type']);
         if ($request->boolean('mine')) {
@@ -338,17 +388,23 @@ final class HousekeepingTaskController
         if ($queue === 'overdue') $query->where('t.due_at', '<', $dueNow);
         if ($queue === 'unassigned') $query->whereNull('t.assigned_user_id');
         if ($queue === 'pending_inspection') $this->pendingInspection($query);
+        $start = $localNow->copy()->startOfDay()->setTimezone(config('app.timezone'))->toDateTimeString();
+        $end = $localNow->copy()->addDay()->startOfDay()->setTimezone(config('app.timezone'))->toDateTimeString();
+        if ($queue === 'completed') $this->completed($query);
+        if ($queue === 'completed_today') $this->completed($query, $start, $end);
         if (isset($input['q']) && trim($input['q']) !== '') {
             $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower(trim($input['q']))).'%';
-            $query->leftJoin('users as staff', 'staff.id', '=', 't.assigned_user_id')
-                ->where(function ($search) use ($term, $input): void {
-                    foreach (['r.number', 't.type', 't.status', 't.assigned_to', 'staff.name'] as $column) {
-                        $search->orWhereRaw("LOWER($column) LIKE ? ESCAPE '!'", [$term]);
-                    }
-                    if (preg_match('/^[1-9][0-9]{0,17}$/D', trim($input['q']))) {
-                        $search->orWhere('t.id', trim($input['q']));
-                    }
-                });
+            $query->where(function ($search) use ($term, $input): void {
+                foreach (['r.number', 'rt.name', 't.type', 't.status', 't.assigned_to', 'staff.name'] as $column) {
+                    $search->orWhereRaw("LOWER($column) LIKE ? ESCAPE '!'", [$term]);
+                }
+                foreach (['t.type', 't.status'] as $column) {
+                    $search->orWhereRaw("REPLACE($column, '_', ' ') LIKE ? ESCAPE '!'", [$term]);
+                }
+                if (preg_match('/^[1-9][0-9]{0,17}$/D', trim($input['q']))) {
+                    $search->orWhere('t.id', trim($input['q']));
+                }
+            });
         }
         $scope = $this->scoped($hotel);
         if ($request->boolean('mine')) $scope->where('t.assigned_user_id', $request->user()->id);
@@ -360,6 +416,31 @@ final class HousekeepingTaskController
                 ->orderByRaw('CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END')->orderBy('t.due_at');
         }
         $page=$query->orderByDesc('t.id')->paginate((int)($input['per_page']??20));
+        $overview = [];
+        if ($request->boolean('overview')) {
+            $team = $this->scoped($hotel);
+            $active = (clone $team)->whereIn('t.status', ['todo', 'in_progress']);
+            $byStatus = (clone $active)->select('t.status')->selectRaw('count(*) as total')
+                ->groupBy('t.status')->pluck('total', 't.status');
+            $todo = (int) ($byStatus['todo'] ?? 0);
+            $inProgress = (int) ($byStatus['in_progress'] ?? 0);
+            $overview = [
+                'summary' => [
+                    'active' => $todo + $inProgress,
+                    'urgent' => (clone $active)->whereIn('t.room_id', clone $arrivals)->where('t.type', '!=', 'stayover')->count(),
+                    'todo' => $todo,
+                    'inProgress' => $inProgress,
+                    'inspectionDue' => $this->pendingInspection(clone $team)->count(),
+                    'completedToday' => $this->completed(clone $team, $start, $end)->count(),
+                    'overdue' => (clone $active)->where('t.due_at', '<', $dueNow)->count(),
+                ],
+                'floors' => DB::table('rooms')->where('hotel_id', $hotel->id)->whereNotNull('floor_number')
+                    ->distinct()->orderBy('floor_number')->pluck('floor_number')->map(fn ($floor) => (int) $floor),
+                'assignees' => (clone $team)->join('users as staff', 'staff.id', '=', 't.assigned_user_id')
+                    ->select('staff.id', 'staff.name')->distinct()->orderBy('staff.name')->orderBy('staff.id')
+                    ->get()->map(fn (object $staff) => ['id' => (string) $staff->id, 'name' => $staff->name]),
+            ];
+        }
         $pendingIds = $this->pendingInspection($this->scoped($hotel))
             ->whereIn('t.id', $page->getCollection()->pluck('id')->all())->pluck('t.id')->map(fn ($id) => (string) $id)->all();
         return response()->json([
@@ -373,15 +454,18 @@ final class HousekeepingTaskController
                 'page'=>$page->currentPage(), 'perPage'=>$page->perPage(),
                 'total'=>$page->total(), 'totalPages'=>$page->lastPage(),
                 'determinesRoomReadiness'=>false, 'pastDueCount'=>$pastDueCount, 'pendingInspectionCount'=>$pendingInspectionCount,
+                ...$overview,
             ],
         ]);
     }
 
     public function show(Hotel $hotel, string $task): JsonResponse
     {
-        $row=$this->scoped($hotel)->where('t.id',$task)->first();
+        $row=$this->withTaskDetails($this->scoped($hotel))->where('t.id',$task)->first();
         abort_if($row===null,404);
-        return response()->json(['data'=>$this->present($row)]);
+        $pending = $row->type === 'checkout_clean' && $row->status === 'done'
+            && $this->pendingInspection($this->scoped($hotel))->where('t.id', $task)->exists();
+        return response()->json(['data'=>[...$this->present($row), 'pendingInspection' => $pending]]);
     }
 
     public function store(Request $request, Hotel $hotel): JsonResponse
@@ -544,7 +628,7 @@ final class HousekeepingTaskController
             $row = DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)
                 ->where('id', $task)->lockForUpdate()->first();
             abort_if($row === null, 404);
-            if (! TaskStaffAccess::canOperate($request, $hotel, $row, 'housekeeping')) abort(403);
+            abort_unless(TaskStaffAccess::canOperateHousekeeping($request, $hotel), 403);
             if ((int) $row->revision !== (int) $data['expectedRevision']) {
                 return ['conflict' => true];
             }
@@ -587,9 +671,7 @@ final class HousekeepingTaskController
         if ($result['conflict']) {
             return response()->json(['message' => 'The housekeeping task changed. Reload before inspection.'], 409);
         }
-        return response()->json([
-            'data' => $this->present($this->scoped($hotel)->where('t.id', $task)->first()),
-        ]);
+        return $this->show($hotel, $task);
     }
 
     public function history(Request $request, Hotel $hotel, string $task): JsonResponse
@@ -609,7 +691,7 @@ final class HousekeepingTaskController
                 'action'=>$row->action,
                 'before'=>$row->before_state?json_decode($row->before_state,true):null,
                 'after'=>json_decode($row->after_state,true),
-                'note'=>$row->note, 'createdAt'=>$row->created_at,
+                'note'=>$row->note, 'createdAt'=>Carbon::parse($row->created_at, config('app.timezone'))->toIso8601String(),
             ])->values(),
             'meta'=>[
                 'page'=>$page->currentPage(), 'perPage'=>$page->perPage(),
