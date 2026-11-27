@@ -171,6 +171,123 @@ final class HousekeepingTaskController
             });
     }
 
+    public function managerReport(Request $request, Hotel $hotel): JsonResponse
+    {
+        $input = $request->validate(['days'=>['sometimes','integer','min:1','max:14']]);
+        $days = (int) ($input['days'] ?? 7);
+        $localNow = now($hotel->timezone ?: 'Asia/Manila');
+        $first = $localNow->copy()->startOfDay()->subDays($days - 1);
+        $zone = config('app.timezone');
+        $start = $first->copy()->setTimezone($zone)->toDateTimeString();
+        $end = $localNow->copy()->addDay()->startOfDay()->setTimezone($zone)->toDateTimeString();
+        $dueNow = $localNow->toDateTimeString();
+        $daily = [];
+        for ($i = 0; $i < $days; $i++) {
+            $date = $first->copy()->addDays($i)->toDateString();
+            $daily[$date] = ['date'=>$date,'checkoutCompleted'=>0,'stayoverCompleted'=>0,'inspectionsCompleted'=>0,
+                'cleaningSamples'=>0,'cleaningMinutes'=>0,'turnoverSamples'=>0,'turnoverMinutes'=>0];
+        }
+        $staff = [];
+        $staffRow = static fn ($id) => ['userId'=>$id === null ? null : (string)$id,
+            'todo'=>0,'inProgress'=>0,'overdue'=>0,'completed'=>0,'checkoutCompleted'=>0,'stayoverCompleted'=>0,
+            'cleaningSamples'=>0,'cleaningMinutes'=>0];
+        $active = $this->scoped($hotel)->whereIn('t.status',['todo','in_progress']);
+        $work = (clone $active)->select('t.assigned_user_id')
+            ->selectRaw("SUM(CASE WHEN t.status = 'todo' THEN 1 ELSE 0 END) as todo")
+            ->selectRaw("SUM(CASE WHEN t.status = 'in_progress' THEN 1 ELSE 0 END) as progress")
+            ->selectRaw("SUM(CASE WHEN t.due_at < ? THEN 1 ELSE 0 END) as overdue",[$dueNow])
+            ->groupBy('t.assigned_user_id')->get();
+        foreach ($work as $row) {
+            $key = $row->assigned_user_id ?? 'unknown';
+            $staff[$key] = $staffRow($row->assigned_user_id);
+            $staff[$key]['todo'] = (int)$row->todo;
+            $staff[$key]['inProgress'] = (int)$row->progress;
+            $staff[$key]['overdue'] = (int)$row->overdue;
+        }
+        $completed = DB::table('housekeeping_tasks as t')->where('t.hotel_id',$hotel->id)
+            ->where('t.status','done')->where('t.completed_at','>=',$start)->where('t.completed_at','<',$end)
+            ->select('t.id','t.type','t.completed_at','t.completed_by')
+            ->selectSub(DB::table('housekeeping_task_events as e')->whereColumn('e.hotel_id','t.hotel_id')
+                ->whereColumn('e.task_id','t.id')->where('e.action','updated')
+                ->where('e.before_state->status','todo')->where('e.after_state->status','in_progress')
+                ->selectRaw('MIN(e.created_at)'), 'started_at')
+            ->selectSub(DB::table('housekeeping_task_events as e')->whereColumn('e.hotel_id','t.hotel_id')
+                ->whereColumn('e.task_id','t.id')->where('e.action','updated')->where('e.after_state->status','done')
+                ->where('e.before_state->status','!=','done')->orderBy('e.id')->limit(1)->select('e.actor_id'), 'legacy_actor')
+            ->lazyById(500,'t.id','id');
+        foreach ($completed as $row) {
+            $date = \Illuminate\Support\Carbon::parse($row->completed_at,$zone)->setTimezone($localNow->timezone)->toDateString();
+            if (!isset($daily[$date])) continue;
+            $actor = $row->completed_by ?? $row->legacy_actor;
+            $key = $actor ?? 'unknown';
+            $staff[$key] ??= $staffRow($actor);
+            $staff[$key]['completed']++;
+            $kind = match ($row->type) {'checkout_clean'=>'checkoutCompleted','stayover'=>'stayoverCompleted',default=>null};
+            if ($kind === null) continue; // Standalone inspection is not cleaning.
+            $staff[$key][$kind]++;
+            $daily[$date][$kind]++;
+            if ($row->started_at !== null && $row->started_at <= $row->completed_at) {
+                $minutes = \Illuminate\Support\Carbon::parse($row->started_at,$zone)->diffInSeconds(\Illuminate\Support\Carbon::parse($row->completed_at,$zone))/60;
+                $daily[$date]['cleaningSamples']++;
+                $daily[$date]['cleaningMinutes'] += $minutes;
+                $staff[$key]['cleaningSamples']++;
+                $staff[$key]['cleaningMinutes'] += $minutes;
+            }
+        }
+        // First approved inspection for the exact checkout turnover, not a later unrelated inspection.
+        $turnovers = DB::table('reservation_turnover_links as l')
+            ->join('housekeeping_tasks as t',function ($join): void {
+                $join->on('t.id','=','l.housekeeping_task_id')->on('t.hotel_id','=','l.hotel_id');
+            })->join('room_readiness_inspections as i',function ($join): void {
+                $join->on('i.hotel_id','=','l.hotel_id')->on('i.room_id','=','t.room_id')->on('i.latest_turnover_link_id','=','l.id');
+            })->join('room_readiness_events as e',function ($join): void {
+                $join->on('e.hotel_id','=','i.hotel_id')->on('e.inspection_id','=','i.id');
+            })->where('l.hotel_id',$hotel->id)->where('t.status','done')->where('e.action','approved')
+            ->whereColumn('i.latest_housekeeping_task_id','>=','t.id')->whereColumn('e.created_at','>=','t.completed_at')
+            ->whereColumn('e.created_at','>=','l.created_at')->groupBy('l.id','l.created_at')
+            ->select('l.id','l.created_at as checkout_at')->selectRaw('MIN(e.created_at) as ready_at')
+            ->havingRaw('MIN(e.created_at) >= ? AND MIN(e.created_at) < ?',[$start,$end])->get();
+        foreach ($turnovers as $row) {
+            $date = \Illuminate\Support\Carbon::parse($row->ready_at,$zone)->setTimezone($localNow->timezone)->toDateString();
+            if (!isset($daily[$date])) continue;
+            $daily[$date]['turnoverSamples']++;
+            $daily[$date]['turnoverMinutes'] += \Illuminate\Support\Carbon::parse($row->checkout_at,$zone)->diffInSeconds(\Illuminate\Support\Carbon::parse($row->ready_at,$zone))/60;
+        }
+        $inspections = DB::table('room_readiness_events')->where('hotel_id',$hotel->id)->where('action','approved')
+            ->where('created_at','>=',$start)->where('created_at','<',$end)->select('id','created_at')->lazyById(500);
+        foreach ($inspections as $row) {
+            $date = \Illuminate\Support\Carbon::parse($row->created_at,$zone)->setTimezone($localNow->timezone)->toDateString();
+            if (isset($daily[$date])) $daily[$date]['inspectionsCompleted']++;
+        }
+        $sum = static fn (string $key) => array_sum(array_column($daily,$key));
+        $average = static fn ($minutes,$samples) => $samples > 0 ? round($minutes/$samples,1) : null;
+        $summary = [
+            'todo'=>array_sum(array_column($staff,'todo')),'inProgress'=>array_sum(array_column($staff,'inProgress')),
+            'overdue'=>array_sum(array_column($staff,'overdue')),
+            'unassigned'=>(clone $active)->whereNull('t.assigned_user_id')->count(),
+            'pendingInspection'=>$this->pendingInspection($this->scoped($hotel))->count(),
+            'checkoutCompleted'=>$sum('checkoutCompleted'),'stayoverCompleted'=>$sum('stayoverCompleted'),
+            'inspectionsCompleted'=>$sum('inspectionsCompleted'),
+            'cleaningSamples'=>$sum('cleaningSamples'),'turnoverSamples'=>$sum('turnoverSamples'),
+            'averageCleaningMinutes'=>$average($sum('cleaningMinutes'),$sum('cleaningSamples')),
+            'averageTurnoverMinutes'=>$average($sum('turnoverMinutes'),$sum('turnoverSamples')),
+        ];
+        $staff = array_map(static function ($row) use ($average) {
+            $row['averageCleaningMinutes']=$average($row['cleaningMinutes'],$row['cleaningSamples']);
+            unset($row['cleaningMinutes']);
+            return $row;
+        },array_values($staff));
+        $daily = array_map(static function ($row) use ($average) {
+            $row['averageCleaningMinutes']=$average($row['cleaningMinutes'],$row['cleaningSamples']);
+            $row['averageTurnoverMinutes']=$average($row['turnoverMinutes'],$row['turnoverSamples']);
+            unset($row['cleaningMinutes'],$row['turnoverMinutes']);
+            return $row;
+        },array_values($daily));
+        return response()->json(['data'=>['hotelId'=>(string)$hotel->id,'hotelDate'=>$localNow->toDateString(),
+            'days'=>$days,'summary'=>$summary,'staff'=>$staff,'daily'=>$daily],
+            'meta'=>['snapshotOnly'=>true,'durationBasis'=>'recorded_events']]);
+    }
+
     public function workload(Hotel $hotel): JsonResponse
     {
         $rows = DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)

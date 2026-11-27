@@ -157,6 +157,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/housekeeping/dashboard', [HousekeepingTaskController::class, 'dashboard']);
             Route::get('/housekeeping/room-board', \App\Http\Controllers\Api\HousekeepingRoomBoardController::class)->middleware('throttle:30,1');
             Route::get('/housekeeping/workload', [HousekeepingTaskController::class, 'workload'])->middleware('hotel.admin');
+            Route::get('/housekeeping/manager-report', [HousekeepingTaskController::class, 'managerReport'])->middleware('hotel.admin')->middleware('throttle:30,1');
             Route::post('/housekeeping-tasks/{task}/maintenance-report', [MaintenanceWorkOrderController::class, 'reportFromHousekeeping'])->whereNumber('task')->middleware('throttle:20,1');
             Route::get('/lost-found', [\App\Http\Controllers\Api\LostFoundController::class, 'index']);
             Route::post('/lost-found', [\App\Http\Controllers\Api\LostFoundController::class, 'store'])->middleware('throttle:20,1');
