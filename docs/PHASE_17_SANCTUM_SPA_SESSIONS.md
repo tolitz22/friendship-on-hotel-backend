@@ -32,7 +32,8 @@ SESSION_DRIVER=file
 SESSION_DOMAIN=
 SESSION_SECURE_COOKIE=false
 SESSION_SAME_SITE=lax
-SESSION_LIFETIME=120
+SESSION_LIFETIME=720
+SESSION_EXPIRE_ON_CLOSE=false
 ```
 
 React/Vite `.env`:
@@ -66,7 +67,9 @@ FRONTEND_ORIGINS=https://pms.example.com
 SESSION_DOMAIN=.example.com
 SESSION_SECURE_COOKIE=true
 SESSION_SAME_SITE=lax
-SESSION_DRIVER=redis
+SESSION_DRIVER=database
+SESSION_LIFETIME=720
+SESSION_EXPIRE_ON_CLOSE=false
 ```
 
 React:
@@ -79,9 +82,13 @@ VITE_API_URL=https://api.example.com/api/v1
 
 **Do not use a frontend on an unrelated hosted domain and an API on a different registrable domain** and expect this first-party cookie model to work. Add custom domains or a same-site reverse proxy first.
 
-Use valid HTTPS, a trusted reverse-proxy configuration, exact allowed origins (not wildcard CORS with credentials), secure/HttpOnly session cookies, a persistent shared session store across replicas, and verified CSRF behavior. If using Redis, configure the required driver and connection first; a session store alone does not configure itself. Never deploy `SESSION_SECURE_COOKIE=false` on HTTPS production.
+Use valid HTTPS, a trusted reverse-proxy configuration, exact allowed origins (not wildcard CORS with credentials), secure/HttpOnly session cookies, a persistent shared session store across replicas, and verified CSRF behavior. The database session table is provided by a migration. Run `php artisan migrate --force` before switching `SESSION_DRIVER=database` on Railway. All replicas must use the same database and APP_KEY. Redis is an alternative only if its driver and connection are configured. Switching stores may require signing in once again. Never deploy `SESSION_SECURE_COOKIE=false` on HTTPS production.
 
 `SANCTUM_STATEFUL_DOMAINS` values have **hostnames and optional ports but no scheme**. `FRONTEND_ORIGINS` values have **scheme, hostname and optional port**. Production reverse proxies must forward HTTPS host/protocol correctly.
+
+## Full-shift session behavior
+
+The default idle lifetime is 720 minutes (12 hours), configurable with SESSION_LIFETIME. This is a rolling idle timeout, not an unlimited login or absolute maximum shift duration. A browser can restore the HttpOnly cookie after closing and reopening when SESSION_EXPIRE_ON_CLOSE=false, unless the browser clears it. Explicit logout, revoked access and expired sessions remain enforced. Do not persist bearer tokens in localStorage. Always sign out of shared hotel terminals.
 
 ## Routes
 
