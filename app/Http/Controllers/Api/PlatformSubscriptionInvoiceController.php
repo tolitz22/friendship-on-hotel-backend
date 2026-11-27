@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Logging\SecurityLog;
 use App\Models\Hotel;
 use App\Models\PlatformHotelSubscription;
+use App\Services\PlatformSubscriptionPayments as Payments;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -20,25 +21,30 @@ final class PlatformSubscriptionInvoiceController
     {
         $input = $request->validate([
             'search' => ['nullable', 'string', 'max:100'],
-            'status' => ['sometimes', 'in:all,unpaid,overdue'],
+            'status' => ['sometimes', 'in:all,unpaid,partially_paid,paid,overdue'],
             'page' => ['sometimes', 'integer', 'min:1', 'max:10000'],
         ]);
         $today = CarbonImmutable::today('Asia/Manila')->toDateString();
-        $query = DB::table('platform_subscription_invoices');
+        $query = Payments::invoices();
         $search = trim($input['search'] ?? '');
         if ($search !== '') {
             $pattern = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($search)).'%';
             $query->where(fn ($q) => $q->whereRaw("LOWER(hotel_name) LIKE ? ESCAPE '!'", [$pattern])
                 ->orWhereRaw("LOWER(reference) LIKE ? ESCAPE '!'", [$pattern]));
         }
-        // No payment ledger exists yet. All issued balances remain unpaid.
-        if (($input['status'] ?? 'all') === 'overdue') {
-            $query->whereDate('due_on', '<', $today);
-        } elseif (($input['status'] ?? 'all') === 'unpaid') {
-            $query->whereDate('due_on', '>=', $today);
+        $verified = 'COALESCE(payment_totals.verified_minor, 0)';
+        $status = $input['status'] ?? 'all';
+        if ($status === 'paid') {
+            $query->whereRaw($verified.' >= invoice.amount_minor');
+        } elseif ($status === 'overdue') {
+            $query->whereRaw($verified.' < invoice.amount_minor')->whereDate('invoice.due_on', '<', $today);
+        } elseif ($status === 'partially_paid') {
+            $query->whereRaw($verified.' > 0 AND '.$verified.' < invoice.amount_minor')->whereDate('invoice.due_on', '>=', $today);
+        } elseif ($status === 'unpaid') {
+            $query->whereRaw($verified.' = 0')->whereDate('invoice.due_on', '>=', $today);
         }
-        $total = (int) (clone $query)->sum('amount_minor');
-        $page = $query->orderByDesc('id')->paginate(20);
+        $total = (int) (clone $query)->reorder()->sum(DB::raw('invoice.amount_minor - '.$verified));
+        $page = $query->orderByDesc('invoice.id')->paginate(20);
 
         return $this->response(['data' => $page->getCollection()->map(fn ($row) => $this->project($row, $today))->values(),
             'summary' => ['outstandingMinor' => $total, 'currency' => 'PHP'], 'today' => $today,
@@ -116,10 +122,14 @@ final class PlatformSubscriptionInvoiceController
     private function project(object $row, string $today): array
     {
         $due = substr((string) $row->due_on, 0, 10);
+        $verified = isset($row->verified_minor) ? (int) $row->verified_minor : Payments::paid((int) $row->id);
+        $pending = isset($row->pending_minor) ? (int) $row->pending_minor : Payments::pending((int) $row->id);
+        $outstanding = max(0, (int) $row->amount_minor - $verified);
         return ['id' => (string) $row->id, 'hotelId' => (string) $row->hotel_id, 'hotelName' => $row->hotel_name,
             'reference' => $row->reference, 'planName' => $row->plan_name, 'agreementRevision' => (int) $row->agreement_revision,
             'currency' => $row->currency, 'cycle' => $row->cycle, 'amountMinor' => (int) $row->amount_minor,
-            'outstandingMinor' => (int) $row->amount_minor, 'status' => $due < $today ? 'overdue' : 'unpaid',
+            'outstandingMinor' => $outstanding, 'verifiedMinor' => $verified, 'pendingMinor' => $pending,
+            'status' => $outstanding === 0 ? 'paid' : ($due < $today ? 'overdue' : ($verified > 0 ? 'partially_paid' : 'unpaid')),
             'periodStart' => substr((string) $row->period_start, 0, 10), 'periodEnd' => substr((string) $row->period_end, 0, 10),
             'issuedOn' => substr((string) $row->issued_on, 0, 10), 'dueOn' => $due, 'issuedBy' => $row->issued_by === null ? null : (string) $row->issued_by];
     }

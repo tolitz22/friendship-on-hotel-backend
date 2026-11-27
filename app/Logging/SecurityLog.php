@@ -18,6 +18,8 @@ final class SecurityLog
         'pms.security.platform.plan_updated',
         'pms.security.platform.subscription_changed',
         'pms.security.platform.subscription_invoice_issued',
+        'pms.security.platform.subscription_payment_recorded',
+        'pms.security.platform.subscription_payment_reviewed',
         'pms.security.login.succeeded',
         'pms.security.login.failed',
         'pms.security.logout.succeeded',
