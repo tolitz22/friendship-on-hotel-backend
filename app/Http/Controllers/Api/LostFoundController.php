@@ -56,8 +56,9 @@ final class LostFoundController
     {
         $query=$this->query($request,$hotel);
         $input=$request->validate(['status'=>['sometimes',Rule::in(['stored','returned','disposed'])],
-            'page'=>['sometimes','integer','min:1']]);
+            'page'=>['sometimes','integer','min:1'],'item'=>['sometimes','integer','min:1']]);
         if (isset($input['status'])) $query->where('i.status',$input['status']);
+        if (isset($input['item'])) $query->where('i.id',$input['item']);
         $page=$query->orderByDesc('i.id')->paginate(20);
         return response()->json(['data'=>$page->getCollection()->map(fn ($row)=>$this->present($row))->values(),
             'meta'=>['hotelId'=>(string)$hotel->id,'page'=>$page->currentPage(),'total'=>$page->total(),'totalPages'=>$page->lastPage()]]);

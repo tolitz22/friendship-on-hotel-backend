@@ -49,6 +49,13 @@ final class HotelNotificationService
             }
         }
 
+        if (!$expanded) {
+            foreach (app(OperationalActivityNotifications::class)->all($hotel, 9) as $item) {
+                if ($item['kind'] === 'room_inspection_approved') {
+                    $notifications[] = $item;
+                }
+            }
+        }
         if ($expanded) {
             $counts = [];
             foreach ($this->adminActivity($hotel, $userId, 9) as $item) {
@@ -93,6 +100,7 @@ final class HotelNotificationService
         yield from app(BookingActivityNotifications::class)->all($hotel, $limit);
         yield from app(FinancialActivityNotifications::class)->all($hotel, $limit);
         yield from app(OperationalActivityNotifications::class)->all($hotel, $limit);
+        yield from app(HousekeepingNotifications::class)->manager($hotel, $limit);
         yield from app(DailyClosingNotifications::class)->all($hotel, $limit);
     }
 
@@ -106,7 +114,8 @@ final class HotelNotificationService
             return app(BookingActivityNotifications::class)->current($hotel, $id)
                 ?? app(FinancialActivityNotifications::class)->current($hotel, $id)
                 ?? app(OperationalActivityNotifications::class)->current($hotel, $id)
-                ?? app(DailyClosingNotifications::class)->current($hotel, $id);
+                ?? app(DailyClosingNotifications::class)->current($hotel, $id)
+                ?? app(HousekeepingNotifications::class)->currentManager($hotel, $id);
         }
         $booking = $query?->where('id', $parts[2])->first(['id', 'reference', 'check_in', 'check_out']);
         if (! $booking) {

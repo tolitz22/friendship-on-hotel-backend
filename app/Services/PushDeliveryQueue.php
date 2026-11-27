@@ -54,7 +54,7 @@ final class PushDeliveryQueue
                 'expense_recorded', 'room_inspection_approved', 'room_inspection_rejected',
                 'maintenance_urgent', 'room_blocked', 'approval_approved', 'approval_rejected',
                 'staff_message', 'staff_announcement', 'staff_handover', 'staff_acknowledged',
-                'daily_close_completed',
+                'daily_close_completed', 'lost_found_registered',
             ]);
         $ids = (clone $query)->orderBy('id')->limit(max(1, min($limit, 1000)))->pluck('id');
         return $ids->isEmpty() ? 0 : $query->whereIn('id', $ids)->delete();
@@ -81,7 +81,7 @@ final class PushDeliveryQueue
         return $this->scoped($hotelId)->where('status', 'pending')->where('available_at', '<=', now())
             ->where('attempts', '<', self::MAX_ATTEMPTS)
             ->where('created_at', '>', now()->subDay())
-            ->orderByRaw("CASE WHEN created_at <= ? THEN 0 WHEN kind IN ('closing_journal_integrity','cashier_discrepancy','maintenance_urgent') THEN 1 WHEN kind IN ('checkout_overdue','payment_pending_review','payment_rejected','payment_voided','refund_requested','approval_requested','daily_close_blocked','closing_no_show_unresolved','closing_room_night_issue','closing_cashier_unreconciled','closing_payment_pending','staff_announcement','staff_handover') THEN 2 ELSE 3 END", [now()->subMinutes(15)])
+            ->orderByRaw("CASE WHEN created_at <= ? THEN 0 WHEN kind IN ('closing_journal_integrity','cashier_discrepancy','maintenance_urgent','hk_arrival_urgent') THEN 1 WHEN kind IN ('checkout_overdue','payment_pending_review','payment_rejected','payment_voided','refund_requested','approval_requested','daily_close_blocked','closing_no_show_unresolved','closing_room_night_issue','closing_cashier_unreconciled','closing_payment_pending','staff_announcement','staff_handover','hk_checkout_handoff','hk_overdue') THEN 2 ELSE 3 END", [now()->subMinutes(15)])
             ->orderBy('id')->limit($limit)->get();
     }
 

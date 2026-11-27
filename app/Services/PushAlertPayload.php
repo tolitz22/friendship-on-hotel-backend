@@ -15,7 +15,7 @@ final class PushAlertPayload
         if (isset($alert['paymentId'])) $params['payment'] = $alert['paymentId'];
         if (isset($alert['expenseId'])) $params['expense'] = $alert['expenseId'];
         if (isset($alert['shiftId'])) $params['shift'] = $alert['shiftId'];
-        foreach (['taskId' => 'task', 'orderId' => 'order', 'room' => 'room', 'calendarDate' => 'date', 'approvalId' => 'approval', 'conversationId' => 'conversation', 'closingDate' => 'date'] as $field => $parameter) {
+        foreach (['taskId' => 'task', 'orderId' => 'order', 'room' => 'room', 'calendarDate' => 'date', 'approvalId' => 'approval', 'conversationId' => 'conversation', 'closingDate' => 'date', 'itemId' => 'item'] as $field => $parameter) {
             if (isset($alert[$field])) {
                 $params[$parameter] = $alert[$field];
             }
@@ -49,6 +49,10 @@ final class PushAlertPayload
                 'expense_recorded' => 'A hotel expense was recorded.',
                 'expense_correction_requested' => 'An expense correction was requested.',
                 'cashier_discrepancy' => 'A cashier cash-count discrepancy was reported.',
+                'hk_checkout_handoff' => 'Checkout cleaning needs an assignment.',
+                'hk_arrival_urgent' => 'An arriving room needs cleaning or inspection.',
+                'hk_overdue' => 'A housekeeping task is overdue.',
+                'lost_found_registered' => 'A found item was registered.',
                 'housekeeping_completed' => 'A housekeeping task was completed.',
                 'room_inspection_approved' => 'A room inspection was approved.',
                 'room_inspection_rejected' => 'A room inspection requires attention.',

@@ -155,6 +155,7 @@ Route::prefix('v1')->group(function (): void {
                 ->middleware('hotel.admin');
             Route::get('/housekeeping/my-assignments', [HousekeepingHandoffController::class, 'myAssignments']);
             Route::get('/housekeeping/dashboard', [HousekeepingTaskController::class, 'dashboard']);
+            Route::get('/housekeeping/notifications', \App\Http\Controllers\Api\HousekeepingNotificationController::class)->middleware('throttle:30,1');
             Route::get('/housekeeping/room-board', \App\Http\Controllers\Api\HousekeepingRoomBoardController::class)->middleware('throttle:30,1');
             Route::get('/housekeeping/workload', [HousekeepingTaskController::class, 'workload'])->middleware('hotel.admin');
             Route::get('/housekeeping/manager-report', [HousekeepingTaskController::class, 'managerReport'])->middleware('hotel.admin')->middleware('throttle:30,1');
