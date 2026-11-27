@@ -127,6 +127,7 @@ final class StaffInvitationController
             if (User::whereRaw('LOWER(email) = ?',[$invite->email])->exists()) {
                 throw ValidationException::withMessages(['token'=>['An account already exists for this email. Ask your administrator to add your existing account.']]);
             }
+            \App\Services\PlatformHotelAccess::requireWritable(\App\Services\PlatformHotelAccess::lock((int) $invite->hotel_id));
             app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $invite->hotel_id, 'staff');
             $user=User::create([
                 'name'=>$invite->name,

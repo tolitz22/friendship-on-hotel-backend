@@ -26,6 +26,16 @@ class EnsureHotelMember
             abort(404);
         }
 
+        if (! in_array($request->method(), ['GET', 'HEAD', 'OPTIONS'], true)) {
+            \App\Services\PlatformHotelAccess::requireWritable($hotel);
+            if ($request->isMethod('POST') && in_array($request->route()->uri(), [
+                'api/v1/hotels/{hotel}/bookings', 'api/v1/hotels/{hotel}/group-reservations',
+                'api/v1/hotels/{hotel}/group-allotments',
+            ], true)) {
+                \App\Services\PlatformHotelAccess::requireNewBooking($hotel);
+            }
+        }
+
         return $next($request);
     }
 }

@@ -42,6 +42,7 @@ final class ReservationBookingService
         $fingerprint = hash('sha256', json_encode($fingerprintFields, JSON_THROW_ON_ERROR));
 
         return DB::transaction(function () use ($hotel, $actorId, $data, $period, $fingerprint): array {
+            \App\Services\PlatformHotelAccess::requireNewBooking(\App\Services\PlatformHotelAccess::lock((int) $hotel->id));
             // Lock a stable parent row, not a possibly empty set of reservation rows.
             $type = DB::table('room_types')->where('hotel_id', $hotel->id)
                 ->where('id', $data['roomTypeId'])->lockForUpdate()->first();

@@ -21,7 +21,7 @@ final class PlatformHotelController
     {
         $input = $request->validate(['search' => ['nullable', 'string', 'max:100'], 'page' => ['sometimes', 'integer', 'min:1', 'max:10000']]);
         $search = trim($input['search'] ?? '');
-        $query = Hotel::query()->select(['id', 'name', 'timezone', 'currency', 'created_at'])
+        $query = Hotel::query()->select(['id', 'name', 'timezone', 'currency', 'created_at', 'platform_access_state', 'platform_access_revision'])
             ->withCount(['rooms', 'memberships as active_staff_count' => fn ($q) => $q->where('is_active', true)->whereHas('user', fn ($u) => $u->where('is_active', true)),
                 'memberships as active_admin_count' => fn ($q) => $q->where('is_active', true)->where('role', 'admin')->whereHas('user', fn ($u) => $u->where('is_active', true))]);
         if ($search !== '') {
@@ -34,6 +34,7 @@ final class PlatformHotelController
         return response()->json(['data' => $page->getCollection()->map(static fn (Hotel $hotel): array => [
             'id' => (string) $hotel->id, 'name' => $hotel->name, 'timezone' => $hotel->timezone,
             'currency' => $hotel->currency, 'createdAt' => $hotel->created_at?->toIso8601String(),
+            'accessState' => \App\Services\PlatformHotelAccess::state($hotel), 'accessRevision' => (int) $hotel->platform_access_revision,
             'roomCount' => (int) $hotel->rooms_count, 'activeStaffCount' => (int) $hotel->active_staff_count,
             'activeAdminCount' => (int) $hotel->active_admin_count,
         ])->values(), 'meta' => ['page' => $page->currentPage(), 'lastPage' => $page->lastPage(), 'total' => $page->total()]])

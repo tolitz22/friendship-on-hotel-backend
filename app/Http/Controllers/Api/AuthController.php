@@ -64,10 +64,11 @@ class AuthController
             'mustChangePassword' => (bool) $user->must_change_password,
             'platformAdmin' => \App\Support\PlatformAccess::allowed($user),
             'hotels' => $user->memberships()->where('is_active', true)
-                ->with('hotel:id,name')->get()
+                ->with('hotel:id,name,platform_access_state')->get()
                 ->map(fn ($membership): array => [
                     'id' => (string) $membership->hotel_id,
                     'name' => $membership->hotel->name,
+                    'accessState' => \App\Services\PlatformHotelAccess::state($membership->hotel),
                     'role' => $membership->role,
                     'permissions' => \App\Http\Middleware\EnsureHotelPermission::effectiveForMembership($membership),
                 ])->values(),

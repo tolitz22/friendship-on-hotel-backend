@@ -287,7 +287,7 @@ final class CashierShiftService
     public function open(Hotel $hotel, int $actor, int $float): array
     {
         return DB::transaction(function () use ($hotel, $actor, $float): array {
-            $this->lockHotel($hotel);
+            \App\Services\PlatformHotelAccess::requireWritable(\App\Services\PlatformHotelAccess::lock((int) $hotel->id));
             $exists = DB::table('cashier_shifts')->where('hotel_id', $hotel->id)
                 ->where('cashier_id', $actor)->whereIn('status', ['open','submitted'])->exists();
             if ($exists) throw new HttpException(409, 'Close and reconcile your previous shift before opening another.');

@@ -56,6 +56,7 @@ final class GroupAllotmentController
         ], JSON_THROW_ON_ERROR));
 
         $result = DB::transaction(function () use ($hotel, $request, $input, $fingerprint, $stay, $inventory): array {
+            \App\Services\PlatformHotelAccess::requireNewBooking(\App\Services\PlatformHotelAccess::lock((int) $hotel->id));
             // Same stable lock used by booking and maintenance inventory writes.
             $type = DB::table('room_types')->where('hotel_id', $hotel->id)
                 ->where('id', $input['roomTypeId'])->lockForUpdate()->first();

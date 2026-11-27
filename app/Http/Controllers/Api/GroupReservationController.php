@@ -249,6 +249,7 @@ final class GroupReservationController
         ], JSON_THROW_ON_ERROR));
 
         $result = DB::transaction(function () use ($hotel, $data, $fingerprint, $request, $bookings): array {
+            \App\Services\PlatformHotelAccess::requireNewBooking(\App\Services\PlatformHotelAccess::lock((int) $hotel->id));
             // Serialize concurrent submissions of one group key, including a retry
             // before the original write has committed.
             DB::table('hotels')->where('id', $hotel->id)->lockForUpdate()->first();

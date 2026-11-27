@@ -13,6 +13,7 @@ final class SecurityLog
         'pms.security.platform.monitoring_viewed',
         'pms.security.platform.hotels_viewed',
         'pms.security.platform.hotel_created',
+        'pms.security.platform.hotel_access_changed',
         'pms.security.platform.plan_created',
         'pms.security.platform.plan_updated',
         'pms.security.platform.subscription_changed',
