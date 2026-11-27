@@ -50,11 +50,9 @@ final class HotelNotificationService
         }
 
         if (!$expanded) {
-            foreach (app(OperationalActivityNotifications::class)->all($hotel, 9) as $item) {
-                if ($item['kind'] === 'room_inspection_approved') {
-                    $notifications[] = $item;
-                }
-            }
+            $inspections = iterator_to_array(app(OperationalActivityNotifications::class)->recentApprovedInspections($hotel, 9), false);
+            $hasMore = $hasMore || count($inspections) > 8;
+            array_push($notifications, ...array_slice($inspections, 0, 8));
         }
         if ($expanded) {
             $counts = [];

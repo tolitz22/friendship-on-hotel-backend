@@ -116,6 +116,13 @@ final class OperationalActivityNotifications
         return $item + ['target' => 'rooms', 'room' => (string) $row->room_number];
     }
 
+    public function recentApprovedInspections(Hotel $hotel, int $limit): iterable
+    {
+        foreach ($this->query($hotel, 'room_inspection_approved')->limit($limit)->get() as $row) {
+            yield $this->item($hotel, 'room_inspection_approved', $row);
+        }
+    }
+
     public function all(Hotel $hotel, ?int $limit = null): iterable
     {
         foreach (self::KINDS as $kind) {

@@ -26,7 +26,7 @@ final class HousekeepingNotifications
             return DB::table('lost_found_items as i')->join('rooms as r',function ($join): void {
                 $join->on('r.id','=','i.room_id')->on('r.hotel_id','=','i.hotel_id');
             })->where('i.hotel_id',$hotel->id)->where('i.created_at','>=',now()->subDay())
-                ->select('i.id','r.number as room_number')->orderByDesc('i.id');
+                ->select('i.id','i.created_at','r.number as room_number')->orderByDesc('i.id');
         }
         $query=$this->tasks($hotel);
         if ($kind === 'hk_checkout_handoff') {
@@ -53,7 +53,8 @@ final class HousekeepingNotifications
     {
         $today=now($hotel->timezone ?: 'Asia/Manila')->toDateString();
         $id=$kind.':'.$row->id.(in_array($kind,['hk_arrival_urgent','hk_overdue'],true)?':'.$today:'');
-        return ['id'=>$id,'kind'=>$kind,'date'=>$today,'reference'=>'Room '.$row->room_number]
+        $date=$kind==='lost_found_registered'?\Illuminate\Support\Carbon::parse($row->created_at)->setTimezone($hotel->timezone ?: 'Asia/Manila')->toDateString():$today;
+        return ['id'=>$id,'kind'=>$kind,'date'=>$date,'reference'=>'Room '.$row->room_number]
             + ($kind==='lost_found_registered'?['target'=>'lost-found','itemId'=>(string)$row->id]:['target'=>'housekeeping','taskId'=>(string)$row->id]);
     }
 
@@ -80,10 +81,7 @@ final class HousekeepingNotifications
     /** Personal assignment alerts are never added to the hotel-wide push feed. */
     public function personal(Hotel $hotel,int $userId): array
     {
-        $clock=now($hotel->timezone ?: 'Asia/Manila');
-        $today=$clock->toDateString();
         $items=[];$hasMore=false;
-        $tasks=$this->tasks($hotel)->where('t.assigned_user_id',$userId);
         // Select the latest real assignment change, not ordinary progress or note updates.
         $events=DB::table('housekeeping_task_events as e')->join('housekeeping_tasks as t',function ($join): void {
             $join->on('t.id','=','e.task_id')->on('t.hotel_id','=','e.hotel_id');
@@ -91,7 +89,7 @@ final class HousekeepingNotifications
             $join->on('r.id','=','t.room_id')->on('r.hotel_id','=','t.hotel_id');
         })->where('e.hotel_id',$hotel->id)->where('t.assigned_user_id',$userId)
             ->whereIn('t.status',['todo','in_progress'])->where('e.created_at','>=',now()->subDay())
-            ->whereIn('e.action',['created','updated'])->select('e.id','e.task_id','e.before_state','e.after_state','r.number as room_number')
+            ->whereIn('e.action',['created','updated'])->select('e.id','e.task_id','e.before_state','e.after_state','e.created_at','r.number as room_number')
             ->orderByDesc('e.id')->lazy(200);
         $seen=[];$count=0;
         foreach ($events as $event) {
@@ -102,7 +100,7 @@ final class HousekeepingNotifications
             $seen[$event->task_id]=true;
             if ((string)$to!==(string)$userId) continue;
             if (++$count>8) {$hasMore=true;break;}
-            $items[]=['id'=>'hk_assigned:'.$event->id,'kind'=>'hk_assigned','date'=>$today,
+            $items[]=['id'=>'hk_assigned:'.$event->id,'kind'=>'hk_assigned','date'=>\Illuminate\Support\Carbon::parse($event->created_at)->setTimezone($hotel->timezone ?: 'Asia/Manila')->toDateString(),
                 'reference'=>'Room '.$event->room_number,'target'=>'housekeeping','taskId'=>(string)$event->task_id];
         }
         foreach (['hk_arrival_urgent','hk_overdue'] as $kind) {
