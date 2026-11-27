@@ -130,3 +130,33 @@ it('shows a floor-groupable private housekeeping board without reservation ident
     $other = Hotel::create(['name'=>'Foreign room board']);
     $this->getJson('/api/v1/hotels/'.$other->id.'/housekeeping/room-board')->assertNotFound();
 });
+
+it('keeps occupancy separate from service and shows readiness only after cleaning and inspection', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-10T10:00:00+08:00'));
+    [$hotel, $type, $rooms, $admin] = rackFixture();
+    $base = '/api/v1/hotels/'.$hotel->id;
+    $cleaner = User::create(['name'=>'Board Service Cleaner','email'=>'hk-board-service@example.test','password'=>'Password123456!']);
+    HotelMembership::create(['hotel_id'=>$hotel->id,'user_id'=>$cleaner->id,'role'=>'housekeeping','is_active'=>true]);
+    $guest = $hotel->guests()->create(['first_name'=>'Occupied','last_name'=>'Room']);
+    $booking = $this->postJson($base.'/bookings', [
+        'idempotencyKey'=>'hk-board-service-01','guestId'=>$guest->id,'roomTypeId'=>$type->id,
+        'checkIn'=>'2026-12-10','checkOut'=>'2026-12-11',
+    ])->assertCreated()->json('data.id');
+    $this->patchJson($base.'/bookings/'.$booking.'/assign-room',['roomId'=>$rooms[0]->id])->assertOk();
+    $this->postJson($base.'/bookings/'.$booking.'/check-in')->assertOk();
+    $this->postJson($base.'/housekeeping-tasks',['roomId'=>$rooms[0]->id,'type'=>'stayover','assignedUserId'=>$cleaner->id])->assertCreated();
+    $task = $this->postJson($base.'/housekeeping-tasks',['roomId'=>$rooms[1]->id,'type'=>'checkout_clean','assignedUserId'=>$cleaner->id])->assertCreated()->json('data');
+    $this->postJson($base.'/maintenance-work-orders',['roomId'=>$rooms[2]->id,'title'=>'Water leak','description'=>'Room cannot be used','priority'=>'high','affectsRoom'=>true])->assertCreated();
+    Sanctum::actingAs($cleaner,['hotel:read']);
+    $board = $base.'/housekeeping/room-board';
+    $this->getJson($board)->assertOk()->assertJsonPath('data.rooms.0.occupancy','occupied')
+        ->assertJsonPath('data.rooms.0.stage','service_due')->assertJsonPath('data.rooms.2.stage','blocked');
+    $url=$base.'/housekeeping-tasks/'.$task['id'];
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'in_progress'])->assertOk();
+    $this->getJson($board)->assertJsonPath('data.rooms.1.stage','cleaning');
+    $this->patchJson($url,['expectedRevision'=>2,'status'=>'done','checkedItems'=>array_column($task['checklist'],'key')])->assertOk();
+    $this->getJson($board)->assertJsonPath('data.rooms.1.stage','inspection_due');
+    $this->postJson($url.'/final-inspection',['expectedRevision'=>3,'cleaningVerified'=>true,'safetyVerified'=>true,'amenitiesVerified'=>true,'note'=>'All required physical checks complete'])->assertOk();
+    $this->getJson($board)->assertJsonPath('data.rooms.1.stage','ready')->assertJsonPath('data.rooms.1.task',null)
+        ->assertJsonPath('data.rooms.0.occupancy','occupied')->assertJsonPath('data.rooms.2.stage','blocked');
+});
