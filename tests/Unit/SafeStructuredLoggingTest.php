@@ -17,7 +17,7 @@ it('keeps reviewed event names and numeric metadata only', function (): void {
 
     expect($safe->message)->toBe('pms.logging.smoke')
         ->and($safe->context)->toBe(['hotel_id' => 2, 'count' => 1])
-        ->and($safe->extra)->toBe(['service' => 'friendship-on-hotel-backend', 'environment' => 'production', 'schema_version' => 1]);
+        ->and($safe->extra)->toBe(['service' => 'friendship-on-hotel-backend', 'environment' => 'production', 'service_role' => 'unspecified', 'schema_version' => 1]);
 });
 
 it('removes free-form text and exception details but keeps safe diagnostics', function (): void {
@@ -62,4 +62,13 @@ it('writes one sanitized JSON record per line with the actual handler', function
         ->and($second['message'])->toBe('pms.application.exception')
         ->and(implode('', $lines))->not->toContain('secret-token', 'secret-exception', 'private');
     $handler->close();
+});
+
+it('uses only the configured allowlisted service role and ignores supplied log metadata', function (): void {
+    $record = new LogRecord(new DateTimeImmutable(), 'production', Level::Warning, 'pms.logging.smoke',
+        ['service_role' => 'backend'], ['service_role' => 'backend']);
+    $safe = (new SafeStructuredLogProcessor('production', null, 'worker'))($record);
+    expect($safe->extra['service_role'])->toBe('worker')
+        ->and($safe->context)->not->toHaveKey('service_role')
+        ->and((new SafeStructuredLogProcessor('production', null, 'private-hostname'))($record)->extra['service_role'])->toBe('unspecified');
 });

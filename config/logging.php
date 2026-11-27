@@ -8,6 +8,7 @@ use Monolog\Handler\NullHandler;
 $deployed = in_array(env('APP_ENV', 'production'), ['production', 'staging'], true);
 
 return [
+    'service_role' => env('PMS_LOG_SERVICE_ROLE', 'unspecified'),
     'default' => env('LOG_CHANNEL', $deployed ? 'stderr' : 'stack'),
     'deprecations' => ['channel' => env('LOG_DEPRECATIONS_CHANNEL', 'null'), 'trace' => env('LOG_DEPRECATIONS_TRACE', false)],
     'channels' => [

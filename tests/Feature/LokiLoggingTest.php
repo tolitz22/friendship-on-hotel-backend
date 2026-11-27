@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Log;
 
 it('exports only sanitized bounded batches with low-cardinality labels', function (): void {
     $url = 'https://logs.example.test/loki/api/v1/push';
-    config(['logging.channels.loki.with' => [
+    config(['logging.service_role' => 'backend', 'logging.channels.loki.with' => [
         'enabled' => true, 'url' => $url, 'username' => '123', 'token' => 'test-secret',
     ], 'logging.channels.loki.level' => 'warning']);
     Http::fake([$url => Http::response('', 204)]);
@@ -27,11 +27,12 @@ it('exports only sanitized bounded batches with low-cardinality labels', functio
             $streams = $request->data()['streams'];
             $line = json_decode($streams[0]['values'][0][1], true, 512, JSON_THROW_ON_ERROR);
             expect($streams)->toHaveCount(1)
-                ->and($streams[0]['stream'])->toBe(['service' => 'friendship-on-hotel-backend', 'environment' => 'testing', 'level' => 'warning'])
+                ->and($streams[0]['stream'])->toBe(['service' => 'friendship-on-hotel-backend', 'environment' => 'testing', 'service_role' => 'backend', 'level' => 'warning'])
                 ->and($streams[0]['values'])->toHaveCount(40)
                 ->and($streams[0]['values'][0][0])->toMatch('/^[0-9]{19}$/')
                 ->and($line['message'])->toBe('pms.application.log')
                 ->and($line['context']['hotel_id'])->toBe(2)
+                ->and($line['extra']['service_role'])->toBe('backend')
                 ->and($request->body())->not->toContain('private-message', 'secret-password', 'test-secret');
 
             return $request->url() === $url && $request->hasHeader('Authorization', 'Basic '.base64_encode('123:test-secret'));

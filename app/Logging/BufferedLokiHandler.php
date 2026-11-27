@@ -66,9 +66,10 @@ final class BufferedLokiHandler extends AbstractProcessingHandler
             $environment = 'other';
         }
         $severity = strtolower($record->level->getName());
-        $key = $environment.':'.$severity;
+        $role = ServiceRole::normalize($record->extra['service_role'] ?? null);
+        $key = $environment.':'.$role.':'.$severity;
         $this->streams[$key] ??= [
-            'stream' => ['service' => 'friendship-on-hotel-backend', 'environment' => $environment, 'level' => $severity],
+            'stream' => ['service' => 'friendship-on-hotel-backend', 'environment' => $environment, 'service_role' => $role, 'level' => $severity],
             'values' => [],
         ];
         // Loki expects a string containing Unix epoch nanoseconds.

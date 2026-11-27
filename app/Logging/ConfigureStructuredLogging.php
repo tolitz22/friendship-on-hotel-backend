@@ -26,6 +26,7 @@ final class ConfigureStructuredLogging
 
                 return is_string($id) ? $id : null;
             },
+            ServiceRole::normalize(config('logging.service_role')),
         );
 
         // Attach at the handler level so Laravel stack channels do not apply

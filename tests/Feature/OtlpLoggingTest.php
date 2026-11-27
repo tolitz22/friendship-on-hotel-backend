@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Log;
 
 it('exports sanitized OTLP JSON with service resource, severity and nanosecond timestamps', function (): void {
     $url = 'https://otlp.example.test/otlp/v1/logs';
-    config(['logging.channels.loki.with' => [
+    config(['logging.service_role' => 'worker', 'logging.channels.loki.with' => [
         'enabled' => true, 'protocol' => 'otlp', 'url' => $url, 'username' => '123', 'token' => 'synthetic-token',
     ], 'logging.channels.loki.level' => 'warning']);
     // Use an explicit JSON object response, as required by OTLP.
@@ -25,6 +25,8 @@ it('exports sanitized OTLP JSON with service resource, severity and nanosecond t
             $logs = $groups[0]['scopeLogs'][0]['logRecords'];
             expect($groups)->toHaveCount(1)
                 ->and($groups[0]['resource']['attributes'][0])->toBe(['key' => 'service.name', 'value' => ['stringValue' => 'friendship-on-hotel-backend']])
+                ->and($groups[0]['resource']['attributes'][2])->toBe(['key' => 'service.role', 'value' => ['stringValue' => 'worker']])
+                ->and(json_decode($logs[0]['body']['stringValue'], true)['extra']['service_role'])->toBe('worker')
                 ->and($logs)->toHaveCount(2)
                 ->and($logs[0]['severityNumber'])->toBe(13)
                 ->and($logs[1]['severityNumber'])->toBe(17)
@@ -103,4 +105,16 @@ it('accepts an empty HTTP 204 response from the Grafana OTLP gateway', function 
     } finally {
         Log::forgetChannel('loki');
     }
+});
+
+it('keeps resource groups separate across environments and service roles', function (): void {
+    $streams = [];
+    foreach ([['staging', 'backend'], ['staging', 'worker'], ['production', 'backend']] as [$environment, $role]) {
+        $streams[] = ['stream' => ['environment' => $environment, 'service_role' => $role, 'level' => 'warning'],
+            'values' => [['1795780000000000000', '{}']]];
+    }
+    $groups = OtlpLogPayload::fromStreams($streams)['resourceLogs'];
+    expect($groups)->toHaveCount(3)
+        ->and($groups[1]['resource']['attributes'][2]['value']['stringValue'])->toBe('worker')
+        ->and($groups[2]['resource']['attributes'][1]['value']['stringValue'])->toBe('production');
 });

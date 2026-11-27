@@ -27,6 +27,7 @@ final class SafeStructuredLogProcessor
     public function __construct(
         private readonly string $environment,
         private readonly ?Closure $requestId = null,
+        private readonly string $serviceRole = 'unspecified',
     ) {
     }
 
@@ -95,6 +96,7 @@ final class SafeStructuredLogProcessor
             extra: [
                 'service' => 'friendship-on-hotel-backend',
                 'environment' => in_array($this->environment, ['local', 'testing', 'staging', 'production'], true) ? $this->environment : 'other',
+                'service_role' => ServiceRole::normalize($this->serviceRole),
                 'schema_version' => 1,
             ],
         );

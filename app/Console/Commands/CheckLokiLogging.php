@@ -6,6 +6,7 @@ namespace App\Console\Commands;
 
 use App\Logging\BufferedLokiHandler;
 use App\Logging\LokiSettings;
+use App\Logging\ServiceRole;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Log;
 use Throwable;
@@ -33,6 +34,11 @@ final class CheckLokiLogging extends Command
             return self::FAILURE;
         }
         $this->line('Loki configuration: valid. Protocol: '.$protocol.'. Network delivery not yet verified.');
+        $role = ServiceRole::normalize(config('logging.service_role'));
+        $this->line('Service role: '.$role);
+        if ($role === 'unspecified') {
+            $this->warn('Set PMS_LOG_SERVICE_ROLE to backend, worker or scheduler to separate service logs.');
+        }
         if (! $this->option('send')) {
             return self::SUCCESS;
         }

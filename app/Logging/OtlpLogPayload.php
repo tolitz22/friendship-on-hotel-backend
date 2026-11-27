@@ -17,10 +17,13 @@ final class OtlpLogPayload
         foreach ($streams as $stream) {
             $environment = $stream['stream']['environment'];
             $severity = $stream['stream']['level'];
-            $groups[$environment] ??= [
+            $role = ServiceRole::normalize($stream['stream']['service_role'] ?? null);
+            $key = $environment.':'.$role;
+            $groups[$key] ??= [
                 'resource' => ['attributes' => [
                     ['key' => 'service.name', 'value' => ['stringValue' => 'friendship-on-hotel-backend']],
                     ['key' => 'deployment.environment.name', 'value' => ['stringValue' => $environment]],
+                    ['key' => 'service.role', 'value' => ['stringValue' => $role]],
                 ]],
                 'scopeLogs' => [[
                     'scope' => ['name' => 'friendship-on-hotel.logging'],
@@ -28,7 +31,7 @@ final class OtlpLogPayload
                 ]],
             ];
             foreach ($stream['values'] as [$timestamp, $line]) {
-                $groups[$environment]['scopeLogs'][0]['logRecords'][] = [
+                $groups[$key]['scopeLogs'][0]['logRecords'][] = [
                     'timeUnixNano' => $timestamp,
                     'severityNumber' => match ($severity) {
                         'debug' => 5,
