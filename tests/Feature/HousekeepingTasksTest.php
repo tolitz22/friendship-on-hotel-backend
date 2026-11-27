@@ -246,3 +246,15 @@ it('uses a different stayover checklist and does not fabricate legacy manager ev
     $this->patchJson($url,['expectedRevision'=>1,'status'=>'done'])->assertOk()->assertJsonPath('data.checklist.0.checkedAt',null);
     $this->getJson($url.'/history')->assertOk()->assertJsonPath('data.0.after.checklistEvidence','legacy_status_only');
 });
+
+it('does not allow stayover completion to certify a room ready through final inspection', function (): void {
+    $hotel=Hotel::create(['name'=>'HK Stayover Boundary']);
+    $room=housekeepingRoom($hotel);
+    housekeepingLogin($hotel);
+    $base='/api/v1/hotels/'.$hotel->id.'/housekeeping-tasks';
+    $task=$this->postJson($base,['roomId'=>$room->id,'type'=>'stayover'])->assertCreated()->json('data');
+    $url=$base.'/'.$task['id'];
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'done','checkedItems'=>array_column($task['checklist'],'key')])->assertOk();
+    $this->postJson($url.'/final-inspection',['expectedRevision'=>2,'cleaningVerified'=>true,'safetyVerified'=>true,'amenitiesVerified'=>true,'note'=>'Stayover service finished'])->assertUnprocessable();
+    expect(DB::table('room_readiness_inspections')->where('hotel_id',$hotel->id)->count())->toBe(0);
+});

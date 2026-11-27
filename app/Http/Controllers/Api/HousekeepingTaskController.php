@@ -410,6 +410,11 @@ final class HousekeepingTaskController
                     'status' => ['Complete the cleaning stage before final room inspection.'],
                 ]);
             }
+            if ($row->type === 'stayover') {
+                throw ValidationException::withMessages([
+                    'status' => ['Stayover service does not release an occupied room for check-in.'],
+                ]);
+            }
             $service = app(\App\Domain\Reservations\RoomReadinessService::class);
             $prior = $service->show($hotel, (int) $row->room_id);
             if ($prior['advisoryReady']) {
