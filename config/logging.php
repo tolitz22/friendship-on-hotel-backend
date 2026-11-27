@@ -1,6 +1,7 @@
 <?php
 
 use App\Logging\ConfigureStructuredLogging;
+use App\Logging\BufferedLokiHandler;
 use Monolog\Handler\StreamHandler;
 use Monolog\Handler\NullHandler;
 
@@ -32,6 +33,18 @@ return [
             'handler' => StreamHandler::class,
             'with' => ['stream' => 'php://stderr'],
             'level' => env('LOG_LEVEL', $deployed ? 'info' : 'debug'),
+            'tap' => [ConfigureStructuredLogging::class],
+        ],
+        'loki' => [
+            'driver' => 'monolog',
+            'handler' => BufferedLokiHandler::class,
+            'level' => env('PMS_LOKI_LEVEL', 'warning'),
+            'with' => [
+                'enabled' => (bool) env('PMS_LOKI_ENABLED', false),
+                'url' => (string) env('PMS_LOKI_URL', ''),
+                'username' => (string) env('PMS_LOKI_USERNAME', ''),
+                'token' => (string) env('PMS_LOKI_TOKEN', ''),
+            ],
             'tap' => [ConfigureStructuredLogging::class],
         ],
         'null' => ['driver' => 'monolog', 'handler' => NullHandler::class],

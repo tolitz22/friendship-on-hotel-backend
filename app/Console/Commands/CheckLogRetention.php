@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
+use App\Logging\LokiSettings;
 
 final class CheckLogRetention extends Command
 {
@@ -17,7 +18,7 @@ final class CheckLogRetention extends Command
         $channels = $default === 'stack' ? (array) config('logging.channels.stack.channels', []) : [$default];
         $safe = true;
         $this->line('Technical logging destination: '.implode(', ', array_map(
-            fn ($channel) => in_array($channel, ['stderr', 'pms_daily', 'single', 'null'], true) ? $channel : 'unrecognized',
+            fn ($channel) => in_array($channel, ['stderr', 'pms_daily', 'single', 'null', 'loki'], true) ? $channel : 'unrecognized',
             $channels
         )));
         if ($channels === []) {
@@ -30,6 +31,16 @@ final class CheckLogRetention extends Command
             } elseif ($channel === 'pms_daily') {
                 $this->line('Dedicated rotating log files: maximum '.(int) config('logging.channels.pms_daily.days').' daily files.');
                 $this->line('Local archive export is explicit; no business history is affected.');
+            } elseif ($channel === 'loki') {
+                $options = config('logging.channels.loki.with', []);
+                if (! ($options['enabled'] ?? false) || ! LokiSettings::valid(
+                    (string) ($options['url'] ?? ''), (string) ($options['username'] ?? ''), (string) ($options['token'] ?? '')
+                ) || ! in_array('stderr', $channels, true)) {
+                    $this->warn('Loki requires enabled valid configuration and stderr fallback.');
+                    $safe = false;
+                } else {
+                    $this->line('Loki: retention is controlled by the external log provider.');
+                }
             } elseif ($channel === 'single') {
                 $this->warn('Legacy single-file channel is unbounded; prefer stderr or pms_daily.');
                 $safe = false;
