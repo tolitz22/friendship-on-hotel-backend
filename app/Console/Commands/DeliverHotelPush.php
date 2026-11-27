@@ -26,6 +26,21 @@ final class DeliverHotelPush extends Command
 
     public function handle(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery, PushDeliveryReadiness $readiness, PushTransport $transport): int
     {
+        $heartbeat = app(\App\Logging\PlatformHeartbeat::class);
+        $heartbeat->record('push_started', 'started');
+        $outcome = 'failed';
+        try {
+            $code = $this->deliver($notifications, $preferences, $eligibility, $messages, $queue, $discovery, $readiness, $transport);
+            $outcome = $code !== self::SUCCESS ? 'failed' : (config('push.enabled') ? 'succeeded' : 'disabled');
+
+            return $code;
+        } finally {
+            $heartbeat->record('push_completed', $outcome);
+        }
+    }
+
+    private function deliver(HotelNotificationService $notifications, PushPreferences $preferences, PushDeviceEligibility $eligibility, StaffMessageNotifications $messages, PushDeliveryQueue $queue, PushDeliveryDiscovery $discovery, PushDeliveryReadiness $readiness, PushTransport $transport): int
+    {
         if (! config('push.enabled')) {
             return self::SUCCESS;
         }
