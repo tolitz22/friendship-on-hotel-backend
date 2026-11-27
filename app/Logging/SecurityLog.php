@@ -11,6 +11,8 @@ final class SecurityLog
 {
     public const EVENTS = [
         'pms.security.platform.monitoring_viewed',
+        'pms.security.platform.hotels_viewed',
+        'pms.security.platform.hotel_created',
         'pms.security.login.succeeded',
         'pms.security.login.failed',
         'pms.security.logout.succeeded',
