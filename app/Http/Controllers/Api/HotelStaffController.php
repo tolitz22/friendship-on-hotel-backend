@@ -148,6 +148,7 @@ final class HotelStaffController
                 ]);
             }
 
+            app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'staff');
             $user = User::create([
                 'name' => $name,
                 'email' => $email,
@@ -191,6 +192,7 @@ final class HotelStaffController
             if (HotelMembership::where('hotel_id',$hotel->id)->where('user_id',$user->id)->exists()) {
                 throw ValidationException::withMessages(['email'=>['This account already belongs to the hotel.']]);
             }
+            app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'staff');
             HotelMembership::create([
                 'hotel_id'=>$hotel->id,'user_id'=>$user->id,
                 'role'=>$data['role'],'is_active'=>true,
@@ -279,6 +281,9 @@ final class HotelStaffController
                 if ($count<=1) {
                     throw ValidationException::withMessages(['role'=>['The hotel must keep an active administrator.']]);
                 }
+            }
+            if ($nextActive && ! $m->is_active) {
+                app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'staff');
             }
             $base = EnsureHotelPermission::forRole($nextRole);
             $chosen = array_key_exists('permissions',$data)

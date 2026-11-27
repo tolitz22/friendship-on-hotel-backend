@@ -58,6 +58,7 @@ final class StaffInvitationController
         $id=DB::transaction(function () use ($hotel,$request,$data,$email,$name,$token): int {
             // Serializes invitations from this property; re-inviting rotates old links.
             DB::table('hotels')->where('id',$hotel->id)->lockForUpdate()->first();
+            app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'staff');
             DB::table('staff_invitations')
                 ->where('hotel_id',$hotel->id)->where('email',$email)
                 ->whereNull('accepted_at')->whereNull('revoked_at')
@@ -111,8 +112,13 @@ final class StaffInvitationController
         ]);
 
         $result=DB::transaction(function () use ($data): array {
-            $invite=DB::table('staff_invitations')->where('token_hash',hash('sha256',$data['token']))
-                ->lockForUpdate()->first();
+            $hash = hash('sha256', $data['token']);
+            $candidate = DB::table('staff_invitations')->where('token_hash', $hash)->first(['hotel_id']);
+            if ($candidate) {
+                DB::table('hotels')->where('id', $candidate->hotel_id)->lockForUpdate()->first();
+            }
+            $invite = $candidate ? DB::table('staff_invitations')->where('token_hash', $hash)
+                ->where('hotel_id', $candidate->hotel_id)->lockForUpdate()->first() : null;
             if (!$invite||$invite->accepted_at||$invite->revoked_at||now()->greaterThanOrEqualTo($invite->expires_at)) {
                 throw ValidationException::withMessages(['token'=>['Invalid, expired, or already-used invitation.']]);
             }
@@ -121,6 +127,7 @@ final class StaffInvitationController
             if (User::whereRaw('LOWER(email) = ?',[$invite->email])->exists()) {
                 throw ValidationException::withMessages(['token'=>['An account already exists for this email. Ask your administrator to add your existing account.']]);
             }
+            app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $invite->hotel_id, 'staff');
             $user=User::create([
                 'name'=>$invite->name,
                 'email'=>$invite->email,

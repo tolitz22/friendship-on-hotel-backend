@@ -375,6 +375,7 @@ Route::prefix('v1')->group(function (): void {
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::get('/operational-exceptions', OperationalExceptionsController::class);
                 Route::get('/business-audit', \App\Http\Controllers\Api\BusinessAuditController::class)->middleware('throttle:60,1');
+                Route::get('/subscription-capacity', \App\Http\Controllers\Api\HotelSubscriptionCapacityController::class)->middleware('throttle:30,1,pms-hotel-capacity');
                 Route::get('/staff', [HotelStaffController::class, 'index']);
                 Route::get('/staff/permissions', [HotelStaffController::class, 'permissions']);
                 Route::get('/staff/invitations', [StaffInvitationController::class, 'index']);

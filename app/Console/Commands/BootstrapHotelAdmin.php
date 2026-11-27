@@ -34,8 +34,13 @@ class BootstrapHotelAdmin extends Command
             return self::FAILURE;
         }
 
+        try {
         DB::transaction(function () use ($hotel, $email, $password): void {
+            DB::table('hotels')->where('id', $hotel->id)->lockForUpdate()->first();
             $user = User::where('email', $email)->first();
+            if (! $user || ! HotelMembership::where('hotel_id', $hotel->id)->where('user_id', $user->id)->where('is_active', true)->exists()) {
+                app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'staff');
+            }
 
             if (! $user) {
                 $user = User::create([
@@ -51,6 +56,10 @@ class BootstrapHotelAdmin extends Command
                 ['role' => 'admin', 'is_active' => true],
             );
         });
+        } catch (\Illuminate\Validation\ValidationException $error) {
+            $this->error($error->errors()['subscriptionLimit'][0] ?? 'Capacity check failed.');
+            return self::FAILURE;
+        }
 
         $this->info('Admin membership configured.');
 

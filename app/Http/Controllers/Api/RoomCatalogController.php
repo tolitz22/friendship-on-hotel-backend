@@ -48,6 +48,7 @@ class RoomCatalogController
                 throw ValidationException::withMessages(['roomTypeId' => ['The room type does not belong to this property.']]);
             }
 
+            app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'rooms');
             $room = $hotel->rooms()->create([
                 'room_type_id' => $type->id,
                 'number' => $data['number'],

@@ -2,6 +2,7 @@
 
 return [
     'deployment_revision' => env('RAILWAY_GIT_COMMIT_SHA', env('PMS_DEPLOYMENT_REVISION')),
+    'enforce_capacity' => (bool) env('PMS_SUBSCRIPTION_CAPACITY_ENFORCED', true),
     'admin_ids' => explode(',', (string) env('PMS_PLATFORM_ADMIN_IDS', '')),
     'monitoring' => [
         'url' => (string) env('PMS_MONITORING_GRAFANA_URL', ''),

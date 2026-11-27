@@ -26,7 +26,7 @@ final class PlatformHotelSubscriptionController
         $input = $request->validate(['search' => ['nullable', 'string', 'max:100'], 'page' => ['sometimes', 'integer', 'min:1', 'max:10000'],
             'status' => ['sometimes', 'in:all,unassigned,trial,active,expired']]);
         $today = $this->today();
-        $query = Hotel::query()->select(['id', 'name', 'currency'])->with('platformSubscription');
+        $query = Hotel::query()->select(['id', 'name', 'currency'])->with('platformSubscription')->withCount(['rooms', 'memberships as capacity_staff_count' => fn ($q) => $q->where('is_active', true)]);
         $search = trim($input['search'] ?? '');
         if ($search !== '') {
             $pattern = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower($search)).'%';
@@ -45,6 +45,7 @@ final class PlatformHotelSubscriptionController
 
         return $this->response(['data' => $page->getCollection()->map(fn (Hotel $hotel): array => [
             'hotelId' => (string) $hotel->id, 'hotelName' => $hotel->name, 'currency' => $hotel->currency,
+            'usage' => app(\App\Services\PlatformSubscriptionCapacity::class)->snapshot($hotel),
             'subscription' => $hotel->platformSubscription ? $this->project($hotel->platformSubscription, $today) : null,
         ])->values(), 'today' => $today->toDateString(), 'meta' => ['page' => $page->currentPage(), 'lastPage' => $page->lastPage(), 'total' => $page->total()]]);
     }
