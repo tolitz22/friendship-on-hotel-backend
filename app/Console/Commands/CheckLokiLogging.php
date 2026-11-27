@@ -39,11 +39,13 @@ final class CheckLokiLogging extends Command
         try {
             $logger = Log::channel('loki');
             $accepted = false;
+            $diagnostic = ['outcome' => 'handler_not_found', 'http_status' => null];
             $logger->warning('pms.logging.smoke', ['count' => 1]);
             foreach ($logger->getLogger()->getHandlers() as $handler) {
                 if ($handler instanceof BufferedLokiHandler) {
                     $handler->close();
                     $accepted = $handler->lastDeliveryAccepted() === true;
+                    $diagnostic = $handler->deliveryDiagnostic();
                 }
             }
         } catch (Throwable) {
@@ -52,6 +54,8 @@ final class CheckLokiLogging extends Command
             return self::FAILURE;
         }
         if (! $accepted) {
+            $this->line('Export outcome: '.$diagnostic['outcome']);
+            $this->line('HTTP status: '.($diagnostic['http_status'] ?? 'not received'));
             $this->error('NO-GO: smoke event not acknowledged. Check protocol, endpoint, token permissions, log level and connectivity.');
 
             return self::FAILURE;

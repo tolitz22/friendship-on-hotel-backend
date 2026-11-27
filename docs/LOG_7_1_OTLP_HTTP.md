@@ -28,3 +28,5 @@ OTLP service.name typically maps to service_name; inspect available labels if di
 Tests: php artisan test tests/Feature/OtlpLoggingTest.php tests/Feature/LokiLoggingTest.php tests/Feature/LogRetentionTest.php. HTTP tests are faked; live Grafana acceptance must be confirmed separately.
 
 References: https://opentelemetry.io/docs/specs/otlp/ and https://grafana.com/docs/grafana-cloud/send-data/otlp/send-data-otlp/.
+
+On failed smoke delivery the command now prints a fixed outcome code and HTTP status (or not received). 401/403: check gateway instance ID, token validity, stack realm and logs:write. 400/415: payload or media type. 404: endpoint. 429: quota/rate. 5xx: gateway. Connection or timeout: network/TLS/DNS or the short export timeout. HTTP 200 with otlp_unconfirmed_response: response not recognized or records rejected; inspect Grafana for the synthetic event before assuming failure. No remote body, token, or exception details are printed.

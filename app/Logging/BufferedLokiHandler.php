@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Logging;
 
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Monolog\Handler\AbstractProcessingHandler;
 use Monolog\Level;
@@ -26,6 +27,8 @@ final class BufferedLokiHandler extends AbstractProcessingHandler
     private bool $flushing = false;
     private float $retryAfter = 0;
     private ?bool $lastAccepted = null;
+    private ?int $lastHttpStatus = null;
+    private string $lastOutcome = 'no_batch_sent';
 
     public function __construct(
         private readonly bool $enabled = false,
@@ -90,6 +93,8 @@ final class BufferedLokiHandler extends AbstractProcessingHandler
         $this->records = $this->bytes = $this->dropped = 0;
         $this->flushing = true;
         $this->lastAccepted = false;
+        $this->lastHttpStatus = null;
+        $this->lastOutcome = 'export_exception';
         try {
             $payload = $this->protocol === 'otlp'
                 ? OtlpLogPayload::fromStreams($streams)
@@ -99,13 +104,29 @@ final class BufferedLokiHandler extends AbstractProcessingHandler
                 ->connectTimeout(1)->timeout(2)
                 ->acceptJson()
                 ->post($this->url, $payload);
+            $this->lastHttpStatus = $response->status();
             $this->lastAccepted = $this->protocol === 'otlp'
                 ? $response->status() === 200 && OtlpLogPayload::fullyAccepted($response->body())
                 : $response->status() === 204;
+            $this->lastOutcome = match (true) {
+                $this->lastAccepted => 'accepted',
+                in_array($this->lastHttpStatus, [401, 403], true) => 'authentication_or_scope',
+                $this->lastHttpStatus === 400 => 'bad_request',
+                $this->lastHttpStatus === 404 => 'endpoint_not_found',
+                $this->lastHttpStatus === 415 => 'unsupported_media_type',
+                $this->lastHttpStatus === 429 => 'rate_limited',
+                $this->lastHttpStatus >= 500 => 'remote_server_error',
+                $this->protocol === 'otlp' && $this->lastHttpStatus === 200 => 'otlp_unconfirmed_response',
+                default => 'unexpected_http_status',
+            };
             if (! $this->lastAccepted) {
                 $this->retryAfter = microtime(true) + 30;
                 error_log('pms.loki.export_failed');
             }
+        } catch (ConnectionException) {
+            $this->lastOutcome = 'connection_or_timeout';
+            $this->retryAfter = microtime(true) + 30;
+            error_log('pms.loki.export_failed');
         } catch (Throwable) {
             $this->retryAfter = microtime(true) + 30;
             // Never send endpoint, credentials, response or exception to logs.
@@ -121,6 +142,12 @@ final class BufferedLokiHandler extends AbstractProcessingHandler
     public function lastDeliveryAccepted(): ?bool
     {
         return $this->lastAccepted;
+    }
+
+    /** Only fixed diagnostic codes and integer HTTP status; never raw remote data. */
+    public function deliveryDiagnostic(): array
+    {
+        return ['outcome' => $this->lastOutcome, 'http_status' => $this->lastHttpStatus];
     }
 
     public function reset(): void

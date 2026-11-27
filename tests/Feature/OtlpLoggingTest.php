@@ -63,7 +63,26 @@ it('checks remote acknowledgement in the synthetic command', function (): void {
         'logging.channels.loki.level' => 'warning']);
     Http::fake([$url => Http::response('{"partialSuccess":{"rejectedLogRecords":"1"}}', 200)]);
     $this->artisan('pms:loki-check', ['--send' => true])
+        ->expectsOutput('Export outcome: otlp_unconfirmed_response')
+        ->expectsOutput('HTTP status: 200')
         ->expectsOutput('NO-GO: smoke event not acknowledged. Check protocol, endpoint, token permissions, log level and connectivity.')
         ->assertFailed();
     Log::forgetChannel('loki');
+});
+
+it('reports safe HTTP failure diagnostics without printing remote response data', function (): void {
+    $url = 'https://otlp.example.test/otlp/v1/logs';
+    config(['logging.default' => 'stack', 'logging.channels.stack.channels' => ['stderr', 'loki'],
+        'logging.channels.loki.with' => ['enabled' => true, 'protocol' => 'otlp', 'url' => $url, 'username' => '123', 'token' => 'test-token'],
+        'logging.channels.loki.level' => 'warning']);
+    Http::fake([$url => Http::response('private remote response', 401)]);
+    try {
+        $this->artisan('pms:loki-check', ['--send' => true])
+            ->expectsOutput('Export outcome: authentication_or_scope')
+            ->expectsOutput('HTTP status: 401')
+            ->doesntExpectOutput('private remote response')
+            ->assertFailed();
+    } finally {
+        Log::forgetChannel('loki');
+    }
 });
