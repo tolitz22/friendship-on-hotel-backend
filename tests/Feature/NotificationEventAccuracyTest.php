@@ -24,8 +24,8 @@ it('executes every expanded discovery query on a migrated empty hotel without le
     expect($service->feed($this->hotel, true, $this->admin->id)['notifications'])->toBe([]);
     expect(iterator_to_array($service->all($this->hotel), false))->toBe([]);
     $preferences = app(PushPreferences::class)->get($this->hotel->id, $this->admin->id);
-    expect($preferences)->toHaveCount(46);
-    foreach (['hk_checkout_handoff','hk_arrival_urgent','hk_overdue','lost_found_registered'] as $kind) {
+    expect($preferences)->toHaveCount(47);
+    foreach (['hk_checkout_handoff','hk_arrival_urgent','hk_overdue','lost_found_registered','hk_assigned'] as $kind) {
         expect($preferences[$kind])->toBeTrue();
     }
     expect($service->feed($this->other, true, $this->admin->id)['notifications'])->toBe([]);

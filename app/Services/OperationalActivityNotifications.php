@@ -116,9 +116,10 @@ final class OperationalActivityNotifications
         return $item + ['target' => 'rooms', 'room' => (string) $row->room_number];
     }
 
-    public function recentApprovedInspections(Hotel $hotel, int $limit): iterable
+    public function recentApprovedInspections(Hotel $hotel, ?int $limit): iterable
     {
-        foreach ($this->query($hotel, 'room_inspection_approved')->limit($limit)->get() as $row) {
+        $query = $this->query($hotel, 'room_inspection_approved');
+        foreach ($limit===null?$query->lazy(200):$query->limit($limit)->get() as $row) {
             yield $this->item($hotel, 'room_inspection_approved', $row);
         }
     }

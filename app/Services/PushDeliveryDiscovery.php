@@ -34,9 +34,12 @@ final class PushDeliveryDiscovery
                 continue;
             }
             $this->queue->enqueueBatch((function () use ($hotel, $preferences, $devices): iterable {
+                $scope = app(PushRecipientScope::class);
+                $roles = [];
+                foreach ($devices as $userId => $registered) $roles[$userId] = $scope->role($hotel, (int)$userId);
                 foreach ($this->notifications->all($hotel) as $alert) {
                     foreach ($devices as $userId => $registered) {
-                        if (! ($preferences[$userId][$alert['kind']] ?? false)) {
+                        if ($roles[$userId] !== 'admin' || ! ($preferences[$userId][$alert['kind']] ?? false)) {
                             continue;
                         }
                         foreach ($registered as $device) {
@@ -45,7 +48,13 @@ final class PushDeliveryDiscovery
                     }
                 }
                 foreach ($devices as $userId => $registered) {
-                    foreach ($this->messages->all($hotel, (int) $userId) as $alert) {
+                    $alerts = match ($roles[$userId]) {
+                        'admin' => $this->messages->all($hotel, (int) $userId),
+                        'housekeeping' => app(HousekeepingNotifications::class)->personal($hotel,(int)$userId,null)['notifications'],
+                        'front_desk' => app(OperationalActivityNotifications::class)->recentApprovedInspections($hotel,null),
+                        default => [],
+                    };
+                    foreach ($alerts as $alert) {
                         if (! ($preferences[$userId][$alert['kind']] ?? false)) {
                             continue;
                         }

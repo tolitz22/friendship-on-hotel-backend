@@ -49,6 +49,7 @@ final class PushAlertPayload
                 'expense_recorded' => 'A hotel expense was recorded.',
                 'expense_correction_requested' => 'An expense correction was requested.',
                 'cashier_discrepancy' => 'A cashier cash-count discrepancy was reported.',
+                'hk_assigned' => 'A cleaning task has been assigned to you.',
                 'hk_checkout_handoff' => 'Checkout cleaning needs an assignment.',
                 'hk_arrival_urgent' => 'An arriving room needs cleaning or inspection.',
                 'hk_overdue' => 'A housekeeping task is overdue.',

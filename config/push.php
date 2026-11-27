@@ -2,6 +2,7 @@
 
 return [
     'enabled' => env('PMS_PUSH_ENABLED', false),
+    'staff_enabled' => env('PMS_STAFF_PUSH_ENABLED', false),
     'public_key' => env('PMS_PUSH_PUBLIC_KEY'),
     'private_key' => env('PMS_PUSH_PRIVATE_KEY'),
     'subject' => env('PMS_PUSH_SUBJECT'),

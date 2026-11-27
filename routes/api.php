@@ -89,9 +89,10 @@ Route::prefix('v1')->group(function (): void {
         Route::get('/hotels', [HotelController::class, 'index']);
 
         Route::prefix('hotels/{hotel}')->middleware('hotel.member')->group(function (): void {
-            Route::get('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'show'])->middleware(['hotel.admin', 'throttle:30,1,pms-get-push-preferences']);
-            Route::put('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'update'])->middleware(['hotel.admin', 'throttle:30,1,pms-put-push-preferences']);
-            Route::prefix('push-subscriptions')->middleware(['hotel.admin', 'throttle:30,1,pms-push-subscriptions'])->group(function (): void {
+            Route::get('/push-access', [\App\Http\Middleware\EnsurePushAccess::class, 'capability']);
+            Route::get('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'show'])->middleware([\App\Http\Middleware\EnsurePushAccess::class, 'throttle:30,1,pms-get-push-preferences']);
+            Route::put('/push-preferences', [\App\Http\Controllers\Api\PushPreferenceController::class, 'update'])->middleware([\App\Http\Middleware\EnsurePushAccess::class, 'throttle:30,1,pms-put-push-preferences']);
+            Route::prefix('push-subscriptions')->middleware([\App\Http\Middleware\EnsurePushAccess::class, 'throttle:30,1,pms-push-subscriptions'])->group(function (): void {
                 Route::get('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'index']);
                 Route::post('/', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'store']);
                 Route::delete('/{subscription}', [\App\Http\Controllers\Api\PushSubscriptionController::class, 'destroy'])->whereNumber('subscription');

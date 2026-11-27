@@ -97,9 +97,7 @@ final class DeliverHotelPush extends Command
                 $queue->finish($row, 'cancelled', 'no_longer_eligible');
                 continue;
             }
-            $alert = in_array($row->kind, StaffMessageNotifications::KINDS, true)
-                ? $messages->current($hotel, $device->user_id, $row->notification_id)
-                : $notifications->current($hotel, $row->notification_id);
+            $alert = app(\App\Services\PushRecipientScope::class)->current($hotel,(int)$device->user_id,$row->kind,$row->notification_id);
             if (! $alert || $alert['kind'] !== $row->kind) {
                 $queue->finish($row, 'cancelled', 'stale_alert');
                 continue;

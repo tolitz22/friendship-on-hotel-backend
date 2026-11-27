@@ -79,7 +79,7 @@ final class HousekeepingNotifications
     }
 
     /** Personal assignment alerts are never added to the hotel-wide push feed. */
-    public function personal(Hotel $hotel,int $userId): array
+    public function personal(Hotel $hotel,int $userId,?int $limit=8): array
     {
         $items=[];$hasMore=false;
         // Select the latest real assignment change, not ordinary progress or note updates.
@@ -99,14 +99,16 @@ final class HousekeepingNotifications
             if ($from===$to||isset($seen[$event->task_id])) continue;
             $seen[$event->task_id]=true;
             if ((string)$to!==(string)$userId) continue;
-            if (++$count>8) {$hasMore=true;break;}
+            if ($limit!==null && ++$count>$limit) {$hasMore=true;break;}
             $items[]=['id'=>'hk_assigned:'.$event->id,'kind'=>'hk_assigned','date'=>\Illuminate\Support\Carbon::parse($event->created_at)->setTimezone($hotel->timezone ?: 'Asia/Manila')->toDateString(),
                 'reference'=>'Room '.$event->room_number,'target'=>'housekeeping','taskId'=>(string)$event->task_id];
         }
         foreach (['hk_arrival_urgent','hk_overdue'] as $kind) {
-            $rows=$this->managerQuery($hotel,$kind)->where('t.assigned_user_id',$userId)->limit(9)->get();
-            $hasMore=$hasMore||$rows->count()>8;
-            foreach ($rows->take(8) as $row) $items[]=$this->managerItem($hotel,$kind,$row);
+            $query=$this->managerQuery($hotel,$kind)->where('t.assigned_user_id',$userId);
+            if ($limit!==null) $query->limit($limit+1);
+            $rows=$query->get();
+            $hasMore=$hasMore||($limit!==null&&$rows->count()>$limit);
+            foreach ($limit===null?$rows:$rows->take($limit) as $row) $items[]=$this->managerItem($hotel,$kind,$row);
         }
         return ['hotelId'=>(string)$hotel->id,'notifications'=>$items,'hasMore'=>$hasMore];
     }
