@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
+use App\Logging\SecurityLog;
 use App\Models\HotelMembership;
 use App\Models\User;
 use App\Notifications\StaffInvitationNotification;
@@ -85,18 +86,20 @@ final class StaffInvitationController
                 ->update(['revoked_at'=>now(),'updated_at'=>now()]);
             return response()->json(['message'=>'Invitation delivery failed. Check email configuration and send a new invitation.'],503);
         }
+        SecurityLog::record('pms.security.invitation.sent', ['hotel_id' => (int) $hotel->id, 'actor_id' => (int) $request->user()->id, 'invitation_id' => (int) $id]);
         return response()->json([
             'data'=>['id'=>(string)$id,'email'=>$email,'expiresInHours'=>self::HOURS],
             'message'=>'Invitation email sent.',
         ],201);
     }
 
-    public function revoke(Hotel $hotel, string $invitation): JsonResponse
+    public function revoke(Request $request, Hotel $hotel, string $invitation): JsonResponse
     {
         $updated=DB::table('staff_invitations')->where('hotel_id',$hotel->id)
             ->where('id',$invitation)->whereNull('accepted_at')->whereNull('revoked_at')
             ->update(['revoked_at'=>now(),'updated_at'=>now()]);
         abort_if($updated===0,404);
+        SecurityLog::record('pms.security.invitation.revoked', ['hotel_id' => (int) $hotel->id, 'actor_id' => (int) $request->user()->id, 'invitation_id' => (int) $invitation]);
         return response()->json(['message'=>'Invitation revoked.']);
     }
 
@@ -142,12 +145,13 @@ final class StaffInvitationController
                 'after_state'=>json_encode(['role'=>$invite->role,'isActive'=>true],JSON_THROW_ON_ERROR),
                 'created_at'=>now(),
             ]);
-            return ['hotelId'=>(string)$invite->hotel_id];
+            return ['hotelId'=>(string)$invite->hotel_id, 'userId'=>(int)$user->id, 'invitationId'=>(int)$invite->id];
         },3);
 
+        SecurityLog::record('pms.security.invitation.accepted', ['hotel_id' => (int) $result['hotelId'], 'user_id' => $result['userId'], 'invitation_id' => $result['invitationId']]);
         return response()->json([
             'message'=>'Account created. Sign in with your new password.',
-            'data'=>$result,
+            'data'=>['hotelId'=>$result['hotelId']],
         ],201);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Hotel;
+use App\Logging\SecurityLog;
 use App\Models\HotelMembership;
 use App\Models\User;
 use App\Http\Middleware\EnsureHotelPermission;
@@ -138,7 +139,7 @@ final class HotelStaffController
             throw ValidationException::withMessages(['name' => ['A full name is required.']]);
         }
 
-        DB::transaction(function () use ($hotel, $request, $data, $name, $email): void {
+        $targetId = DB::transaction(function () use ($hotel, $request, $data, $name, $email): int {
             // Serialize administrator onboarding for this property.
             DB::table('hotels')->where('id', $hotel->id)->lockForUpdate()->first();
             if (User::whereRaw('LOWER(email) = ?', [$email])->exists()) {
@@ -164,7 +165,9 @@ final class HotelStaffController
                 'account_created', null, [
                     'role' => $data['role'], 'isActive' => true, 'passwordChangeRequired' => true,
                 ]);
+            return (int) $user->id;
         }, 3);
+        SecurityLog::record('pms.security.staff.account_created', ['hotel_id' => (int) $hotel->id, 'actor_id' => (int) $request->user()->id, 'target_user_id' => $targetId]);
 
         return response()->json([
             'message' => 'Staff account created. The employee must change their initial password when they first sign in.',
@@ -194,6 +197,7 @@ final class HotelStaffController
             ]);
             $this->audit($hotel,(int)$request->user()->id,(int)$user->id,'attached',null,['role'=>$data['role'],'isActive'=>true]);
         });
+        SecurityLog::record('pms.security.staff.attached', ['hotel_id' => (int) $hotel->id, 'actor_id' => (int) $request->user()->id, 'target_user_id' => (int) $user->id]);
         return response()->json(['data'=>$this->staffList($hotel)],201);
     }
 
@@ -231,7 +235,7 @@ final class HotelStaffController
             'expectedPermissions.*'=>['string','distinct','max:80'],
         ]);
 
-        DB::transaction(function () use ($request,$hotel,$userId,$data): void {
+        $event = DB::transaction(function () use ($request,$hotel,$userId,$data): ?string {
             // Lock the hotel to serialize membership changes and preserve at least one administrator.
             DB::table('hotels')->where('id',$hotel->id)->lockForUpdate()->first();
             $m=HotelMembership::where('hotel_id',$hotel->id)
@@ -286,10 +290,15 @@ final class HotelStaffController
             $after=['role'=>$nextRole,'isActive'=>(bool)$nextActive,'permissions'=>$chosen];
             if ($before!==$after) {
                 $m->update(['role'=>$nextRole,'is_active'=>$nextActive,'permission_overrides'=>$override]);
-                $this->audit($hotel,(int)$request->user()->id,(int)$m->user_id,
-                    array_key_exists('permissions',$data)?'permissions_updated':'updated',$before,$after);
+                $action = array_key_exists('permissions',$data)?'permissions_updated':'updated';
+                $this->audit($hotel,(int)$request->user()->id,(int)$m->user_id,$action,$before,$after);
+                return $action;
             }
+            return null;
         });
+        if ($event !== null) {
+            SecurityLog::record('pms.security.staff.'.$event, ['hotel_id' => (int) $hotel->id, 'actor_id' => (int) $request->user()->id, 'target_user_id' => (int) $userId]);
+        }
 
         return response()->json(['data'=>$this->staffList($hotel)]);
     }

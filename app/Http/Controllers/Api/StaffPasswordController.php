@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\User;
+use App\Logging\SecurityLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -26,6 +27,7 @@ final class StaffPasswordController
         $data = $request->validate(['email' => ['required','email','max:255']]);
         // Do not reveal whether an account exists, whether it is active, or whether
         // the broker has throttled its mail. No token is returned to the browser.
+        SecurityLog::record('pms.security.password.reset_requested');
         $email = strtolower(trim($data['email']));
         $user = User::whereRaw('LOWER(email) = ?', [$email])->first();
         if ($user !== null && $user->is_active) {
@@ -50,8 +52,10 @@ final class StaffPasswordController
             'password' => $this->passwordRules(),
         ]);
 
-        $status = Password::broker('users')->reset($data, function (User $user, string $password): void {
+        $resetUserId = null;
+        $status = Password::broker('users')->reset($data, function (User $user, string $password) use (&$resetUserId): void {
             if (! $user->is_active) {
+                SecurityLog::record('pms.security.password.reset_failed', [], true);
                 throw ValidationException::withMessages([
                     'token' => ['The password reset request could not be completed.'],
                 ]);
@@ -65,14 +69,17 @@ final class StaffPasswordController
 
             // Password reset invalidates all existing Sanctum sessions.
             $user->tokens()->delete();
+            $resetUserId = (int) $user->id;
         });
 
         if ($status !== Password::PASSWORD_RESET) {
+            SecurityLog::record('pms.security.password.reset_failed', [], true);
             throw ValidationException::withMessages([
                 'token' => ['The reset link is invalid or expired. Request a new link.'],
             ]);
         }
 
+        SecurityLog::record('pms.security.password.reset_succeeded', ['user_id' => $resetUserId]);
         return response()->json([
             'message' => 'Password reset. Sign in with your new password.',
         ]);
@@ -88,6 +95,7 @@ final class StaffPasswordController
         /** @var User $user */
         $user = $request->user();
         if (! Hash::check($data['currentPassword'], $user->password)) {
+            SecurityLog::record('pms.security.password.change_failed', ['user_id' => (int) $user->id], true);
             throw ValidationException::withMessages([
                 'currentPassword' => ['The current password is incorrect.'],
             ]);
@@ -116,6 +124,7 @@ final class StaffPasswordController
             $request->session()->regenerateToken();
         }
 
+        SecurityLog::record('pms.security.password.change_succeeded', ['user_id' => (int) $user->id]);
         return response()->json([
             'message' => 'Password changed. Sign in again using the new password.',
         ]);

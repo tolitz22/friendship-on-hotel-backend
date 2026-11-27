@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Middleware;
 
+use App\Logging\SecurityLog;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Route;
@@ -32,6 +33,16 @@ final class TrackApiRequest
             $response = $next($request);
             $status = $response->getStatusCode();
             $response->headers->set('X-Request-ID', $id);
+            $securityEvent = match ($status) {
+                401 => 'pms.security.access.unauthenticated',
+                403 => 'pms.security.access.denied',
+                419 => 'pms.security.access.csrf_rejected',
+                429 => 'pms.security.access.rate_limited',
+                default => null,
+            };
+            if ($securityEvent !== null) {
+                SecurityLog::record($securityEvent, ['status_code' => $status], true);
+            }
 
             return $response;
         } finally {

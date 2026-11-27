@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Models\User;
+use App\Logging\SecurityLog;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -21,6 +22,7 @@ class AuthController
         $user = User::where('email', $data['email'])->first();
 
         if (! $user || ! $user->is_active || ! Hash::check($data['password'], $user->password)) {
+            SecurityLog::record('pms.security.login.failed', ['auth_mode' => 'bearer'], true);
             throw ValidationException::withMessages([
                 'email' => ['The provided credentials are incorrect.'],
             ]);
@@ -40,6 +42,7 @@ class AuthController
         }
 
         $token = $user->createToken('hotel-pms', $abilities);
+        SecurityLog::record('pms.security.login.succeeded', ['user_id' => (int) $user->id, 'auth_mode' => 'bearer']);
 
         return response()->json([
             'data' => [
@@ -72,7 +75,9 @@ class AuthController
 
     public function logout(Request $request): JsonResponse
     {
+        $userId = (int) $request->user()->id;
         $request->user()->currentAccessToken()?->delete();
+        SecurityLog::record('pms.security.logout.succeeded', ['user_id' => $userId, 'auth_mode' => 'bearer']);
 
         return response()->json(['message' => 'Signed out.']);
     }

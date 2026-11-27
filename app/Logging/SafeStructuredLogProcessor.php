@@ -19,6 +19,7 @@ final class SafeStructuredLogProcessor
     private const NUMERIC_FIELDS = [
         'hotel_id', 'user_id', 'actor_id', 'booking_id', 'reservation_id',
         'payment_id', 'shift_id', 'job_id', 'status_code', 'duration_ms',
+        'target_user_id', 'invitation_id',
         'attempt', 'count',
     ];
 
@@ -58,6 +59,13 @@ final class SafeStructuredLogProcessor
             }
         }
 
+        if (in_array($record->message, SecurityLog::EVENTS, true)) {
+            $mode = $record->context['auth_mode'] ?? null;
+            if (in_array($mode, ['bearer', 'cookie'], true)) {
+                $context['auth_mode'] = $mode;
+            }
+        }
+
         $exception = $record->context['exception'] ?? null;
         if ($exception instanceof Throwable) {
             $class = get_class($exception);
@@ -71,7 +79,7 @@ final class SafeStructuredLogProcessor
 
         // Free-form log messages may contain SQL, tokens, URLs or personal data.
         // Retain the level and safe diagnostic metadata, not the raw text.
-        $event = in_array($record->message, self::EVENTS, true)
+        $event = (in_array($record->message, self::EVENTS, true) || in_array($record->message, SecurityLog::EVENTS, true))
             ? $record->message
             : ($exception instanceof Throwable ? 'pms.application.exception' : 'pms.application.log');
 
