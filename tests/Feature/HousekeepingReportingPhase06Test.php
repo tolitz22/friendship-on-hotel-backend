@@ -68,3 +68,25 @@ it('registers a found item and protects its custody trail and final outcome', fu
     Sanctum::actingAs($cleaner,['hotel:read']);
     $this->getJson($url.'/'.$item.'/history')->assertOk()->assertJsonPath('data.0.note',null);
 });
+
+it('allows an authorized housekeeper to claim an unassigned task but never take another staff assignment',function (): void {
+    [$hotel,$room,$admin,$first,$second,$maintenance]=hkSixFixture();
+    $base='/api/v1/hotels/'.$hotel->id;
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $task=$this->postJson($base.'/housekeeping-tasks',['roomId'=>$room->id,'type'=>'checkout_clean'])->assertCreated()->json('data');
+    $url=$base.'/housekeeping-tasks/'.$task['id'];
+    Sanctum::actingAs($maintenance,['hotel:read']);
+    $this->postJson($url.'/claim',['expectedRevision'=>1])->assertForbidden();
+    Sanctum::actingAs($first,['hotel:read']);
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'in_progress'])->assertForbidden();
+    $this->postJson($url.'/claim',['expectedRevision'=>1])->assertOk()->assertJsonPath('data.assignedUserId',(string)$first->id)->assertJsonPath('data.revision',2);
+    Sanctum::actingAs($second,['hotel:read']);
+    $this->postJson($url.'/claim',['expectedRevision'=>1])->assertConflict();
+    $this->postJson($url.'/claim',['expectedRevision'=>2])->assertConflict();
+    $this->patchJson($url,['expectedRevision'=>2,'status'=>'in_progress'])->assertForbidden();
+    Sanctum::actingAs($first,['hotel:read']);
+    $this->patchJson($url,['expectedRevision'=>2,'status'=>'in_progress'])->assertOk();
+    $this->getJson($url.'/history')->assertOk()->assertJsonPath('data.1.note','Housekeeper claimed unassigned task.');
+    $foreign=Hotel::create(['name'=>'Foreign claim']);
+    $this->postJson('/api/v1/hotels/'.$foreign->id.'/housekeeping-tasks/'.$task['id'].'/claim',['expectedRevision'=>3])->assertNotFound();
+});

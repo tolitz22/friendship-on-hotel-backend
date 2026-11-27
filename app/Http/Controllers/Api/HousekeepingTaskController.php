@@ -414,6 +414,30 @@ final class HousekeepingTaskController
         return response()->json(['data'=>$this->present($this->scoped($hotel)->where('t.id',$id)->first())],201);
     }
 
+    /** Claim only genuinely unassigned, not-started tasks. Never take another employee's work. */
+    public function claim(Request $request, Hotel $hotel, string $task): JsonResponse
+    {
+        $user = $request->user();
+        $member = $user->memberships()->where('hotel_id',$hotel->id)->where('role','housekeeping')
+            ->where('is_active',true)->first();
+        abort_unless($user->is_active && $member !== null
+            && in_array('housekeeping.assigned',\App\Http\Middleware\EnsureHotelPermission::effectiveForMembership($member),true),403);
+        $data = $request->validate(['expectedRevision'=>['required','integer','min:1']]);
+        DB::transaction(function () use ($hotel,$task,$user,$data): void {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
+            $row=DB::table('housekeeping_tasks')->where('hotel_id',$hotel->id)->where('id',$task)->lockForUpdate()->first();
+            abort_if($row===null,404);
+            abort_if((int)$row->revision !== (int)$data['expectedRevision']
+                || $row->status !== 'todo' || $row->assigned_user_id !== null
+                || trim((string)$row->assigned_to) !== '',409,'This task is no longer available to claim. Refresh the task.');
+            $changes=['assigned_user_id'=>$user->id,'revision'=>(int)$row->revision+1,'updated_at'=>now()];
+            $next=(object)array_merge((array)$row,$changes);
+            DB::table('housekeeping_tasks')->where('hotel_id',$hotel->id)->where('id',$row->id)->update($changes);
+            $this->event($hotel,(int)$row->id,(int)$user->id,'updated',$this->state($row),$this->state($next),'Housekeeper claimed unassigned task.');
+        });
+        return $this->show($hotel,$task);
+    }
+
     public function update(Request $request, Hotel $hotel, string $task): JsonResponse
     {
         $data=$request->validate([
