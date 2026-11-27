@@ -111,7 +111,7 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/', [HotelController::class, 'show']);
             Route::get('/room-types', [RoomCatalogController::class, 'roomTypes']);
             Route::get('/rooms', [RoomCatalogController::class, 'rooms']);
-            Route::get('/room-calendar', RoomCalendarController::class);
+            Route::get('/room-calendar', RoomCalendarController::class)->middleware('hotel.permission:reservation.read');
             Route::get('/catalog-summary', PropertyCatalogSummaryController::class);
             Route::get('/reservation-records', [ReservationRecordController::class, 'index'])->middleware('hotel.permission:reservation.read');
             Route::get('/reservation-records/{booking}', [ReservationRecordController::class, 'show'])->whereNumber('booking')->middleware('hotel.permission:reservation.read');

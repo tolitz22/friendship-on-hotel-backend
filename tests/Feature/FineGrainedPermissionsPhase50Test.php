@@ -98,12 +98,14 @@ it('hides guest, reservation and financial records from cleaning staff', functio
     $this->getJson($base.'/guests')->assertForbidden();
     $this->getJson($base.'/reservation-records')->assertForbidden();
     $this->getJson($base.'/front-desk/manifest')->assertForbidden();
+    $this->getJson($base.'/room-calendar?start=2026-11-17&end=2026-11-24')->assertForbidden();
     $this->getJson($base.'/bookings/999999/folio-ledger')->assertForbidden();
 
     $reception = phase50Staff($hotel, 'front_desk');
     Sanctum::actingAs($reception, ['hotel:read', 'booking:write']);
     $this->getJson($base.'/guests')->assertOk();
     $this->getJson($base.'/reservation-records')->assertOk();
+    $this->getJson($base.'/room-calendar?start=2026-11-17&end=2026-11-24')->assertOk();
 });
 
 it('permits front desk to assign within a hotel and audits the room assignment', function (): void {
