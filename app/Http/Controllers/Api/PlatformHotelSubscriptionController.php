@@ -42,10 +42,15 @@ final class PlatformHotelSubscriptionController
                 ->whereDate('expires_on', '>', $today->toDateString()));
         }
         $page = $query->orderByDesc('id')->paginate(20);
+        $issued = DB::table('platform_subscription_invoices as invoice')->join('platform_hotel_subscriptions as agreement', function ($join): void {
+            $join->on('agreement.id', '=', 'invoice.subscription_id')->on('agreement.revision', '=', 'invoice.agreement_revision');
+        })->whereIn('invoice.hotel_id', $page->getCollection()->pluck('id'))
+            ->select('invoice.subscription_id', 'invoice.agreement_revision')->get()->mapWithKeys(fn ($row) => [$row->subscription_id.':'.$row->agreement_revision => true]);
 
         return $this->response(['data' => $page->getCollection()->map(fn (Hotel $hotel): array => [
             'hotelId' => (string) $hotel->id, 'hotelName' => $hotel->name, 'currency' => $hotel->currency,
             'usage' => app(\App\Services\PlatformSubscriptionCapacity::class)->snapshot($hotel),
+            'currentRevisionBilled' => $hotel->platformSubscription !== null && $issued->has($hotel->platformSubscription->id.':'.$hotel->platformSubscription->revision),
             'subscription' => $hotel->platformSubscription ? $this->project($hotel->platformSubscription, $today) : null,
         ])->values(), 'today' => $today->toDateString(), 'meta' => ['page' => $page->currentPage(), 'lastPage' => $page->lastPage(), 'total' => $page->total()]]);
     }

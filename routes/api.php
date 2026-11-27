@@ -84,6 +84,8 @@ Route::prefix('v1')->group(function (): void {
     Route::middleware(['auth:sanctum', 'active.user'])->group(function (): void {
         Route::post('/telemetry/frontend-errors', \App\Http\Controllers\Api\FrontendErrorController::class)->middleware('throttle:12,1,pms-frontend-errors');
         Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::get('/platform/subscription-invoices', [\App\Http\Controllers\Api\PlatformSubscriptionInvoiceController::class, 'index'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:30,1,pms-platform-invoices']);
+        Route::post('/platform/hotels/{hotel}/subscription-invoices', [\App\Http\Controllers\Api\PlatformSubscriptionInvoiceController::class, 'store'])->whereNumber('hotel')->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:10,1,pms-platform-invoice-issue']);
         Route::get('/platform/hotel-subscriptions', [\App\Http\Controllers\Api\PlatformHotelSubscriptionController::class, 'index'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:30,1,pms-platform-subscriptions']);
         Route::put('/platform/hotel-subscriptions/{hotel}', [\App\Http\Controllers\Api\PlatformHotelSubscriptionController::class, 'update'])->whereNumber('hotel')->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:10,1,pms-platform-subscription-update']);
         Route::get('/platform/hotel-subscriptions/{hotel}/history', [\App\Http\Controllers\Api\PlatformHotelSubscriptionController::class, 'history'])->whereNumber('hotel')->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:30,1,pms-platform-subscription-history']);

@@ -26,7 +26,10 @@ it('requires dedicated platform authorization, restriction first, revision and c
     $this->putJson($url, array_replace($input, ['revision' => 1, 'clearanceConfirmed' => false]))->assertUnprocessable();
     $this->putJson($url, array_replace($input, ['revision' => 1]))->assertOk()->assertJsonPath('data.state', 'suspended');
     $this->getJson($url)->assertOk()->assertJsonPath('meta.total', 2);
-    HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $operator->id, 'role' => 'admin', 'is_active' => true]);
+    $hotelAdmin = accessQaUser('access-property-admin@example.test');
+    HotelMembership::create(['hotel_id' => $hotel->id, 'user_id' => $hotelAdmin->id, 'role' => 'admin', 'is_active' => true]);
+    config(['platform.admin_ids' => [(string) $hotelAdmin->id]]);
+    Sanctum::actingAs($hotelAdmin);
     $this->putJson($url, array_replace($input, ['state' => 'active', 'revision' => 2]))->assertForbidden();
 });
 
