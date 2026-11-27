@@ -360,6 +360,7 @@ Route::prefix('v1')->group(function (): void {
                     ->whereNumber('approval')->middleware('throttle:20,1');
                 Route::patch('/', [HotelController::class, 'update']);
                 Route::get('/operational-exceptions', OperationalExceptionsController::class);
+                Route::get('/business-audit', \App\Http\Controllers\Api\BusinessAuditController::class)->middleware('throttle:60,1');
                 Route::get('/staff', [HotelStaffController::class, 'index']);
                 Route::get('/staff/permissions', [HotelStaffController::class, 'permissions']);
                 Route::get('/staff/invitations', [StaffInvitationController::class, 'index']);
