@@ -48,7 +48,7 @@ it('aggregates exported records beyond the event list limit with fixed queries',
 });
 
 it('distinguishes failed metrics from successful empty queries and blocks unauthorized requests', function (): void {
-    Http::fake();
+    Http::preventStrayRequests();
     $this->getJson('/api/v1/platform/monitoring/metrics')->assertUnauthorized();
     authorizeMonitoringMetrics();
     Http::fake(function ($request) {

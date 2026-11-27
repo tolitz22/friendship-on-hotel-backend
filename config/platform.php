@@ -1,6 +1,7 @@
 <?php
 
 return [
+    'deployment_revision' => env('RAILWAY_GIT_COMMIT_SHA', env('PMS_DEPLOYMENT_REVISION')),
     'admin_ids' => explode(',', (string) env('PMS_PLATFORM_ADMIN_IDS', '')),
     'monitoring' => [
         'url' => (string) env('PMS_MONITORING_GRAFANA_URL', ''),
