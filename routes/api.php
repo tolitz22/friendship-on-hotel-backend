@@ -84,6 +84,10 @@ Route::prefix('v1')->group(function (): void {
     Route::middleware(['auth:sanctum', 'active.user'])->group(function (): void {
         Route::post('/telemetry/frontend-errors', \App\Http\Controllers\Api\FrontendErrorController::class)->middleware('throttle:12,1,pms-frontend-errors');
         Route::get('/auth/me', [AuthController::class, 'me']);
+        Route::get('/platform/subscription-plans', [\App\Http\Controllers\Api\PlatformSubscriptionPlanController::class, 'index'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:30,1,pms-platform-plans']);
+        Route::post('/platform/subscription-plans', [\App\Http\Controllers\Api\PlatformSubscriptionPlanController::class, 'store'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:10,1,pms-platform-plan-create']);
+        Route::put('/platform/subscription-plans/{plan}', [\App\Http\Controllers\Api\PlatformSubscriptionPlanController::class, 'update'])->whereNumber('plan')->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:10,1,pms-platform-plan-update']);
+        Route::get('/platform/subscription-plans/{plan}/history', [\App\Http\Controllers\Api\PlatformSubscriptionPlanController::class, 'history'])->whereNumber('plan')->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:30,1,pms-platform-plan-history']);
         Route::get('/platform/hotels', [\App\Http\Controllers\Api\PlatformHotelController::class, 'index'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:30,1,pms-platform-hotels']);
         Route::post('/platform/hotels', [\App\Http\Controllers\Api\PlatformHotelController::class, 'store'])->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:5,1,pms-platform-hotel-create']);
         Route::get('/platform/workers', \App\Http\Controllers\Api\PlatformWorkerHealthController::class)->middleware([\App\Http\Middleware\EnsurePlatformAdmin::class, 'throttle:6,1,pms-platform-workers']);
