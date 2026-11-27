@@ -13,7 +13,8 @@ use Throwable;
 
 /**
  * Optional best-effort exporter. The normal stderr channel remains primary.
- * A bounded batch is sent at reset/close or PHP shutdown, never per log entry.
+ * A bounded batch is sent at worker lifecycle boundaries, reset/close or
+ * PHP shutdown, never per log entry.
  */
 final class BufferedLokiHandler extends AbstractProcessingHandler
 {

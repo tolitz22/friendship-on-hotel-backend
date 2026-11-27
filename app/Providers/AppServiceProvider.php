@@ -2,6 +2,11 @@
 
 namespace App\Providers;
 
+use App\Logging\WorkerLogFlush;
+use Illuminate\Queue\Events\JobAttempted;
+use Illuminate\Queue\Events\Looping;
+use Illuminate\Queue\Events\WorkerStopping;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -14,6 +19,10 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
-        //
+        // Flush after each queue attempt and before polling again (including
+        // exceptions reported after an attempt), plus graceful worker exit.
+        Event::listen([JobAttempted::class, Looping::class, WorkerStopping::class], static function (): void {
+            WorkerLogFlush::flush();
+        });
     }
 }
