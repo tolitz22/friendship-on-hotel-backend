@@ -62,6 +62,7 @@ class AuthController
             'name' => $user->name,
             'email' => $user->email,
             'mustChangePassword' => (bool) $user->must_change_password,
+            'platformAdmin' => \App\Support\PlatformAccess::allowed($user),
             'hotels' => $user->memberships()->where('is_active', true)
                 ->with('hotel:id,name')->get()
                 ->map(fn ($membership): array => [
