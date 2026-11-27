@@ -106,7 +106,7 @@ final class BufferedLokiHandler extends AbstractProcessingHandler
                 ->post($this->url, $payload);
             $this->lastHttpStatus = $response->status();
             $this->lastAccepted = $this->protocol === 'otlp'
-                ? $response->status() === 200 && OtlpLogPayload::fullyAccepted($response->body())
+                ? ($response->status() === 204 || ($response->status() === 200 && OtlpLogPayload::fullyAccepted($response->body())))
                 : $response->status() === 204;
             $this->lastOutcome = match (true) {
                 $this->lastAccepted => 'accepted',

@@ -86,3 +86,21 @@ it('reports safe HTTP failure diagnostics without printing remote response data'
         Log::forgetChannel('loki');
     }
 });
+
+it('accepts an empty HTTP 204 response from the Grafana OTLP gateway', function (): void {
+    $url = 'https://otlp.example.test/otlp/v1/logs';
+    config(['logging.default' => 'stack', 'logging.channels.stack.channels' => ['stderr', 'loki'],
+        'logging.channels.loki.with' => ['enabled' => true, 'protocol' => 'otlp', 'url' => $url, 'username' => '123', 'token' => 'test-token'],
+        'logging.channels.loki.level' => 'warning']);
+    Http::fake([$url => Http::response('', 204)]);
+    try {
+        $this->artisan('pms:loki-check', ['--send' => true])
+            ->expectsOutput('Smoke event acknowledged by remote endpoint. Confirm its presence in Grafana Explore.')
+            ->assertSuccessful();
+        Http::assertSentCount(1);
+        $handler = Log::channel('loki')->getLogger()->getHandlers()[0];
+        expect($handler->deliveryDiagnostic())->toBe(['outcome' => 'accepted', 'http_status' => 204]);
+    } finally {
+        Log::forgetChannel('loki');
+    }
+});
