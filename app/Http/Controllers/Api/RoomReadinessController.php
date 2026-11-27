@@ -23,11 +23,9 @@ final class RoomReadinessController
             'cleaningVerified' => ['required', 'boolean'],
             'safetyVerified' => ['required', 'boolean'],
             'amenitiesVerified' => ['required', 'boolean'],
-            'note' => ['required', 'string', 'min:5', 'max:2000'],
+            'note' => ['nullable', 'string', 'max:2000'],
         ]);
-        if (trim($data['note']) === '') {
-            throw ValidationException::withMessages(['note' => ['A meaningful inspector note is required.']]);
-        }
+        $data['note'] = trim($data['note'] ?? '');
         return response()->json(['data' => $service->inspect(
             $hotel, (int) $room, (int) $request->user()->id, $data
         )], 201);
