@@ -36,10 +36,10 @@ final class PlatformHotelSubscriptionController
         if ($status === 'unassigned') {
             $query->whereDoesntHave('platformSubscription');
         } elseif ($status === 'expired') {
-            $query->whereHas('platformSubscription', fn ($q) => $q->where('expires_on', '<=', $today->toDateString()));
+            $query->whereHas('platformSubscription', fn ($q) => $q->whereDate('expires_on', '<=', $today->toDateString()));
         } elseif (in_array($status, ['trial', 'active'], true)) {
             $query->whereHas('platformSubscription', fn ($q) => $q->where('kind', $status === 'trial' ? 'trial' : 'paid')
-                ->where('expires_on', '>', $today->toDateString()));
+                ->whereDate('expires_on', '>', $today->toDateString()));
         }
         $page = $query->orderByDesc('id')->paginate(20);
 

@@ -35,7 +35,7 @@ return new class extends Migration {
             $table->string('action', 20);
             $table->json('snapshot');
             $table->timestamp('created_at');
-            $table->unique(['subscription_id', 'revision']);
+            $table->unique(['subscription_id', 'revision'], 'platform_hotel_sub_change_revision_uq');
         });
     }
 

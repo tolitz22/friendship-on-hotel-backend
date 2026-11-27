@@ -35,27 +35,27 @@ class BootstrapHotelAdmin extends Command
         }
 
         try {
-        DB::transaction(function () use ($hotel, $email, $password): void {
-            DB::table('hotels')->where('id', $hotel->id)->lockForUpdate()->first();
-            $user = User::where('email', $email)->first();
-            if (! $user || ! HotelMembership::where('hotel_id', $hotel->id)->where('user_id', $user->id)->where('is_active', true)->exists()) {
-                app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'staff');
-            }
-
-            if (! $user) {
-                $user = User::create([
-                    'name' => $this->ask('Staff name'),
-                    'email' => $email,
-                    'password' => Hash::make($password),
-                    'is_active' => true,
-                ]);
-            }
-
-            HotelMembership::updateOrCreate(
-                ['hotel_id' => $hotel->id, 'user_id' => $user->id],
-                ['role' => 'admin', 'is_active' => true],
-            );
-        });
+            DB::transaction(function () use ($hotel, $email, $password): void {
+                DB::table('hotels')->where('id', $hotel->id)->lockForUpdate()->first();
+                $user = User::where('email', $email)->first();
+                if (! $user || ! HotelMembership::where('hotel_id', $hotel->id)->where('user_id', $user->id)->where('is_active', true)->exists()) {
+                    app(\App\Services\PlatformSubscriptionCapacity::class)->requireSpace((int) $hotel->id, 'staff');
+                }
+    
+                if (! $user) {
+                    $user = User::create([
+                        'name' => $this->ask('Staff name'),
+                        'email' => $email,
+                        'password' => Hash::make($password),
+                        'is_active' => true,
+                    ]);
+                }
+    
+                HotelMembership::updateOrCreate(
+                    ['hotel_id' => $hotel->id, 'user_id' => $user->id],
+                    ['role' => 'admin', 'is_active' => true],
+                );
+            });
         } catch (\Illuminate\Validation\ValidationException $error) {
             $this->error($error->errors()['subscriptionLimit'][0] ?? 'Capacity check failed.');
             return self::FAILURE;
