@@ -139,3 +139,42 @@ it('records final inspection inside the cleaned housekeeping task without indepe
         ->assertJsonPath('data.0.action','inspection_completed');
     expect(DB::table('room_readiness_inspections')->where('room_id',$room->id)->count())->toBe(1);
 });
+
+it('returns private personal dashboard counts and prioritizes an assigned arrival room', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-10T01:00:00+08:00'));
+    $hotel=Hotel::create(['name'=>'HK Dashboard','timezone'=>'Asia/Manila']);
+    $room=housekeepingRoom($hotel);
+    housekeepingLogin($hotel);
+    $cleaner=User::create(['name'=>'Cleaner','email'=>'hk-dashboard@example.test','password'=>'test-password']);
+    HotelMembership::create(['hotel_id'=>$hotel->id,'user_id'=>$cleaner->id,'role'=>'housekeeping','is_active'=>true]);
+    $base='/api/v1/hotels/'.$hotel->id;
+    $guest=$hotel->guests()->create(['first_name'=>'Private','last_name'=>'Guest']);
+    $booking=$this->postJson($base.'/bookings',[
+        'idempotencyKey'=>'hk-dashboard-arrival-01','guestId'=>$guest->id,'roomTypeId'=>$room->room_type_id,
+        'checkIn'=>'2026-12-10','checkOut'=>'2026-12-11',
+    ])->assertCreated()->json('data.id');
+    $this->patchJson($base.'/bookings/'.$booking.'/assign-room',['roomId'=>$room->id])->assertOk();
+    $make=fn (string $type, ?int $assignee)=>$this->postJson($base.'/housekeeping-tasks',[
+        'roomId'=>$room->id,'type'=>$type,'assignedUserId'=>$assignee,
+    ])->assertCreated()->json('data.id');
+    $todo=$make('checkout_clean',$cleaner->id);
+    $progress=$make('stayover',$cleaner->id);
+    $done=$make('stayover',$cleaner->id);
+    $make('inspection',null);
+    $this->patchJson($base.'/housekeeping-tasks/'.$progress,['expectedRevision'=>1,'status'=>'in_progress'])->assertOk();
+    $this->patchJson($base.'/housekeeping-tasks/'.$done,['expectedRevision'=>1,'status'=>'done'])->assertOk();
+    $this->getJson($base.'/housekeeping/dashboard')->assertForbidden();
+    Sanctum::actingAs($cleaner,['hotel:read']);
+    $response=$this->getJson($base.'/housekeeping/dashboard')->assertOk()
+        ->assertJsonPath('data.hotelDate','2026-12-10')
+        ->assertJsonPath('data.summary.todo',1)->assertJsonPath('data.summary.inProgress',1)
+        ->assertJsonPath('data.summary.urgentRooms',1)->assertJsonPath('data.summary.completedToday',1)
+        ->assertJsonPath('data.activeTotal',2)->assertJsonCount(2,'data.tasks')
+        ->assertJsonPath('data.tasks.0.id',$todo)->assertJsonPath('data.tasks.0.priority','arrival_today')
+        ->assertJsonPath('data.tasks.1.priority','in_progress');
+    expect($response->getContent())->not->toContain('Private Guest','guestName','bookingId');
+    $other=Hotel::create(['name'=>'Other dashboard hotel']);
+    $this->getJson('/api/v1/hotels/'.$other->id.'/housekeeping/dashboard')->assertNotFound();
+    $this->patchJson($base.'/housekeeping-tasks/'.$todo,['expectedRevision'=>1,'status'=>'in_progress'])
+        ->assertOk()->assertJsonPath('data.status','in_progress');
+});

@@ -71,6 +71,58 @@ final class HousekeepingTaskController
         ]);
     }
 
+    /** Personal operational snapshot: no guest, booking, or financial details. */
+    public function dashboard(Request $request, Hotel $hotel): JsonResponse
+    {
+        $staff = $request->user();
+        abort_unless($staff->memberships()->where('hotel_id', $hotel->id)
+            ->where('role', 'housekeeping')->where('is_active', true)->exists(), 403);
+
+        $localNow = now($hotel->timezone ?: 'Asia/Manila');
+        $today = $localNow->toDateString();
+        // completed_at is written in the application timezone by now().
+        $start = $localNow->copy()->startOfDay()->setTimezone(config('app.timezone'))->toDateTimeString();
+        $end = $localNow->copy()->addDay()->startOfDay()->setTimezone(config('app.timezone'))->toDateTimeString();
+        $dueNow = $localNow->toDateTimeString(); // task due_at is a hotel-local wall time
+        $mine = $this->scoped($hotel)->where('t.assigned_user_id', $staff->id);
+        $active = (clone $mine)->whereIn('t.status', ['todo', 'in_progress']);
+        $arrivals = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+            ->where('lifecycle_state', 'confirmed')->where('check_in', $today)
+            ->whereNotNull('assigned_room_id')->select('assigned_room_id')->distinct();
+        $queue = (clone $active)->leftJoinSub($arrivals, 'arrival', function ($join): void {
+            $join->on('arrival.assigned_room_id', '=', 't.room_id');
+        });
+        $urgentRooms = (clone $queue)->whereNotNull('arrival.assigned_room_id')
+            ->where('t.type', '!=', 'stayover')->distinct()->count('t.room_id');
+        $rows = $queue->addSelect('arrival.assigned_room_id as arrival_room')
+            ->orderByRaw("CASE WHEN arrival.assigned_room_id IS NOT NULL AND t.type != 'stayover' THEN 0 WHEN t.due_at IS NOT NULL AND t.due_at < ? THEN 1 WHEN t.status = 'in_progress' THEN 2 ELSE 3 END", [$dueNow])
+            ->orderByRaw('CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END')
+            ->orderBy('t.due_at')->orderBy('t.id')->limit(12)->get();
+
+        $todo = (clone $mine)->where('t.status', 'todo')->count();
+        $inProgress = (clone $mine)->where('t.status', 'in_progress')->count();
+
+        return response()->json(['data' => [
+            'hotelId' => (string) $hotel->id,
+            'userId' => (string) $staff->id,
+            'hotelDate' => $today,
+            'summary' => [
+                'todo' => $todo,
+                'inProgress' => $inProgress,
+                'urgentRooms' => $urgentRooms,
+                'completedToday' => (clone $mine)->where('t.status', 'done')
+                    ->where('t.completed_at', '>=', $start)->where('t.completed_at', '<', $end)->count(),
+            ],
+            'tasks' => $rows->map(fn (object $row): array => [
+                ...$this->present($row),
+                'priority' => $row->arrival_room !== null && $row->type !== 'stayover' ? 'arrival_today'
+                    : ($row->due_at !== null && (string) $row->due_at < $dueNow ? 'overdue'
+                        : ($row->status === 'in_progress' ? 'in_progress' : 'normal')),
+            ])->values(),
+            'activeTotal' => $todo + $inProgress,
+        ]]);
+    }
+
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
         $input=$request->validate([
