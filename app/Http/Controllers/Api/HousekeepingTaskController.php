@@ -455,7 +455,7 @@ final class HousekeepingTaskController
             $row=DB::table('housekeeping_tasks')
                 ->where('hotel_id',$hotel->id)->where('id',$task)->lockForUpdate()->first();
             abort_if($row===null,404);
-            if (!TaskStaffAccess::canOperate($request,$hotel,$row,'housekeeping')) abort(403);
+            if (!TaskStaffAccess::canOperateHousekeeping($request,$hotel)) abort(403);
             if (!TaskStaffAccess::isAdmin($request,$hotel)
                 && (array_key_exists('assignedTo',$data)||array_key_exists('assignedUserId',$data)||array_key_exists('dueAt',$data))) abort(403);
             if (array_key_exists('assignedUserId',$data)) TaskStaffAccess::verifyAssignee($hotel,$data['assignedUserId']===null?null:(int)$data['assignedUserId'],'housekeeping');
@@ -515,11 +515,13 @@ final class HousekeepingTaskController
                 $after['completedBy']=(string)$request->user()->id;
             }
             DB::table('housekeeping_tasks')->where('id',$row->id)->update($changes);
+            $before['revision']=(int)$row->revision;
+            $after['revision']=(int)$row->revision+1;
             $this->event($hotel,(int)$row->id,(int)$request->user()->id,'updated',$before,$after,$note);
             return ['conflict'=>false];
         });
         if ($result['conflict']) {
-            return response()->json(['message'=>'This task was updated by another administrator. Reload before saving.'],409);
+            return response()->json(['message'=>'This task was updated by another employee. Reload before saving.'],409);
         }
         return $this->show($hotel,$task);
     }
@@ -577,6 +579,8 @@ final class HousekeepingTaskController
                     ...$this->state($row),
                     'inspectionId' => $inspection['inspection']['id'],
                     'inspectionStatus' => 'approved',
+                    'inspectionChecks' => ['cleanliness'=>true,'safety'=>true,'amenities'=>true],
+                    'revision' => (int)$row->revision + 1,
                 ], trim($data['note']));
             return ['conflict' => false];
         }, 3);

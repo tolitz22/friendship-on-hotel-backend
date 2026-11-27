@@ -33,6 +33,18 @@ final class TaskStaffAccess
         ]);
     }
 
+    /** Housekeeping is a shared operational queue. Assignment remains planning metadata. */
+    public static function canOperateHousekeeping(Request $request, Hotel $hotel): bool
+    {
+        if (self::isAdmin($request,$hotel)) return true;
+        $user=$request->user();
+        if (!$user->is_active || !$user->tokenCan('hotel:read')) return false;
+        $membership=$user->memberships()->where('hotel_id',$hotel->id)
+            ->where('role','housekeeping')->where('is_active',true)->first();
+        return $membership !== null && in_array('housekeeping.assigned',
+            \App\Http\Middleware\EnsureHotelPermission::effectiveForMembership($membership),true);
+    }
+
     public static function canOperate(Request $request, Hotel $hotel, object $task, string $role): bool
     {
         if (self::isAdmin($request,$hotel)) return true;

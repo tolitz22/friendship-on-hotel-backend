@@ -96,12 +96,12 @@ it('allows only the linked housekeeping assignee to advance the assigned task', 
     ])->assertCreated()->assertJsonPath('data.assignedUserId',(string)$cleaner->id)->json('data.id');
 
     Sanctum::actingAs($other,['hotel:read']);
-    $this->patchJson($base.'/'.$id,['expectedRevision'=>1,'status'=>'in_progress'])->assertForbidden();
+    $this->patchJson($base.'/'.$id,['expectedRevision'=>1,'status'=>'in_progress'])->assertOk()->assertJsonPath('data.revision',2);
     Sanctum::actingAs($cleaner,['hotel:read']);
-    $this->patchJson($base.'/'.$id,['expectedRevision'=>1,'assignedUserId'=>(string)$other->id])
+    $this->patchJson($base.'/'.$id,['expectedRevision'=>2,'assignedUserId'=>(string)$other->id])
         ->assertForbidden();
-    $this->patchJson($base.'/'.$id,['expectedRevision'=>1,'status'=>'in_progress','note'=>'Started'])
-        ->assertOk()->assertJsonPath('data.revision',2);
+    $this->patchJson($base.'/'.$id,['expectedRevision'=>2,'status'=>'in_progress','note'=>'Started'])
+        ->assertOk()->assertJsonPath('data.revision',3);
     $this->patchJson($base.'/'.$id,['expectedRevision'=>1,'status'=>'done'])->assertStatus(409);
     $this->patchJson($base.'/'.$id,['expectedRevision'=>2,'status'=>'done'])->assertOk()
         ->assertJsonPath('data.status','done');

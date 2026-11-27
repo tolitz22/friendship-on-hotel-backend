@@ -154,7 +154,7 @@ final class MaintenanceWorkOrderController
             app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
             $source = DB::table('housekeeping_tasks')->where('hotel_id',$hotel->id)->where('id',$task)->lockForUpdate()->first();
             abort_if($source===null,404);
-            abort_unless(TaskStaffAccess::canOperate($request,$hotel,$source,'housekeeping'),403);
+            abort_unless(TaskStaffAccess::canOperateHousekeeping($request,$hotel),403);
             $existing = DB::table('maintenance_work_orders')->where('hotel_id',$hotel->id)
                 ->where('created_by',$request->user()->id)->where('housekeeping_report_key',$data['requestKey'])->first();
             if ($existing) {

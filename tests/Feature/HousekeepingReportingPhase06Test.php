@@ -25,7 +25,7 @@ function hkSixFixture(): array
     return [$hotel,$room,...$staff];
 }
 
-it('lets assigned housekeeping report maintenance once without granting work order management', function (): void {
+it('lets housekeeping report maintenance once without granting work order management', function (): void {
     [$hotel,$room,$admin,$cleaner,$other]=hkSixFixture();
     $base='/api/v1/hotels/'.$hotel->id;
     Sanctum::actingAs($admin,['hotel:read','hotel:write']);
@@ -33,8 +33,6 @@ it('lets assigned housekeeping report maintenance once without granting work ord
     $report=['title'=>'Leaking tap','description'=>'Water leaking onto floor','priority'=>'urgent','affectsRoom'=>true,'requestKey'=>(string)Str::uuid()];
     $url=$base.'/housekeeping-tasks/'.$task.'/maintenance-report';
     Sanctum::actingAs($other,['hotel:read']);
-    $this->postJson($url,$report)->assertForbidden();
-    Sanctum::actingAs($cleaner,['hotel:read']);
     $order=$this->postJson($url,$report)->assertCreated()->assertJsonPath('data.housekeepingTaskId',$task)->assertJsonPath('data.affectsRoom',true)->json('data.id');
     $this->postJson($url,$report)->assertOk()->assertJsonPath('data.id',$order);
     $this->postJson($url,array_merge($report,['title'=>'Other issue']))->assertConflict();
@@ -78,15 +76,34 @@ it('allows an authorized housekeeper to claim an unassigned task but never take 
     Sanctum::actingAs($maintenance,['hotel:read']);
     $this->postJson($url.'/claim',['expectedRevision'=>1])->assertForbidden();
     Sanctum::actingAs($first,['hotel:read']);
-    $this->patchJson($url,['expectedRevision'=>1,'status'=>'in_progress'])->assertForbidden();
     $this->postJson($url.'/claim',['expectedRevision'=>1])->assertOk()->assertJsonPath('data.assignedUserId',(string)$first->id)->assertJsonPath('data.revision',2);
     Sanctum::actingAs($second,['hotel:read']);
     $this->postJson($url.'/claim',['expectedRevision'=>1])->assertConflict();
     $this->postJson($url.'/claim',['expectedRevision'=>2])->assertConflict();
-    $this->patchJson($url,['expectedRevision'=>2,'status'=>'in_progress'])->assertForbidden();
+    $this->patchJson($url,['expectedRevision'=>2,'status'=>'in_progress'])->assertOk()->assertJsonPath('data.assignedUserId',(string)$first->id);
     Sanctum::actingAs($first,['hotel:read']);
-    $this->patchJson($url,['expectedRevision'=>2,'status'=>'in_progress'])->assertOk();
     $this->getJson($url.'/history')->assertOk()->assertJsonPath('data.1.note','Housekeeper claimed unassigned task.');
     $foreign=Hotel::create(['name'=>'Foreign claim']);
     $this->postJson('/api/v1/hotels/'.$foreign->id.'/housekeeping-tasks/'.$task['id'].'/claim',['expectedRevision'=>3])->assertNotFound();
+});
+
+it('allows multiple housekeepers to share progress with real actors and rejects stale revisions',function (): void {
+    [$hotel,$room,$admin,$first,$second,$maintenance]=hkSixFixture();
+    $base='/api/v1/hotels/'.$hotel->id;
+    Sanctum::actingAs($admin,['hotel:read','hotel:write']);
+    $task=$this->postJson($base.'/housekeeping-tasks',['roomId'=>$room->id,'type'=>'checkout_clean','assignedUserId'=>$first->id])->assertCreated()->json('data');
+    $url=$base.'/housekeeping-tasks/'.$task['id'];
+    Sanctum::actingAs($second,['hotel:read']);
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'in_progress','checkedItems'=>['trash']])->assertOk()->assertJsonPath('data.assignedUserId',(string)$first->id);
+    Sanctum::actingAs($first,['hotel:read']);
+    $this->patchJson($url,['expectedRevision'=>1,'status'=>'done'])->assertConflict();
+    $this->patchJson($url,['expectedRevision'=>2,'status'=>'done','checkedItems'=>array_column($task['checklist'],'key')])->assertOk()->assertJsonPath('data.completedBy',(string)$first->id);
+    Sanctum::actingAs($second,['hotel:read']);
+    $this->postJson($url.'/final-inspection',['expectedRevision'=>3,'cleaningVerified'=>true,'safetyVerified'=>true,'amenitiesVerified'=>true,'note'=>'Verified room physically'])->assertOk();
+    $this->getJson($url.'/history')->assertOk()->assertJsonPath('data.0.actorId',(string)$second->id)
+      ->assertJsonPath('data.0.action','inspection_completed')->assertJsonPath('data.1.actorId',(string)$first->id)
+      ->assertJsonPath('data.2.actorId',(string)$second->id)->assertJsonPath('data.2.after.checkedItems',['trash']);
+    $this->patchJson($url,['expectedRevision'=>4,'assignedUserId'=>$second->id])->assertForbidden();
+    Sanctum::actingAs($maintenance,['hotel:read']);
+    $this->patchJson($url,['expectedRevision'=>4,'note'=>'Not authorized'])->assertForbidden();
 });
