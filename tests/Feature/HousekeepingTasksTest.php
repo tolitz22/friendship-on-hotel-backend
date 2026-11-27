@@ -178,3 +178,32 @@ it('returns private personal dashboard counts and prioritizes an assigned arriva
     $this->patchJson($base.'/housekeeping-tasks/'.$todo,['expectedRevision'=>1,'status'=>'in_progress'])
         ->assertOk()->assertJsonPath('data.status','in_progress');
 });
+
+it('filters the full housekeeping queue and separates completed cleaning from inspection evidence', function (): void {
+    $this->travelTo(new DateTimeImmutable('2026-12-10T11:00:00+08:00'));
+    $hotel=Hotel::create(['name'=>'HK Queue','timezone'=>'Asia/Manila']);
+    $room=housekeepingRoom($hotel);
+    housekeepingLogin($hotel);
+    $cleaner=User::create(['name'=>'Queue Cleaner','email'=>'hk-queue@example.test','password'=>'test-password']);
+    HotelMembership::create(['hotel_id'=>$hotel->id,'user_id'=>$cleaner->id,'role'=>'housekeeping','is_active'=>true]);
+    $base='/api/v1/hotels/'.$hotel->id;
+    $url=$base.'/housekeeping-tasks';
+    $overdue=$this->postJson($url,['roomId'=>$room->id,'type'=>'stayover','assignedUserId'=>$cleaner->id,'dueAt'=>'2026-12-10 10:00:00'])->assertCreated()->json('data.id');
+    $pending=$this->postJson($url,['roomId'=>$room->id,'type'=>'checkout_clean','assignedUserId'=>$cleaner->id])->assertCreated()->json('data.id');
+    $unassigned=$this->postJson($url,['roomId'=>$room->id,'type'=>'stayover'])->assertCreated()->json('data.id');
+    $this->patchJson($url.'/'.$pending,['expectedRevision'=>1,'status'=>'done'])->assertOk();
+    $this->getJson($url.'?queue=overdue&mine=0')->assertOk()->assertJsonPath('meta.total',1)->assertJsonPath('data.0.id',$overdue)->assertJsonPath('data.0.overdue',true);
+    $this->getJson($url.'?queue=unassigned')->assertOk()->assertJsonPath('data.0.id',$unassigned);
+    $this->getJson($url.'?queue=pending_inspection')->assertOk()->assertJsonPath('data.0.id',$pending)->assertJsonPath('data.0.pendingInspection',true);
+    $this->getJson($url.'?assignee='.$cleaner->id.'&sort=priority&per_page=1')->assertOk()->assertJsonPath('meta.total',2)->assertJsonPath('data.0.id',$overdue);
+    $this->getJson($base.'/housekeeping/workload')->assertOk()->assertJsonPath('data.0.userId',(string)$cleaner->id)->assertJsonPath('data.0.todo',1);
+    $this->patchJson($url.'/'.$overdue,['expectedRevision'=>1,'status'=>'done'])->assertOk();
+    $this->patchJson($url.'/'.$unassigned,['expectedRevision'=>1,'status'=>'done'])->assertOk();
+    Sanctum::actingAs($cleaner,['hotel:read']);
+    $this->getJson($base.'/housekeeping/workload')->assertForbidden();
+    $this->getJson($url.'?mine=1&queue=pending_inspection')->assertOk()->assertJsonPath('meta.pendingInspectionCount',1);
+    $this->postJson($url.'/'.$pending.'/final-inspection',[
+        'expectedRevision'=>2,'cleaningVerified'=>true,'safetyVerified'=>true,'amenitiesVerified'=>true,'note'=>'Final inspection complete',
+    ])->assertOk();
+    $this->getJson($url.'?mine=1&queue=pending_inspection')->assertOk()->assertJsonPath('meta.total',0)->assertJsonPath('meta.pendingInspectionCount',0);
+});

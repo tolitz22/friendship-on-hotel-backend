@@ -123,11 +123,41 @@ final class HousekeepingTaskController
         ]]);
     }
 
+    /** Cleaning completion and inspection evidence are distinct from current room readiness. */
+    private function pendingInspection($query)
+    {
+        return $query->where('t.type', 'checkout_clean')->where('t.status', 'done')
+            ->whereNotExists(function ($inspection): void {
+                $inspection->selectRaw('1')->from('room_readiness_inspections as i')
+                    ->whereColumn('i.hotel_id', 't.hotel_id')->whereColumn('i.room_id', 't.room_id')
+                    ->where('i.status', 'approved')
+                    ->whereColumn('i.latest_housekeeping_task_id', '>=', 't.id')
+                    ->whereColumn('i.created_at', '>=', 't.completed_at');
+            });
+    }
+
+    public function workload(Hotel $hotel): JsonResponse
+    {
+        $rows = DB::table('housekeeping_tasks')->where('hotel_id', $hotel->id)
+            ->whereIn('status', ['todo', 'in_progress'])->whereNotNull('assigned_user_id')
+            ->select('assigned_user_id')
+            ->selectRaw("SUM(CASE WHEN status = 'todo' THEN 1 ELSE 0 END) as todo")
+            ->selectRaw("SUM(CASE WHEN status = 'in_progress' THEN 1 ELSE 0 END) as in_progress")
+            ->groupBy('assigned_user_id')->get();
+        return response()->json(['data' => $rows->map(fn (object $row): array => [
+            'userId' => (string) $row->assigned_user_id,
+            'todo' => (int) $row->todo, 'inProgress' => (int) $row->in_progress,
+        ])->values(), 'meta' => ['hotelId' => (string) $hotel->id]]);
+    }
+
     public function index(Request $request, Hotel $hotel): JsonResponse
     {
         $input=$request->validate([
             'q' => ['sometimes', 'string', 'max:120'],
             'mine' => ['sometimes', 'boolean'],
+            'queue' => ['sometimes', Rule::in(['active', 'arrival_today', 'overdue', 'unassigned', 'pending_inspection'])],
+            'sort' => ['sometimes', Rule::in(['priority'])],
+            'assignee' => ['sometimes', 'integer', 'min:1'],
             'page'=>['sometimes','integer','min:1'],
             'per_page'=>['sometimes','integer','min:1','max:100'],
             'status'=>['sometimes',Rule::in(self::STATUSES)],
@@ -139,6 +169,23 @@ final class HousekeepingTaskController
         if ($request->boolean('mine')) {
             $query->where('t.assigned_user_id', $request->user()->id);
         }
+        if (isset($input['assignee'])) $query->where('t.assigned_user_id', $input['assignee']);
+        $localNow = now($hotel->timezone ?: 'Asia/Manila');
+        $dueNow = $localNow->toDateTimeString();
+        $arrivals = DB::table('reservation_records')->where('hotel_id', $hotel->id)
+            ->where('lifecycle_state', 'confirmed')->where('check_in', $localNow->toDateString())
+            ->whereNotNull('assigned_room_id')->select('assigned_room_id')->distinct();
+        $query->leftJoinSub($arrivals, 'arrival', function ($join): void {
+            $join->on('arrival.assigned_room_id', '=', 't.room_id');
+        })->addSelect('arrival.assigned_room_id as arrival_room');
+        $queue = $input['queue'] ?? null;
+        if (in_array($queue, ['active', 'arrival_today', 'overdue', 'unassigned'], true)) {
+            $query->whereIn('t.status', ['todo', 'in_progress']);
+        }
+        if ($queue === 'arrival_today') $query->whereNotNull('arrival.assigned_room_id')->where('t.type', '!=', 'stayover');
+        if ($queue === 'overdue') $query->where('t.due_at', '<', $dueNow);
+        if ($queue === 'unassigned') $query->whereNull('t.assigned_user_id');
+        if ($queue === 'pending_inspection') $this->pendingInspection($query);
         if (isset($input['q']) && trim($input['q']) !== '') {
             $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], mb_strtolower(trim($input['q']))).'%';
             $query->leftJoin('users as staff', 'staff.id', '=', 't.assigned_user_id')
@@ -151,16 +198,29 @@ final class HousekeepingTaskController
                     }
                 });
         }
-        $pastDueCount = $this->scoped($hotel)->where('t.status', '!=', 'done')
-            ->where('t.due_at', '<', now($hotel->timezone ?: 'Asia/Manila')->toDateString())
-            ->count();
+        $scope = $this->scoped($hotel);
+        if ($request->boolean('mine')) $scope->where('t.assigned_user_id', $request->user()->id);
+        if (isset($input['assignee'])) $scope->where('t.assigned_user_id', $input['assignee']);
+        $pastDueCount = (clone $scope)->where('t.status', '!=', 'done')->where('t.due_at', '<', $dueNow)->count();
+        $pendingInspectionCount = $this->pendingInspection(clone $scope)->count();
+        if (($input['sort'] ?? null) === 'priority') {
+            $query->orderByRaw("CASE WHEN t.status = 'done' THEN 4 WHEN arrival.assigned_room_id IS NOT NULL AND t.type != 'stayover' THEN 0 WHEN t.due_at IS NOT NULL AND t.due_at < ? THEN 1 WHEN t.status = 'in_progress' THEN 2 ELSE 3 END", [$dueNow])
+                ->orderByRaw('CASE WHEN t.due_at IS NULL THEN 1 ELSE 0 END')->orderBy('t.due_at');
+        }
         $page=$query->orderByDesc('t.id')->paginate((int)($input['per_page']??20));
+        $pendingIds = $this->pendingInspection($this->scoped($hotel))
+            ->whereIn('t.id', $page->getCollection()->pluck('id')->all())->pluck('t.id')->map(fn ($id) => (string) $id)->all();
         return response()->json([
-            'data'=>$page->getCollection()->map(fn (object $row): array=>$this->present($row))->values(),
+            'data'=>$page->getCollection()->map(fn (object $row): array=>[
+                ...$this->present($row),
+                'arrivalToday' => $row->status !== 'done' && $row->type !== 'stayover' && $row->arrival_room !== null,
+                'overdue' => $row->status !== 'done' && $row->due_at !== null && (string) $row->due_at < $dueNow,
+                'pendingInspection' => in_array((string) $row->id, $pendingIds, true),
+            ])->values(),
             'meta'=>[
                 'page'=>$page->currentPage(), 'perPage'=>$page->perPage(),
                 'total'=>$page->total(), 'totalPages'=>$page->lastPage(),
-                'determinesRoomReadiness'=>false, 'pastDueCount'=>$pastDueCount,
+                'determinesRoomReadiness'=>false, 'pastDueCount'=>$pastDueCount, 'pendingInspectionCount'=>$pendingInspectionCount,
             ],
         ]);
     }
