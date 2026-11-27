@@ -34,7 +34,7 @@ final class CheckLogRetention extends Command
             } elseif ($channel === 'loki') {
                 $options = config('logging.channels.loki.with', []);
                 if (! ($options['enabled'] ?? false) || ! LokiSettings::valid(
-                    (string) ($options['url'] ?? ''), (string) ($options['username'] ?? ''), (string) ($options['token'] ?? '')
+                    (string) ($options['url'] ?? ''), (string) ($options['username'] ?? ''), (string) ($options['token'] ?? ''), (string) ($options['protocol'] ?? 'loki')
                 ) || ! in_array('stderr', $channels, true)) {
                     $this->warn('Loki requires enabled valid configuration and stderr fallback.');
                     $safe = false;

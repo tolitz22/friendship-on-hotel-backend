@@ -41,6 +41,7 @@ return [
             'level' => env('PMS_LOKI_LEVEL', 'warning'),
             'with' => [
                 'enabled' => (bool) env('PMS_LOKI_ENABLED', false),
+                'protocol' => (string) env('PMS_LOKI_PROTOCOL', 'loki'),
                 'url' => (string) env('PMS_LOKI_URL', ''),
                 'username' => (string) env('PMS_LOKI_USERNAME', ''),
                 'token' => (string) env('PMS_LOKI_TOKEN', ''),

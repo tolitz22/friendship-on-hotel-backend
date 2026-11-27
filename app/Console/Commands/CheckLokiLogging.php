@@ -23,7 +23,8 @@ final class CheckLokiLogging extends Command
 
             return $this->option('send') ? self::FAILURE : self::SUCCESS;
         }
-        if (! LokiSettings::valid((string) ($options['url'] ?? ''), (string) ($options['username'] ?? ''), (string) ($options['token'] ?? ''))
+        $protocol = (string) ($options['protocol'] ?? 'loki');
+        if (! LokiSettings::valid((string) ($options['url'] ?? ''), (string) ($options['username'] ?? ''), (string) ($options['token'] ?? ''), $protocol)
             || config('logging.default') !== 'stack'
             || ! in_array('stderr', (array) config('logging.channels.stack.channels'), true)
             || ! in_array('loki', (array) config('logging.channels.stack.channels'), true)) {
@@ -31,16 +32,18 @@ final class CheckLokiLogging extends Command
 
             return self::FAILURE;
         }
-        $this->line('Loki configuration: valid. Network delivery not yet verified.');
+        $this->line('Loki configuration: valid. Protocol: '.$protocol.'. Network delivery not yet verified.');
         if (! $this->option('send')) {
             return self::SUCCESS;
         }
         try {
             $logger = Log::channel('loki');
+            $accepted = false;
             $logger->warning('pms.logging.smoke', ['count' => 1]);
             foreach ($logger->getLogger()->getHandlers() as $handler) {
                 if ($handler instanceof BufferedLokiHandler) {
                     $handler->close();
+                    $accepted = $handler->lastDeliveryAccepted() === true;
                 }
             }
         } catch (Throwable) {
@@ -48,7 +51,12 @@ final class CheckLokiLogging extends Command
 
             return self::FAILURE;
         }
-        $this->line('Smoke event submitted to best-effort exporter. Confirm its presence in Grafana Explore; this is not a delivery acknowledgement.');
+        if (! $accepted) {
+            $this->error('NO-GO: smoke event not acknowledged. Check protocol, endpoint, token permissions, log level and connectivity.');
+
+            return self::FAILURE;
+        }
+        $this->line('Smoke event acknowledged by remote endpoint. Confirm its presence in Grafana Explore.');
 
         return self::SUCCESS;
     }

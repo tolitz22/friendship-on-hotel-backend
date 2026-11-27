@@ -6,8 +6,16 @@ namespace App\Logging;
 
 final class LokiSettings
 {
-    public static function valid(string $url, string $username, string $token): bool
+    public static function valid(string $url, string $username, string $token, string $protocol = 'loki'): bool
     {
+        $path = match ($protocol) {
+            'loki' => '/loki/api/v1/push',
+            'otlp' => '/otlp/v1/logs',
+            default => null,
+        };
+        if ($path === null) {
+            return false;
+        }
         if ($username === '' || $token === '' || strlen($username) > 128 || strlen($token) > 4096
             || preg_match('/[\\x00-\\x20\\x7f]/', $username.$token) === 1 || str_contains($username, ':')) {
             return false;
@@ -18,7 +26,7 @@ final class LokiSettings
         $parts = parse_url($url);
 
         return is_array($parts) && ($parts['scheme'] ?? null) === 'https'
-            && isset($parts['host']) && ($parts['path'] ?? null) === '/loki/api/v1/push'
+            && isset($parts['host']) && ($parts['path'] ?? null) === $path
             && ! isset($parts['user']) && ! isset($parts['pass'])
             && ! isset($parts['query']) && ! isset($parts['fragment']);
     }
