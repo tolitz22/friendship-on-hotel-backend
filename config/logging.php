@@ -17,6 +17,16 @@ return [
             'level' => env('LOG_LEVEL', $deployed ? 'info' : 'debug'),
             'tap' => $deployed ? [ConfigureStructuredLogging::class] : [],
         ],
+        // Opt-in only; dedicated filenames prevent rotation touching legacy logs.
+        'pms_daily' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/pms-technical.log'),
+            'level' => env('LOG_LEVEL', $deployed ? 'info' : 'debug'),
+            'days' => max(1, min(90, (int) env('PMS_LOG_FILE_DAYS', 14))),
+            'permission' => 0600,
+            'locking' => true,
+            'tap' => [ConfigureStructuredLogging::class],
+        ],
         'stderr' => [
             'driver' => 'monolog',
             'handler' => StreamHandler::class,
