@@ -39,6 +39,7 @@ final class MaintenanceWorkOrderController
             'affectsRoom' => (bool) $row->affects_room,
             'revision' => (int) $row->revision,
             'reportedAt' => $row->created_at,
+            'housekeepingTaskId' => isset($row->housekeeping_task_id) ? (string)$row->housekeeping_task_id : null,
             'resolvedAt' => $row->resolved_at,
         ];
     }
@@ -137,6 +138,45 @@ final class MaintenanceWorkOrderController
         });
 
         return response()->json(['data'=>$this->present($this->orderQuery($hotel)->where('wo.id',$id)->first())],201);
+    }
+
+    /** Assigned housekeeping staff may report a defect, not assign or resolve a work order. */
+    public function reportFromHousekeeping(Request $request, Hotel $hotel, string $task): JsonResponse
+    {
+        $data = $request->validate([
+            'title'=>['required','string','max:160'],
+            'description'=>['required','string','max:5000'],
+            'priority'=>['required',Rule::in(self::PRIORITIES)],
+            'affectsRoom'=>['required','boolean'],
+            'requestKey'=>['required','uuid'],
+        ]);
+        $result = DB::transaction(function () use ($request,$hotel,$task,$data): array {
+            app(\App\Domain\Reservations\ReadinessWriteGuard::class)->lockHotel($hotel);
+            $source = DB::table('housekeeping_tasks')->where('hotel_id',$hotel->id)->where('id',$task)->lockForUpdate()->first();
+            abort_if($source===null,404);
+            abort_unless(TaskStaffAccess::canOperate($request,$hotel,$source,'housekeeping'),403);
+            $existing = DB::table('maintenance_work_orders')->where('hotel_id',$hotel->id)
+                ->where('created_by',$request->user()->id)->where('housekeeping_report_key',$data['requestKey'])->first();
+            if ($existing) {
+                abort_if((string)$existing->housekeeping_task_id !== (string)$source->id
+                    || $existing->title !== trim($data['title']) || $existing->description !== trim($data['description'])
+                    || $existing->priority !== $data['priority'] || (bool)$existing->affects_room !== (bool)$data['affectsRoom'],409,
+                    'Report key was already used for another report.');
+                return ['id'=>$existing->id,'created'=>false];
+            }
+            $id = DB::table('maintenance_work_orders')->insertGetId([
+                'hotel_id'=>$hotel->id,'room_id'=>$source->room_id,'housekeeping_task_id'=>$source->id,
+                'housekeeping_report_key'=>$data['requestKey'],
+                'title'=>trim($data['title']),'description'=>trim($data['description']),
+                'priority'=>$data['priority'],'affects_room'=>$data['affectsRoom'],
+                'status'=>'open','revision'=>1,'created_by'=>$request->user()->id,'created_at'=>now(),'updated_at'=>now(),
+            ]);
+            $row = DB::table('maintenance_work_orders')->where('id',$id)->first();
+            $this->event($hotel,$id,$request->user()->id,'created',null,$this->state($row),
+                'Reported from housekeeping task HK-'.$source->id);
+            return ['id'=>$id,'created'=>true];
+        });
+        return response()->json(['data'=>$this->present($this->orderQuery($hotel)->where('wo.id',$result['id'])->first())],$result['created']?201:200);
     }
 
     public function update(Request $request, Hotel $hotel, string $order): JsonResponse

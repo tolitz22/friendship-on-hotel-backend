@@ -157,6 +157,11 @@ Route::prefix('v1')->group(function (): void {
             Route::get('/housekeeping/dashboard', [HousekeepingTaskController::class, 'dashboard']);
             Route::get('/housekeeping/room-board', \App\Http\Controllers\Api\HousekeepingRoomBoardController::class)->middleware('throttle:30,1');
             Route::get('/housekeeping/workload', [HousekeepingTaskController::class, 'workload'])->middleware('hotel.admin');
+            Route::post('/housekeeping-tasks/{task}/maintenance-report', [MaintenanceWorkOrderController::class, 'reportFromHousekeeping'])->whereNumber('task')->middleware('throttle:20,1');
+            Route::get('/lost-found', [\App\Http\Controllers\Api\LostFoundController::class, 'index']);
+            Route::post('/lost-found', [\App\Http\Controllers\Api\LostFoundController::class, 'store'])->middleware('throttle:20,1');
+            Route::get('/lost-found/{item}/history', [\App\Http\Controllers\Api\LostFoundController::class, 'history'])->whereNumber('item');
+            Route::patch('/lost-found/{item}', [\App\Http\Controllers\Api\LostFoundController::class, 'update'])->whereNumber('item')->middleware(['hotel.admin', 'throttle:20,1']);
             Route::get('/housekeeping-tasks', [HousekeepingTaskController::class, 'index']);
             Route::get('/housekeeping-tasks/{task}', [HousekeepingTaskController::class, 'show'])->whereNumber('task');
             Route::get('/housekeeping-tasks/{task}/history', [HousekeepingTaskController::class, 'history'])->whereNumber('task');
