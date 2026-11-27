@@ -14,23 +14,14 @@ final class PlatformMonitoring
 
     public function snapshot(int $minutes, string $environment, string $role, ?string $requestId): array
     {
-        $settings = config('platform.monitoring', []);
-        $url = (string) ($settings['url'] ?? '');
-        $uid = (string) ($settings['datasource_uid'] ?? '');
-        $token = (string) ($settings['token'] ?? '');
-        $label = (string) ($settings['service_label'] ?? '');
+        $connection = PlatformMonitoringConnection::settings();
         $end = time();
         $result = ['state' => 'not_configured', 'minutes' => $minutes, 'sampleLimit' => self::LIMIT, 'sampleSize' => 0,
             'limitReached' => false, 'observedAt' => gmdate(DATE_ATOM, $end), 'events' => []];
-        // Restrict outbound requests to a configured Grafana Cloud stack.
-        // Never accept an endpoint, credential, or arbitrary LogQL from the browser.
-        if (! preg_match('~\Ahttps://[a-zA-Z0-9][a-zA-Z0-9-]*\.grafana\.net/?\z~D', $url)
-            || ! preg_match('/\A[A-Za-z0-9_-]{1,128}\z/D', $uid)
-            || $token === '' || strlen($token) > 4096 || preg_match('/[\x00-\x20\x7f]/', $token)
-            || ! in_array($label, ['service_name', 'service'], true)) {
+        if ($connection === null) {
             return $result;
         }
-        $query = '{'.$label.'="'.self::SERVICE.'"} | json | __error__=""';
+        $query = '{'.$connection['label'].'="'.self::SERVICE.'"} | json | __error__=""';
         if ($environment !== 'all') {
             $query .= ' | extra_environment="'. $environment.'"';
         }
@@ -41,9 +32,9 @@ final class PlatformMonitoring
             $query .= ' | context_request_id="'.$requestId.'" or context_related_request_id="'.$requestId.'"';
         }
         try {
-            $response = Http::withToken($token)->acceptJson()->withOptions(['allow_redirects' => false])
+            $response = Http::withToken($connection['token'])->acceptJson()->withOptions(['allow_redirects' => false])
                 ->connectTimeout(2)->timeout(8)
-                ->get(rtrim($url, '/').'/api/datasources/proxy/uid/'.$uid.'/loki/api/v1/query_range', [
+                ->get($connection['endpoint'].'query_range', [
                     'query' => $query, 'start' => (string) ($end - $minutes * 60).'000000000',
                     'end' => (string) $end.'000000000', 'limit' => self::LIMIT, 'direction' => 'backward',
                 ]);
